@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mineforge",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/001-mineforge", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}
