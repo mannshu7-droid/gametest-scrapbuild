@@ -25,6 +25,8 @@ export interface Enemy {
   y: number;
   hp: number;
   maxHp: number;
+  /** 出現時のウェーブ倍率を反映した攻撃力（wave scalingで基礎値から変動する） */
+  atk: number;
   atkCd: number;
   moveCd: number;
 }
@@ -69,6 +71,8 @@ export interface GameState {
     lifesteal: number;
     thorns: number;
     regen: number;
+    /** 直近の移動直後、被ダメージ軽減が乗っている残りtick数（0なら未発動） */
+    moveEvasion: number;
   };
   map: {
     w: number;

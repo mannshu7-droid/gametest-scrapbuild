@@ -82,7 +82,18 @@
 v2での変更理由: reviews/002-combat-ironring-v1.md の Learnings（同時攻撃可能数がプレイヤー防御に対し過大だと即詰みになる）を踏まえ、
 同時湧き上限を全ウェーブで1体ずつ減らし、プレイヤー側のHP・攻撃力・攻撃速度を強化して「囲まれても対処できる」水準に調整した。
 
-（実装は `src/core/game.ts` の `waveTotalSpawn` / `waveConcurrentCap` / `waveSpawnInterval` を正とする）
+v3での追加変更（reviews/002-combat-ironring-v2.md の指摘対応）:
+- **敵の囲みスロット割り当て**: 各敵が個別にプレイヤー座標へBFS移動すると、同じ経路に複数体が収束し
+  先着の後ろに一列で渋滞する（＝実質1体ずつしか同時接敵できない）バグがあった。プレイヤー隣接4マスを
+  「囲みスロット」として敵に分散割り当てし、複数方向から同時に回り込ませるよう修正（`updateEnemies`）
+- **移動回避バフ**: プレイヤーが移動した直後2tickだけ被ダメージ-15%（`moveEvasion`）。
+  「動くと得をする」インセンティブを与え、棒立ち最適化を弱める
+- **敵の後半ウェーブ強化**: ウェーブ6以降、敵HP・攻撃力に `1 + max(0, wave-5) * 0.35` の倍率がかかる。
+  移動回避バフや囲みスロット修正で生存時間が伸びた結果、攻撃力・攻撃速度・吸血を積んだプレイヤーが
+  中盤以降ノーリスクで無限にスノーボールする状態が20シード中1シードで発覚したため、
+  後半ウェーブの難易度を線形に上げて対処（`waveEnemyMultiplier`）
+
+（実装は `src/core/game.ts` の `waveTotalSpawn` / `waveConcurrentCap` / `waveSpawnInterval` / `waveEnemyMultiplier` を正とする）
 
 強化カード（ドラフトプール、9種。詳細は実装 `src/core/game.ts` のUPGRADE_POOL参照）:
 攻撃力+5／最大HP+20（即回復）／攻撃CD-1（下限1）／ダッシュCD-3・距離+1／

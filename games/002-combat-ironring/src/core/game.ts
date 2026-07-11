@@ -23,6 +23,8 @@ const DASH_RANGE = 3;
 const SKILL_DMG = 15;
 const SKILL_CD_MAX = 20;
 const REGEN_INTERVAL = 50;
+const MOVE_EVASION_TICKS = 2;
+const MOVE_EVASION_REDUCTION = 0.15;
 
 const ENEMY_STATS: Record<EnemyType, { hp: number; atk: number; atkCdMax: number; moveCdMax: number }> = {
   grunt: { hp: 30, atk: 7, atkCdMax: 8, moveCdMax: 6 },
@@ -46,6 +48,15 @@ function waveConcurrentCap(wave: number): number {
 }
 function waveSpawnInterval(wave: number): number {
   return Math.max(15, 42 - wave * 3);
+}
+/**
+ * ウェーブ6以降、敵のHP・攻撃力を緩やかに強化する。
+ * 強化ドラフトで攻撃力・攻撃速度・吸血を積み重ねたプレイヤーが
+ * wave5以降も敵性能が据え置きのまま無限にスノーボールし続け、
+ * 実質不死化してしまう問題への対処（v3で発覚）。
+ */
+function waveEnemyMultiplier(wave: number): number {
+  return 1 + Math.max(0, wave - 5) * 0.35;
 }
 function pickEnemyType(wave: number, rng: Rng): EnemyType {
   if (wave < 3) return 'grunt';
@@ -94,6 +105,8 @@ interface PlayerState {
   regen: number;
   /** このtickの間だけ有効な被弾無敵（ダッシュ発動時にtrue） */
   dashInvuln: boolean;
+  /** 移動直後の身のこなしで被ダメージを軽減する残りtick数 */
+  moveEvasion: number;
 }
 
 interface UpgradeDef {
@@ -207,6 +220,7 @@ export class Game {
     thorns: 0,
     regen: 0,
     dashInvuln: false,
+    moveEvasion: 0,
   };
   private metrics: Metrics = {
     wavesCleared: 0,
@@ -282,6 +296,7 @@ export class Game {
     if (this.player.attackCd > 0) this.player.attackCd--;
     if (this.player.dashCd > 0) this.player.dashCd--;
     if (this.player.skillCd > 0) this.player.skillCd--;
+    if (this.player.moveEvasion > 0) this.player.moveEvasion--;
 
     this.applyPlayerAction(action);
 
@@ -301,7 +316,7 @@ export class Game {
       this.spawnTimer = waveSpawnInterval(this.wave);
     }
 
-    for (const e of this.enemies) this.updateEnemy(e);
+    this.updateEnemies();
     this.enemies = this.enemies.filter((e) => e.hp > 0);
 
     if (this.player.hp <= 0) {
@@ -334,6 +349,7 @@ export class Game {
         if (this.isFloor(nx, ny) && !this.enemyAt(nx, ny)) {
           p.x = nx;
           p.y = ny;
+          p.moveEvasion = MOVE_EVASION_TICKS;
         }
         break;
       }
@@ -393,13 +409,16 @@ export class Game {
       if (!this.isFloor(x, y) || this.enemyAt(x, y) || (x === this.player.x && y === this.player.y)) continue;
       const type = pickEnemyType(this.wave, this.rng);
       const stats = ENEMY_STATS[type];
+      const mult = waveEnemyMultiplier(this.wave);
+      const hp = Math.round(stats.hp * mult);
       this.enemies.push({
         id: this.nextEnemyId++,
         type,
         x,
         y,
-        hp: stats.hp,
-        maxHp: stats.hp,
+        hp,
+        maxHp: hp,
+        atk: Math.round(stats.atk * mult),
         atkCd: 0,
         moveCd: 0,
       });
@@ -409,7 +428,57 @@ export class Game {
   }
 
   // ---- 敵AI ----
-  private updateEnemy(e: Enemy): void {
+  /**
+   * 全敵の行動をまとめて処理する。各敵が個別にプレイヤー座標へBFSすると、
+   * 同じ経路に複数体が収束して先着の後ろに一列で渋滞し、実質1体ずつしか
+   * 同時接敵できなくなる（v2レビューで発覚した「棒立ちが最適」現象の原因）。
+   * それを避けるため、プレイヤーに隣接する空き4マス（囲みスロット）を
+   * 事前に割り当ててから各敵をそのスロットへ向かわせ、複数方向から
+   * 同時に回り込ませる。
+   */
+  private updateEnemies(): void {
+    const p = this.player;
+    const slots: [number, number][] = [];
+    for (const d of ['up', 'down', 'left', 'right'] as Dir[]) {
+      const [dx, dy] = DELTA4[d];
+      const sx = p.x + dx;
+      const sy = p.y + dy;
+      if (this.isFloor(sx, sy)) slots.push([sx, sy]);
+    }
+    const takenSlots = new Set<string>();
+    for (const e of this.enemies) {
+      if (e.hp <= 0) continue;
+      if (Math.abs(p.x - e.x) + Math.abs(p.y - e.y) === 1) takenSlots.add(`${e.x},${e.y}`);
+    }
+    const nonAdjacent = this.enemies
+      .filter((e) => e.hp > 0 && Math.abs(p.x - e.x) + Math.abs(p.y - e.y) !== 1)
+      .sort((a, b) => {
+        const da = Math.abs(p.x - a.x) + Math.abs(p.y - a.y);
+        const db = Math.abs(p.x - b.x) + Math.abs(p.y - b.y);
+        return da !== db ? da - db : a.id - b.id;
+      });
+    const targets = new Map<number, [number, number]>();
+    for (const e of nonAdjacent) {
+      let best: [number, number] | null = null;
+      let bestDist = Infinity;
+      for (const [sx, sy] of slots) {
+        const key = `${sx},${sy}`;
+        if (takenSlots.has(key)) continue;
+        const dist = Math.abs(sx - e.x) + Math.abs(sy - e.y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = [sx, sy];
+        }
+      }
+      if (best) {
+        targets.set(e.id, best);
+        takenSlots.add(`${best[0]},${best[1]}`);
+      }
+    }
+    for (const e of this.enemies) this.updateEnemy(e, targets.get(e.id));
+  }
+
+  private updateEnemy(e: Enemy, moveTarget?: [number, number]): void {
     if (e.hp <= 0) return;
     const stats = ENEMY_STATS[e.type];
     if (e.atkCd > 0) e.atkCd--;
@@ -422,9 +491,10 @@ export class Game {
     if (Math.abs(dx) + Math.abs(dy) === 1) {
       if (e.atkCd === 0) {
         if (!p.dashInvuln) {
-          p.hp -= stats.atk;
-          this.metrics.damageTaken += stats.atk;
-          if (p.thorns > 0) this.damageEnemy(e, Math.round(stats.atk * p.thorns));
+          const dmg = p.moveEvasion > 0 ? Math.round(e.atk * (1 - MOVE_EVASION_REDUCTION)) : e.atk;
+          p.hp -= dmg;
+          this.metrics.damageTaken += dmg;
+          if (p.thorns > 0) this.damageEnemy(e, Math.round(e.atk * p.thorns));
         }
         e.atkCd = stats.atkCdMax;
       }
@@ -433,7 +503,8 @@ export class Game {
 
     if (e.moveCd > 0) return;
 
-    const dir = this.bfsStepToward(e.x, e.y, p.x, p.y);
+    const [tx, ty] = moveTarget ?? [p.x, p.y];
+    const dir = this.bfsStepToward(e.x, e.y, tx, ty);
     if (dir) {
       const [mx, my] = DELTA4[dir];
       const nx = e.x + mx;
@@ -537,6 +608,7 @@ export class Game {
         lifesteal: this.player.lifesteal,
         thorns: this.player.thorns,
         regen: this.player.regen,
+        moveEvasion: this.player.moveEvasion,
       },
       map: { w: W, h: H, tiles: [...this.tiles] },
       enemies: this.enemies.map((e) => ({ ...e })),
