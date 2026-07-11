@@ -15,17 +15,17 @@ export const W = 32;
 export const H = 32;
 
 const PLAYER_START = { x: 16, y: 16 };
-const PLAYER_MAX_HP = 100;
-const PLAYER_ATK = 15;
-const ATTACK_CD_MAX = 4;
+const PLAYER_MAX_HP = 120;
+const PLAYER_ATK = 16;
+const ATTACK_CD_MAX = 3;
 const DASH_CD_MAX = 20;
 const DASH_RANGE = 3;
 const SKILL_DMG = 15;
-const SKILL_CD_MAX = 30;
+const SKILL_CD_MAX = 20;
 const REGEN_INTERVAL = 50;
 
 const ENEMY_STATS: Record<EnemyType, { hp: number; atk: number; atkCdMax: number; moveCdMax: number }> = {
-  grunt: { hp: 30, atk: 8, atkCdMax: 8, moveCdMax: 6 },
+  grunt: { hp: 30, atk: 7, atkCdMax: 8, moveCdMax: 6 },
   runner: { hp: 15, atk: 5, atkCdMax: 6, moveCdMax: 3 },
   brute: { hp: 70, atk: 16, atkCdMax: 12, moveCdMax: 9 },
 };
@@ -39,10 +39,10 @@ function waveTotalSpawn(wave: number): number {
   return 9 + 2 * (wave - 3);
 }
 function waveConcurrentCap(wave: number): number {
-  if (wave === 1) return 3;
-  if (wave === 2) return 4;
-  if (wave <= 4) return 5;
-  return Math.min(5 + Math.floor((wave - 5) / 2), 10);
+  if (wave === 1) return 2;
+  if (wave === 2) return 3;
+  if (wave <= 4) return 4;
+  return Math.min(4 + Math.floor((wave - 5) / 2), 9);
 }
 function waveSpawnInterval(wave: number): number {
   return Math.max(15, 42 - wave * 3);
@@ -214,6 +214,7 @@ export class Game {
     damageDealt: 0,
     damageTaken: 0,
     upgradesChosen: 0,
+    skillUses: 0,
     score: 0,
   };
   private _over = false;
@@ -365,6 +366,7 @@ export class Game {
       }
       case 'skill': {
         if (!p.hasSkill || p.skillCd > 0) break;
+        this.metrics.skillUses++;
         for (const [dx, dy] of DELTA8) {
           const target = this.enemyAt(p.x + dx, p.y + dy);
           if (target) {

@@ -128,6 +128,7 @@ class Bot {
     const p = s.player;
 
     if (p.hasSkill && p.skillCd === 0 && countAdjacent8(s) >= 2) return { type: 'skill' };
+    if (p.hasSkill && p.skillCd === 0 && countAdjacent8(s) >= 1 && p.hp < p.maxHp * 0.4) return { type: 'skill' };
     if (adj) return { type: 'attack', dir: adj.dir };
 
     if (this.strategy === 'passive') return { type: 'wait' };
@@ -153,6 +154,7 @@ interface RunResult {
   damageDealt: number;
   damageTaken: number;
   upgradesChosen: number;
+  skillUses: number;
   score: number;
   finalHp: number;
   over: boolean;
@@ -176,6 +178,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     damageDealt: s.metrics.damageDealt,
     damageTaken: s.metrics.damageTaken,
     upgradesChosen: s.metrics.upgradesChosen,
+    skillUses: s.metrics.skillUses,
     score: s.metrics.score,
     finalHp: s.player.hp,
     over: s.over,
@@ -202,6 +205,6 @@ for (const strategy of ['passive', 'active'] as Strategy[]) {
   }
   const avg = (f: (r: RunResult) => number) => (results.reduce((a, r) => a + f(r), 0) / results.length).toFixed(1);
   console.log(
-    `# ${strategy} summary: avgWaves=${avg((r) => r.wavesCleared)} avgKills=${avg((r) => r.kills)} avgScore=${avg((r) => r.score)} deaths=${results.filter((r) => r.over).length}/${results.length}`,
+    `# ${strategy} summary: avgWaves=${avg((r) => r.wavesCleared)} avgKills=${avg((r) => r.kills)} avgScore=${avg((r) => r.score)} avgSkillUses=${avg((r) => r.skillUses)} deaths=${results.filter((r) => r.over).length}/${results.length}`,
   );
 }
