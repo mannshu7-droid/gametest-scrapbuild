@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/002-combat-ironring", "run", "dev", "--", "--port", "5174"],
       "port": 5174
+    },
+    {
+      "name": "deepvein",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/003-mining-deepvein", "run", "dev", "--", "--port", "5175"],
+      "port": 5175
     }
   ]
 }
