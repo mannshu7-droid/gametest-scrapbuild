@@ -41,6 +41,7 @@ export interface Metrics {
   damageDealt: number;
   damageTaken: number;
   upgradesChosen: number;
+  skillUses: number;
   score: number;
 }
 
