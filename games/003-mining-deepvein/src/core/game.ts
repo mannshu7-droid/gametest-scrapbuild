@@ -9,7 +9,8 @@ const SPAWN_X = Math.floor(W / 2);
 
 const PASSIVE_FUEL_DRAIN = 1;
 const DIG_FUEL_COST = 1;
-const FUEL_EMPTY_HP_DRAIN = 3;
+// v1では34tick分（=102ダメージ）でほぼ確実に致死していたため緩和（reviews/003-mining-deepvein-v1.md #2）
+const FUEL_EMPTY_HP_DRAIN = 1.5;
 const GAS_FUEL_DRAIN = 15;
 const HAZARD_BASE_DMG = 12;
 const HAZARD_DMG_PER_BAND = 2;
@@ -46,8 +47,14 @@ const BASE_VALUE: Partial<Record<TileId, number>> = {
 function bandAt(y: number): number {
   return Math.floor((y - 1) / BAND_SIZE);
 }
+/**
+ * 岩・ガス（TIER1）は土・銅鉱石（TIER0）と同じ要求ドリル威力にする。
+ * v1で「初期ドリル威力のまま到達可能な範囲がTIER0タイルのみに限定され、それを掘り尽くすと
+ * 次のドリル強化を買う収入源自体が尽きる」詰みが発生したため（reviews/003-mining-deepvein-v1.md #1）。
+ */
 function requiredDrillPower(type: TileId, band: number): number {
-  return 1 + (TIER[type] ?? 0) + Math.floor(band / 2);
+  const tier = type === TILE.ROCK || type === TILE.GAS ? 0 : (TIER[type] ?? 0);
+  return 1 + tier + Math.floor(band / 2);
 }
 function digTicksFor(type: TileId, band: number, drillPower: number, digspeedLevel: number): number {
   const req = requiredDrillPower(type, band);
@@ -234,6 +241,44 @@ export class Game {
   }
   private teleportUnlocked(): boolean {
     return this.player.teleportLevel >= 1;
+  }
+
+  /** 既に掘った床だけを通って地上(y=0)へ戻るのに必要なマス数をBFSで求める（構造上、経路は必ず存在する） */
+  private bfsDistanceToSurface(): number {
+    if (this.player.y === 0) return 0;
+    const visited = new Uint8Array(W * H);
+    const startIdx = this.player.y * W + this.player.x;
+    visited[startIdx] = 1;
+    let queue: number[] = [startIdx];
+    let qi = 0;
+    let dist = 0;
+    while (qi < queue.length) {
+      const levelSize = queue.length - qi;
+      dist++;
+      for (let i = 0; i < levelSize; i++) {
+        const idx = queue[qi++];
+        const x = idx % W;
+        const y = Math.floor(idx / W);
+        for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (!this.inBounds(nx, ny)) continue;
+          const nidx = ny * W + nx;
+          if (visited[nidx]) continue;
+          if (ny === 0) return dist;
+          if (this.tiles[nidx] !== TILE.FLOOR) continue;
+          visited[nidx] = 1;
+          queue.push(nidx);
+        }
+      }
+    }
+    return Infinity;
+  }
+
+  private estFuelToReturn(): number | null {
+    const dist = this.bfsDistanceToSurface();
+    if (!Number.isFinite(dist)) return null;
+    return Math.ceil(dist * PASSIVE_FUEL_DRAIN * this.lanternMult());
   }
 
   // ---- メインループ: 1ティック進める ----
@@ -458,6 +503,7 @@ export class Game {
         cargoValue: this.player.cargoValue,
         teleportUnlocked: this.teleportUnlocked(),
         digging: this.player.digging ? { ...this.player.digging } : null,
+        estFuelToReturn: this.estFuelToReturn(),
       },
       map: { w: W, h: H, tiles: [...this.tiles] },
       shop,

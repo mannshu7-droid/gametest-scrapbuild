@@ -77,6 +77,8 @@ export interface GameState {
     cargoValue: number;
     teleportUnlocked: boolean;
     digging: Digging | null;
+    /** 現在地から既に掘った床だけを通って地上へ戻るのに必要な推定燃料（BFS距離×消費率）。0=地上、null=経路不明（理論上発生しない） */
+    estFuelToReturn: number | null;
   };
   map: {
     w: number;
