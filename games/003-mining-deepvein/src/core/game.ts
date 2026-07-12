@@ -38,10 +38,12 @@ const BASE_TICKS: Partial<Record<TileId, number>> = {
   [TILE.UNSTABLE]: 4,
   [TILE.ORE_GOLD]: 6,
 };
+// v3: ショップ購入回数が目標未達（reviews/003-mining-deepvein-v2.md #3）だったため、
+// ドリル威力ゲートには触れず経済側（鉱石価値）を底上げして1トリップあたりの稼ぎを増やす方向で対処
 const BASE_VALUE: Partial<Record<TileId, number>> = {
-  [TILE.ORE_COPPER]: 6,
-  [TILE.ORE_IRON]: 18,
-  [TILE.ORE_GOLD]: 45,
+  [TILE.ORE_COPPER]: 7,
+  [TILE.ORE_IRON]: 22,
+  [TILE.ORE_GOLD]: 54,
 };
 
 function bandAt(y: number): number {
