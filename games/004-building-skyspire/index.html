@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkySpire (004)</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #ddd;
+        font-family: monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+      }
+      canvas {
+        image-rendering: pixelated;
+        border: 1px solid #444;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div>
+      矢印/WASD: 移動 | 1〜5: 資材選択(木/石/鋼/補強/安定化) | F: 選択方向へ設置 | G: 選択方向を撤去 | 移動キー+Shift: 設置方向指定
+      | B: 地上でその場購入 | R: リスタート
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

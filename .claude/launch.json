@@ -18,6 +18,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/003-mining-deepvein", "run", "dev", "--", "--port", "5175"],
       "port": 5175
+    },
+    {
+      "name": "skyspire",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/004-building-skyspire", "run", "dev", "--", "--port", "5176"],
+      "port": 5176
     }
   ]
 }
