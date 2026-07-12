@@ -89,7 +89,15 @@ class Bot {
     }
 
     const p = s.player;
-    if (p.fuel <= 0 || p.cargoUnits >= p.maxCapacity || p.fuel <= p.maxFuel * 0.25) {
+    // v1では残燃料25%固定閾値が実際の帰還距離を無視しており、遠出した回だけ燃料切れで致死していた
+    // （reviews/003-mining-deepvein-v1.md #2）。coreが公開するestFuelToReturn（BFS距離ベース）に
+    // 安全マージンを乗せて判断する
+    const returnMargin = 15;
+    const needsReturn =
+      p.fuel <= 0 ||
+      p.cargoUnits >= p.maxCapacity ||
+      (p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
+    if (needsReturn) {
       const dir = bfsToSurface(s);
       if (dir) return { type: 'move', dir };
     }

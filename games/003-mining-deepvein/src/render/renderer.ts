@@ -63,8 +63,9 @@ export class Renderer {
     ctx.fillRect(0, hudY, VIEW_W * TILE_PX, HUD_PX);
     ctx.fillStyle = '#fff';
     ctx.font = '13px monospace';
+    const returnFuelText = s.player.estFuelToReturn === null ? '' : `  帰還推定燃料 ${s.player.estFuelToReturn}`;
     ctx.fillText(
-      `depth ${s.player.y}  HP ${Math.max(0, Math.round(s.player.hp))}/${s.player.maxHp}  fuel ${Math.round(s.player.fuel)}/${s.player.maxFuel}`,
+      `depth ${s.player.y}  HP ${Math.max(0, Math.round(s.player.hp))}/${s.player.maxHp}  fuel ${Math.round(s.player.fuel)}/${s.player.maxFuel}${returnFuelText}`,
       8,
       hudY + 18,
     );
