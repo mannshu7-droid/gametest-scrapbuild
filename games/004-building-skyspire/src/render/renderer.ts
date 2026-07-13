@@ -1,4 +1,4 @@
-import { H } from '../core/game';
+import { BRACE_RADIUS, H } from '../core/game';
 import type { GameState, Material } from '../core/types';
 
 const TILE_PX = 24;
@@ -51,14 +51,30 @@ export class Renderer {
     }
 
     // ブロック
+    const braces = s.world.blocks.filter((b) => b.material === 'brace');
     for (const b of s.world.blocks) {
       const row = rowOf(b.y);
       if (row < 0 || row >= VIEW_H) continue;
       ctx.fillStyle = MATERIAL_COLOR[b.material];
       ctx.fillRect(b.x * TILE_PX + 1, row * TILE_PX + 1, TILE_PX - 2, TILE_PX - 2);
-      if (b.stressRatio >= 0.6) {
+      if (b.stressRatio >= 0.6 && !b.protected) {
         ctx.fillStyle = `rgba(220,20,20,${Math.min(0.75, (b.stressRatio - 0.6) * 1.8)})`;
         ctx.fillRect(b.x * TILE_PX + 1, row * TILE_PX + 1, TILE_PX - 2, TILE_PX - 2);
+      }
+      // brace効果範囲（半径BRACE_RADIUS）内のブロックに薄いオレンジの縁取りを重ね、
+      // どのブロックが補強されているか一目でわかるようにする（v1のbugリスト#4対応）
+      if (
+        b.material !== 'brace' &&
+        braces.some((br) => Math.abs(br.x - b.x) <= BRACE_RADIUS && Math.abs(br.y - b.y) <= BRACE_RADIUS)
+      ) {
+        ctx.strokeStyle = 'rgba(230,126,34,0.7)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(b.x * TILE_PX + 1.5, row * TILE_PX + 1.5, TILE_PX - 3, TILE_PX - 3);
+      }
+      if (b.protected) {
+        ctx.strokeStyle = '#2ecc71';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(b.x * TILE_PX + 2, row * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
       }
       if (!b.grounded) {
         ctx.strokeStyle = '#ff0000';
@@ -102,7 +118,7 @@ export class Renderer {
       hudY + 32,
     );
     ctx.fillText(
-      `maxStress ${s.structure.maxStressRatio.toFixed(2)}  critical ${s.structure.criticalCount}  stabilizer残${s.shop.stabilizerRemaining}`,
+      `maxStress ${s.structure.maxStressRatio.toFixed(2)}  critical ${s.structure.criticalCount}  土台保護${s.structure.foundationHeight}  stabilizer残${s.shop.stabilizerRemaining}`,
       6,
       hudY + 48,
     );
