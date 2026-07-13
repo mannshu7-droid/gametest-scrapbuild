@@ -15,10 +15,12 @@ export interface BlockInfo {
   x: number;
   y: number;
   material: Material;
-  /** 現在の負荷率（負荷÷耐荷重）。1.0超で崩落判定 */
+  /** 現在の負荷率（負荷÷耐荷重）。1.0超で崩落判定（ただしprotectedがtrueの場合は崩落しない） */
   stressRatio: number;
   /** 地面から支持経路で繋がっているか */
   grounded: boolean;
+  /** 直近マイルストーン以下の土台として、過負荷崩落から保護されているか */
+  protected: boolean;
 }
 
 export interface Metrics {
@@ -71,6 +73,8 @@ export interface GameState {
   structure: {
     maxStressRatio: number;
     criticalCount: number;
+    /** この高さ以下のブロックは過負荷崩落から保護されている */
+    foundationHeight: number;
   };
   metrics: Metrics;
 }

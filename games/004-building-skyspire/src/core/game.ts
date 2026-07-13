@@ -4,15 +4,19 @@ import type { Action, BlockInfo, Dir, GameState, Material, Metrics, ShakeState }
 export const W = 9;
 export const H = 90;
 export const CENTER_X = 4;
-export const GOAL_HEIGHT = 15;
+export const GOAL_HEIGHT = 40;
 export const TIME_LIMIT = 3600;
 
 /** 高度バンド（10高度刻み）ごとの風カンチレバー倍率（オフセット1マスあたり） */
 export const WIND_TABLE = [0.05, 0.08, 0.12, 0.16, 0.2];
 /** 高度バンドごとの揺れ強度 */
 export const SHAKE_TABLE = [0.3, 0.5, 0.8, 1.1, 1.4];
-/** braceが隣接するブロックが下へ伝える荷重の残存率（1-この値が肩代わり分） */
-export const BRACE_FACTOR = 0.6;
+/** brace近傍のブロックが下へ伝える荷重の残存率（1-この値が肩代わり分） */
+export const BRACE_FACTOR = 0.5;
+/** braceの効果が届く範囲（チェビシェフ距離）。1本のbraceで複数段をまとめて補強できる */
+export const BRACE_RADIUS = 2;
+/** 直近に到達したマイルストーン高度（3の倍数）以下は、揺れ・自重による過負荷崩落から保護される */
+export const MILESTONE_STEP = 3;
 
 export const MATERIAL_DEFS: Record<Material, { cost: number; weight: number; capacity: number }> = {
   wood: { cost: 4, weight: 3, capacity: 8 },
@@ -77,6 +81,8 @@ export class Game {
   private groundScrap = new Map<number, number>();
   private stabilizerRemaining = 3;
   private maxHeightReached = 0;
+  /** 直近に到達したマイルストーン高度（3の倍数）。この高さ以下のブロックは過負荷崩落から保護される */
+  private foundationHeight = 0;
 
   private shakeState: ShakeState = 'idle';
   private shakeTimer: number;
@@ -111,10 +117,11 @@ export class Game {
     return `${x},${y}`;
   }
 
-  private hasAdjacentBrace(x: number, y: number): boolean {
-    for (const [dx, dy] of DIRS4) {
-      const b = this.blocks.get(this.key(x + dx, y + dy));
-      if (b && b.material === 'brace') return true;
+  /** (x,y)からチェビシェフ距離BRACE_RADIUS以内にbraceがあるか。1本のbraceで周囲複数段を補強する */
+  private hasNearbyBrace(x: number, y: number): boolean {
+    for (const b of this.blocks.values()) {
+      if (b.material !== 'brace') continue;
+      if (Math.abs(b.x - x) <= BRACE_RADIUS && Math.abs(b.y - y) <= BRACE_RADIUS) return true;
     }
     return false;
   }
@@ -158,8 +165,9 @@ export class Game {
     }
 
     // subtreeWeight(node) = 自重 + 自分の上に乗る全ブロックの荷重合計（自分自身を含む）。
-    // braceが隣接するブロックは、自分が支えている荷重を下の支持ブロックへ伝える際にBRACE_FACTOR分だけ
-    // 肩代わりして減衰させる（毎段ブレースを入れれば等比級数的に頭打ちになり、高層化を可能にする）
+    // BRACE_RADIUS以内にbraceがあるブロックは、自分が支えている荷重を下の支持ブロックへ伝える際に
+    // BRACE_FACTOR分だけ肩代わりして減衰させる（brace1本で周囲複数段をまとめて補強できるため、
+    // 毎段設置しなくても等比級数的に頭打ちになり高層化できる）
     const subtreeWeight = new Map<string, number>();
     for (let i = queue.length - 1; i >= 0; i--) {
       const key = queue[i];
@@ -168,7 +176,7 @@ export class Game {
       let sum = def.weight;
       for (const c of info.get(key)!.children) {
         const childBlock = this.blocks.get(c)!;
-        const factor = this.hasAdjacentBrace(childBlock.x, childBlock.y) ? BRACE_FACTOR : 1;
+        const factor = this.hasNearbyBrace(childBlock.x, childBlock.y) ? BRACE_FACTOR : 1;
         sum += (subtreeWeight.get(c) ?? 0) * factor;
       }
       subtreeWeight.set(key, sum);
@@ -193,7 +201,7 @@ export class Game {
       let loadAbove = 0;
       for (const c of info.get(key)!.children) {
         const childBlock = this.blocks.get(c)!;
-        const factor = this.hasAdjacentBrace(childBlock.x, childBlock.y) ? BRACE_FACTOR : 1;
+        const factor = this.hasNearbyBrace(childBlock.x, childBlock.y) ? BRACE_FACTOR : 1;
         loadAbove += (subtreeWeight.get(c) ?? 0) * factor;
       }
       const load = loadAbove * windMult * shakeMult;
@@ -215,7 +223,14 @@ export class Game {
     while (iterations++ < 60) {
       const floating = this.recomputeStructure();
       const overloaded: string[] = [];
-      for (const [key, ratio] of this.stressMap) if (ratio > 1) overloaded.push(key);
+      for (const [key, ratio] of this.stressMap) {
+        if (ratio <= 1) continue;
+        // 直近マイルストーン以下の土台は過負荷崩落から保護する（1回の事故で積み上げ実績ごと失わないため）。
+        // floatingによる強制撤去（連結が切れた場合）は保護対象外
+        const b = this.blocks.get(key);
+        if (b && b.y <= this.foundationHeight) continue;
+        overloaded.push(key);
+      }
       const toRemove = new Set([...floating, ...overloaded]);
       if (toRemove.size === 0) break;
       anyCollapse = true;
@@ -268,10 +283,11 @@ export class Game {
   }
 
   private applyGravity(): void {
-    const grounded =
-      this.player.y === 0 ||
-      this.blocks.has(this.key(this.player.x, this.player.y - 1)) ||
-      this.blocks.has(this.key(this.player.x, this.player.y));
+    // 「y-1にブロックがあれば接地」を条件に含めると、崩落で自分の足元のブロックだけ残り
+    // 自分のいたブロックが消えた場合に「生き残った最上段のすぐ上の空きマス」で静止してしまい、
+    // 通常の登はんモデル（常にブロックの中に立つ）と矛盾して以降 place up の着地先がズレ続ける
+    // （安全マージンぶんの空白ができてしまう）。同じセルにブロックがあるかどうかだけで接地判定する
+    const grounded = this.player.y === 0 || this.blocks.has(this.key(this.player.x, this.player.y));
     if (!grounded) {
       this.player.y -= 1;
       this.player.fallStreak++;
@@ -296,7 +312,11 @@ export class Game {
   }
 
   private applyMilestones(prevMax: number, newMax: number): void {
-    for (let m = Math.floor(prevMax / 3) * 3 + 3; m <= newMax; m += 3) {
+    for (
+      let m = Math.floor(prevMax / MILESTONE_STEP) * MILESTONE_STEP + MILESTONE_STEP;
+      m <= newMax;
+      m += MILESTONE_STEP
+    ) {
       if (m <= prevMax) continue;
       const bonus = 15 + m * 3;
       this.player.money += bonus;
@@ -412,6 +432,10 @@ export class Game {
     if (newMax > prevMax) this.applyMilestones(prevMax, newMax);
     this.maxHeightReached = newMax;
     this.metrics.maxHeight = newMax;
+    // 保護対象は最初のマイルストーン（高さMILESTONE_STEP）だけに固定する。移動フロンティアを
+    // 保護すると積み上げた分すべてが崩落免除になり構造リスクが消えてしまうため、
+    // 「ゼロから作り直しにはならない」最低限の足場だけを恒久的に保護する
+    if (this.maxHeightReached >= MILESTONE_STEP) this.foundationHeight = MILESTONE_STEP;
 
     this.tick++;
     this.metrics.ticksSurvived = this.tick;
@@ -445,8 +469,9 @@ export class Game {
     for (const [key, b] of this.blocks) {
       const stressRatio = this.stressMap.get(key) ?? 0;
       const grounded = this.groundedSet.has(key);
-      blocks.push({ x: b.x, y: b.y, material: b.material, stressRatio, grounded });
-      if (grounded) {
+      const isProtected = b.y <= this.foundationHeight;
+      blocks.push({ x: b.x, y: b.y, material: b.material, stressRatio, grounded, protected: isProtected });
+      if (grounded && !isProtected) {
         if (stressRatio > maxStressRatio) maxStressRatio = stressRatio;
         if (stressRatio >= 0.8) criticalCount++;
       }
@@ -474,10 +499,7 @@ export class Game {
         money: this.player.money,
         inventory: { ...this.player.inventory },
         fallStreak: this.player.fallStreak,
-        grounded:
-          this.player.y === 0 ||
-          this.blocks.has(this.key(this.player.x, this.player.y - 1)) ||
-          this.blocks.has(this.key(this.player.x, this.player.y)),
+        grounded: this.player.y === 0 || this.blocks.has(this.key(this.player.x, this.player.y)),
       },
       world: {
         w: W,
@@ -498,6 +520,7 @@ export class Game {
       structure: {
         maxStressRatio,
         criticalCount,
+        foundationHeight: this.foundationHeight,
       },
       metrics: { ...this.metrics },
     };
