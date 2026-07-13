@@ -6,11 +6,15 @@
  *   揺れ予兆・本震中は無理に登らず様子を見る
  * - reckless（脳筋ビルド）: 最安のwoodだけを買い、補強材を一切使わず、揺れも無視してひたすら登る
  *   （spec.mdの「AI評価の観点」にある“資材だけ積む脳筋ビルドが通用してしまわないか”の検証用）
+ * - sloppy（そこそこ雑）: stoneだけを買い、brace/stabilizerは一切使わず揺れも無視して登る。
+ *   recklessほど無謀ではなく即死はしないが、崩落を繰り返して資材と所持金をすり減らし続ける
+ *   （v2レビューでブラウザAIP実測により発見した「所持金・資材ともに0でスクラップも無い完全な
+ *   経済的詰み」を再現する検証用。v3のLABOR_INCOME救済で詰みが解消されることを確認する）
  */
 import { Game, W, H, GOAL_HEIGHT, TIME_LIMIT } from '../src/core/game';
 import type { Action, GameState, Material } from '../src/core/types';
 
-type Strategy = 'careful' | 'reckless';
+type Strategy = 'careful' | 'reckless' | 'sloppy';
 
 class Bot {
   private stabilizerBought = 0;
@@ -39,6 +43,7 @@ class Bot {
       if (inv.wood > 0) return 'wood';
       return null;
     }
+    if (this.strategy === 'sloppy') return inv.stone > 0 ? 'stone' : null;
     return inv.wood > 0 ? 'wood' : null;
   }
 
@@ -59,6 +64,11 @@ class Bot {
         return { type: 'buy', material: 'steel' };
       }
       if (p.inventory.stone < 10 && p.money >= 9) return { type: 'buy', material: 'stone' };
+      return null;
+    }
+    if (this.strategy === 'sloppy') {
+      // brace/stabilizerは一切買わずstoneのみ。少なめに買っては登り、崩落したらまた買い足す
+      if (p.inventory.stone < 4 && p.money >= 9) return { type: 'buy', material: 'stone' };
       return null;
     }
     if (p.inventory.wood < 12 && p.money >= 4) return { type: 'buy', material: 'wood' };
@@ -177,7 +187,7 @@ const maxTicks = Number(argVal('maxTicks') ?? Math.min(TIME_LIMIT + 200, 4000));
 console.log(
   `# SkySpire headless simulation (grid ${W}x${H}, goalHeight=${GOAL_HEIGHT}, timeLimit=${TIME_LIMIT}, maxTicks=${maxTicks})`,
 );
-for (const strategy of ['careful', 'reckless'] as Strategy[]) {
+for (const strategy of ['careful', 'reckless', 'sloppy'] as Strategy[]) {
   const results: RunResult[] = [];
   for (const seed of seeds) {
     const r = runOne(seed, strategy, maxTicks);
