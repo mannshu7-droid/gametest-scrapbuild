@@ -17,6 +17,11 @@ export const BRACE_FACTOR = 0.5;
 export const BRACE_RADIUS = 2;
 /** 直近に到達したマイルストーン高度（3の倍数）以下は、揺れ・自重による過負荷崩落から保護される */
 export const MILESTONE_STEP = 3;
+/** 地上(y=0)に滞在し続けた場合、この間隔(tick)ごとに最低限の労働収入が入る */
+export const LABOR_INCOME_INTERVAL = 15;
+/** 労働収入1回分の金額。所持金・資材ともに0でスクラップも無い完全な経済的詰みからでも、
+ *  時間をかければ必ずwood1個分は買えるようにするための最低限の救済（v3で追加） */
+export const LABOR_INCOME_AMOUNT = 1;
 
 export const MATERIAL_DEFS: Record<Material, { cost: number; weight: number; capacity: number }> = {
   wood: { cost: 4, weight: 3, capacity: 8 },
@@ -90,6 +95,8 @@ export class Game {
 
   private groundedSet = new Set<string>();
   private stressMap = new Map<string, number>();
+  /** 地上滞在tickのカウンタ（LABOR_INCOME_INTERVALに達するたび最低限の収入を得る） */
+  private laborTicks = 0;
 
   private debrisHitAppliedThisTick = false;
 
@@ -311,6 +318,20 @@ export class Game {
     }
   }
 
+  /** 所持金・資材・回収可能なスクラップが全て尽きても、地上に留まっていれば必ず再起できるようにする
+   *  最低限の救済。崩落を繰り返した末の完全な経済的詰み（v2 bug#1）を防ぐ */
+  private applyLaborIncome(): void {
+    // 地上に「連続で」滞在した場合だけでなく、行き来を繰り返しつつ地上を経由するだけの
+    // プレイでも詰みから脱出できるよう、非連続でも地上に居た回数を積算する（離れてもリセットしない）
+    if (this.player.y !== 0) return;
+    this.laborTicks++;
+    if (this.laborTicks >= LABOR_INCOME_INTERVAL) {
+      this.laborTicks = 0;
+      this.player.money += LABOR_INCOME_AMOUNT;
+      this.metrics.moneyEarned += LABOR_INCOME_AMOUNT;
+    }
+  }
+
   private applyMilestones(prevMax: number, newMax: number): void {
     for (
       let m = Math.floor(prevMax / MILESTONE_STEP) * MILESTONE_STEP + MILESTONE_STEP;
@@ -426,6 +447,7 @@ export class Game {
     this.resolveCollapses();
     this.applyGravity();
     this.collectScrap();
+    this.applyLaborIncome();
 
     const prevMax = this.maxHeightReached;
     const newMax = Math.max(prevMax, this.player.y);
