@@ -97,27 +97,45 @@ function priorityFor(strategy: Strategy): UpgradeId[] {
   return BALANCED;
 }
 
+// v3修正: v2バグ#1「帰還閾値付近のHP回復→即再潜行を細かく繰り返す」への対応。
+// 帰還理由が低HPだった場合に限り、地上到着後も十分回復するまで再潜行しない「待機」状態を挟む
+// ヒステリシスを追加する（燃料切れ・満載での帰還はHPに問題がないので即再潜行してよい）
+const RETURN_HP_THRESHOLD = 0.25;
+const RESUME_DIVE_HP_THRESHOLD = 0.6;
+
 class Bot {
+  private awaitingHeal = false;
+
   constructor(private strategy: Strategy) {}
+
+  private tryBuy(s: GameState): Action | null {
+    // v2修正: v1は「優先度リストの先頭から見て、今買える最初の項目を買う」方式だったため、
+    // skillより手前の項目(atk/hp/drill等)がmaxLevelに達するまでskillが一切候補に上がらず、
+    // 30ラン全てでskillUsesが0になっていた（コスト引き下げだけでは解決しないことを実測で確認済み）。
+    // 複数同時接敵に対する救済手段を実際に機能検証するため、Lv1だけは「買えるようになり次第」の
+    // 一度きりの特別優先で確保する（Lv2以降は通常の優先度リストに従う＝各戦略のカテゴリ傾向は維持）
+    const skillItem = s.shop.find((it) => it.id === 'skill');
+    if (skillItem && skillItem.level === 0 && skillItem.nextCost !== null && s.player.money >= skillItem.nextCost) {
+      return { type: 'buy', item: 'skill' };
+    }
+    for (const id of priorityFor(this.strategy)) {
+      const item = s.shop.find((it) => it.id === id);
+      if (item && item.nextCost !== null && s.player.money >= item.nextCost) {
+        return { type: 'buy', item: id };
+      }
+    }
+    return null;
+  }
 
   decide(s: GameState): Action {
     if (s.phase === 'shop') {
-      // v2修正: v1は「優先度リストの先頭から見て、今買える最初の項目を買う」方式だったため、
-      // skillより手前の項目(atk/hp/drill等)がmaxLevelに達するまでskillが一切候補に上がらず、
-      // 30ラン全てでskillUsesが0になっていた（コスト引き下げだけでは解決しないことを実測で確認済み）。
-      // 複数同時接敵に対する救済手段を実際に機能検証するため、Lv1だけは「買えるようになり次第」の
-      // 一度きりの特別優先で確保する（Lv2以降は通常の優先度リストに従う＝各戦略のカテゴリ傾向は維持）
-      const skillItem = s.shop.find((it) => it.id === 'skill');
-      if (skillItem && skillItem.level === 0 && skillItem.nextCost !== null && s.player.money >= skillItem.nextCost) {
-        return { type: 'buy', item: 'skill' };
-      }
-      for (const id of priorityFor(this.strategy)) {
-        const item = s.shop.find((it) => it.id === id);
-        if (item && item.nextCost !== null && s.player.money >= item.nextCost) {
-          return { type: 'buy', item: id };
+      if (this.awaitingHeal) {
+        if (s.player.hp < s.player.maxHp * RESUME_DIVE_HP_THRESHOLD) {
+          return this.tryBuy(s) ?? { type: 'wait' };
         }
+        this.awaitingHeal = false;
       }
-      return { type: 'move', dir: 'down' };
+      return this.tryBuy(s) ?? { type: 'move', dir: 'down' };
     }
 
     const p = s.player;
@@ -134,12 +152,14 @@ class Bot {
 
     // 帰還判断: 燃料切れ・満載・低HP・estFuelToReturn残不足のいずれか
     const returnMargin = 15;
+    const lowHp = p.hp <= p.maxHp * RETURN_HP_THRESHOLD;
     const needsReturn =
       p.fuel <= 0 ||
       p.cargoUnits >= p.maxCapacity ||
-      p.hp <= p.maxHp * 0.25 ||
+      lowHp ||
       (p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
     if (needsReturn) {
+      if (lowHp) this.awaitingHeal = true;
       const dir = bfsToSurface(s);
       if (dir) {
         const [dx, dy] = DELTA[dir];
