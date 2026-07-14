@@ -30,6 +30,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/005-combat-mining-ironvein", "run", "dev", "--", "--port", "5177"],
       "port": 5177
+    },
+    {
+      "name": "ironkeep",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/006-combat-mining-building-ironkeep", "run", "dev", "--", "--port", "5178"],
+      "port": 5178
     }
   ]
 }
