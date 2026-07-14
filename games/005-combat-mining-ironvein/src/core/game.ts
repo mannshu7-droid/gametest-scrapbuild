@@ -37,9 +37,19 @@ const SPAWN_NOISE_COEF = 0.0004;
 const MOVE_EVASION_TICKS = 2;
 const MOVE_EVASION_REDUCTION = 0.15;
 
+// v2追加: v1バグ#1（1マス幅の坑道が唯一の帰還経路を兼ね、敵に塞がれると長時間の消耗ループに陥る
+// 残存パターン、balanced seed9でtripsToSurface=3522という異常値）への構造的対処。
+// 「安全マージンの数値公開」だけでは経路そのものが物理的に塞がれるケースを防げないため、
+// 数値ではなく「退路上の敵を無視して通過できる緊急手段」を追加する（v1レビューLearnings参照）
+const DASH_TICKS = 3;
+const DASH_COOLDOWN = 50;
+const DASH_HP_COST = 12;
+
 const LABOR_INCOME_INTERVAL = 15;
 const LABOR_INCOME_AMOUNT = 1;
-const SURFACE_HP_REGEN = 1;
+// v2修正: v1の死亡率が全戦略で高すぎた（9/10, 5/10, 6/10）。地上回復が遅すぎると、
+// 1トリップごとの正味HP回復量が被弾蓄積に対して焼け石に水になり、じり貧の消耗死に繋がっていたため引き上げた
+const SURFACE_HP_REGEN = 3;
 const MILESTONE_BONUS_PER_BAND = 30;
 
 const SPAWN_RADIUS_MIN = 3;
@@ -161,7 +171,9 @@ const SHOP_DEFS: ShopDef[] = [
   { id: 'atk', name: '攻撃力強化', desc: '攻撃力+4', baseCost: 25, growth: 1.5, maxLevel: 8 },
   { id: 'hp', name: '体力強化', desc: '最大HP+20（即回復込み）', baseCost: 25, growth: 1.4, maxLevel: 6 },
   { id: 'atkspeed', name: '攻撃速度強化', desc: '攻撃クールダウン-1（下限1）', baseCost: 25, growth: 1.5, maxLevel: 2 },
-  { id: 'skill', name: '範囲攻撃', desc: 'Lv1で周囲8方向への範囲攻撃を解禁。以降ダメージ+8・CD-2（下限8）', baseCost: 40, growth: 1.6, maxLevel: 5 },
+  // v2修正: v1でskillUsesが全30ヘッドレスラン中0だった。atk/hp(baseCost25)より高コストなせいで
+  // 「安い項目を先に買う」優先度リストでは常に後回しにされ続けていたため、atk/hpと同水準まで引き下げた
+  { id: 'skill', name: '範囲攻撃', desc: 'Lv1で周囲8方向への範囲攻撃を解禁。以降ダメージ+8・CD-2（下限8）', baseCost: 25, growth: 1.45, maxLevel: 5 },
   { id: 'muffler', name: '防音マフラー', desc: '掘削で発生する掘削音の蓄積量-15%（下限-45%）', baseCost: 20, growth: 1.3, maxLevel: 3 },
 ];
 
@@ -176,6 +188,8 @@ interface PlayerState {
   digging: Digging | null;
   noise: number;
   moveEvasion: number;
+  dashActive: number;
+  dashCd: number;
   attackCd: number;
   skillCd: number;
   drillLevel: number;
@@ -209,11 +223,15 @@ function attackCdMaxOf(level: number): number {
 function hasSkillOf(level: number): boolean {
   return level >= 1;
 }
+// v2修正: v1はskillDmg(Lv1=12)がatk(Lv0=14)未満だったため、複数同時接敵が実測でほぼ発生しない
+// この採掘パターン（1マス幅の縦シャフトは基本1体としか同時接敵しない）では単体攻撃の劣化互換にしかならず、
+// 買っても使う理由がなかった。単体に対してもatk以上の価値を持つよう底上げし、CDも短縮して
+// 「複数同時接敵の保険」から「押されている時に使う強力な一手」へ役割を広げた
 function skillDmgOf(level: number): number {
-  return level >= 1 ? 12 + 8 * (level - 1) : 0;
+  return level >= 1 ? 16 + 8 * (level - 1) : 0;
 }
 function skillCdMaxOf(level: number): number {
-  return level >= 1 ? Math.max(8, 20 - 2 * (level - 1)) : 0;
+  return level >= 1 ? Math.max(6, 16 - 2 * (level - 1)) : 0;
 }
 function mufflerMultOf(level: number): number {
   return Math.max(0.55, 1 - 0.15 * level);
@@ -240,6 +258,8 @@ export class Game {
     digging: null,
     noise: 0,
     moveEvasion: 0,
+    dashActive: 0,
+    dashCd: 0,
     attackCd: 0,
     skillCd: 0,
     drillLevel: 0,
@@ -262,6 +282,7 @@ export class Game {
     tripsToSurface: 0,
     milestonesReached: 0,
     skillUses: 0,
+    dashUses: 0,
     fuelEmptyTicks: 0,
     score: 0,
   };
@@ -399,6 +420,8 @@ export class Game {
     if (this.player.attackCd > 0) this.player.attackCd--;
     if (this.player.skillCd > 0) this.player.skillCd--;
     if (this.player.moveEvasion > 0) this.player.moveEvasion--;
+    if (this.player.dashActive > 0) this.player.dashActive--;
+    if (this.player.dashCd > 0) this.player.dashCd--;
 
     if (this.player.fuel <= 0) {
       this.player.hp -= FUEL_EMPTY_HP_DRAIN;
@@ -468,6 +491,14 @@ export class Game {
         p.skillCd = this.skillCdMax();
         break;
       }
+      case 'dash': {
+        if (p.dashCd > 0) break;
+        p.dashActive = DASH_TICKS;
+        p.dashCd = DASH_COOLDOWN;
+        p.hp = Math.max(1, p.hp - Math.min(DASH_HP_COST, p.hp - 1));
+        this.metrics.dashUses++;
+        break;
+      }
       case 'wait':
       case 'buy':
         break;
@@ -481,7 +512,16 @@ export class Game {
     const nx = p.x + dx;
     const ny = p.y + dy;
     if (!this.inBounds(nx, ny)) return { dug: false, moved: false };
-    if (this.enemyAt(nx, ny)) return { dug: false, moved: false }; // 敵のいるマスへは移動できない（攻撃で対応）
+    if (this.enemyAt(nx, ny)) {
+      // dash中は退路上の敵を無視してすり抜けられる（v1バグ#1のチョークポイント詰みへの構造的対処）。
+      // それ以外は敵のいるマスへ移動できない（攻撃で対応）
+      if (p.dashActive <= 0 || this.tileAt(nx, ny) !== TILE.FLOOR) return { dug: false, moved: false };
+      p.digging = null;
+      p.x = nx;
+      p.y = ny;
+      if (ny === 0) this.arriveAtSurface();
+      return { dug: false, moved: true };
+    }
     const t = this.tileAt(nx, ny) as TileId;
 
     if (t === TILE.FLOOR) {
@@ -631,6 +671,11 @@ export class Game {
 
     if (Math.abs(dx) + Math.abs(dy) === 1) {
       if (e.atkCd === 0) {
+        if (p.dashActive > 0) {
+          // dash中は完全無敵ですり抜ける（緊急離脱の効果。攻撃CDだけは消費させ連続dash後の反撃を抑止）
+          e.atkCd = stats.atkCdMax;
+          return;
+        }
         const dmg = p.moveEvasion > 0 ? Math.round(e.atk * (1 - MOVE_EVASION_REDUCTION)) : e.atk;
         p.hp -= dmg;
         this.metrics.damageTaken += dmg;
@@ -789,6 +834,9 @@ export class Game {
         skillDmg: this.skillDmg(),
         noise: this.player.noise,
         moveEvasion: this.player.moveEvasion,
+        dashActive: this.player.dashActive,
+        dashCd: this.player.dashCd,
+        dashCdMax: DASH_COOLDOWN,
         digging: this.player.digging ? { ...this.player.digging } : null,
         estFuelToReturn: this.estFuelToReturn(),
       },

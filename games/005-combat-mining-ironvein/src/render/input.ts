@@ -13,7 +13,7 @@ const BUY_KEYS: Record<string, UpgradeId> = {
 
 /**
  * キーボード入力を1ティック分のアクションに変換する。
- * 操作: WASD/矢印=移動・採掘（向きも保持）, Space=攻撃（直近の向き）, E=範囲攻撃, 1〜8=ショップ購入（地上フェーズ中のみ意味を持つ）
+ * 操作: WASD/矢印=移動・採掘（向きも保持）, Space=攻撃（直近の向き）, E=範囲攻撃, Q=緊急離脱(dash), 1〜8=ショップ購入（地上フェーズ中のみ意味を持つ）
  */
 export class Input {
   private pressed = new Set<string>();
@@ -24,7 +24,7 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return;
       const k = e.key.toLowerCase();
-      if ([' ', 'e', '1', '2', '3', '4', '5', '6', '7', '8'].includes(k)) {
+      if ([' ', 'e', 'q', '1', '2', '3', '4', '5', '6', '7', '8'].includes(k)) {
         this.queued.push(k);
         e.preventDefault();
       }
@@ -39,6 +39,7 @@ export class Input {
     const single = this.queued.shift();
     if (single === ' ') return { type: 'attack', dir: this.facing };
     if (single === 'e') return { type: 'skill' };
+    if (single === 'q') return { type: 'dash' };
     if (single && BUY_KEYS[single]) return { type: 'buy', item: BUY_KEYS[single] };
 
     if (this.pressed.has('w') || this.pressed.has('arrowup')) {

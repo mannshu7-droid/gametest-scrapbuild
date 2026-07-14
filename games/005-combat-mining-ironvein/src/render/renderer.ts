@@ -68,9 +68,9 @@ export class Renderer {
       ctx.fillRect(e.x * TILE_PX, row * TILE_PX - 4, TILE_PX * ratio, 3);
     }
 
-    // プレイヤー（移動回避が乗っている間は金色の縁）
+    // プレイヤー（dash中は水色、移動回避が乗っている間は金色）
     const prow = s.player.y - camTop;
-    ctx.fillStyle = s.player.moveEvasion > 0 ? '#f1c40f' : '#f5f5f5';
+    ctx.fillStyle = s.player.dashActive > 0 ? '#3498db' : s.player.moveEvasion > 0 ? '#f1c40f' : '#f5f5f5';
     ctx.fillRect(s.player.x * TILE_PX + 2, prow * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
 
     // HUD
@@ -91,7 +91,7 @@ export class Renderer {
       hudY + 36,
     );
     ctx.fillText(
-      `tick ${s.tick}  maxDepth ${s.metrics.maxDepth}  kills ${s.metrics.kills}  score ${s.metrics.score}${s.player.hasSkill ? `  skillCd ${s.player.skillCd}/${s.player.skillCdMax}` : ''}`,
+      `tick ${s.tick}  maxDepth ${s.metrics.maxDepth}  kills ${s.metrics.kills}  score ${s.metrics.score}${s.player.hasSkill ? `  skillCd ${s.player.skillCd}/${s.player.skillCdMax}` : ''}  dash(Q) ${s.player.dashActive > 0 ? 'ACTIVE' : s.player.dashCd > 0 ? `CD${s.player.dashCd}` : 'READY'}`,
       8,
       hudY + 54,
     );
