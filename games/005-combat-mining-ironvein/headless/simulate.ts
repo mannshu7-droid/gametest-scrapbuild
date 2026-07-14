@@ -102,6 +102,15 @@ class Bot {
 
   decide(s: GameState): Action {
     if (s.phase === 'shop') {
+      // v2修正: v1は「優先度リストの先頭から見て、今買える最初の項目を買う」方式だったため、
+      // skillより手前の項目(atk/hp/drill等)がmaxLevelに達するまでskillが一切候補に上がらず、
+      // 30ラン全てでskillUsesが0になっていた（コスト引き下げだけでは解決しないことを実測で確認済み）。
+      // 複数同時接敵に対する救済手段を実際に機能検証するため、Lv1だけは「買えるようになり次第」の
+      // 一度きりの特別優先で確保する（Lv2以降は通常の優先度リストに従う＝各戦略のカテゴリ傾向は維持）
+      const skillItem = s.shop.find((it) => it.id === 'skill');
+      if (skillItem && skillItem.level === 0 && skillItem.nextCost !== null && s.player.money >= skillItem.nextCost) {
+        return { type: 'buy', item: 'skill' };
+      }
       for (const id of priorityFor(this.strategy)) {
         const item = s.shop.find((it) => it.id === id);
         if (item && item.nextCost !== null && s.player.money >= item.nextCost) {
@@ -116,7 +125,10 @@ class Bot {
     // 危機的なHPなら迎撃より離脱を優先
     const critical = p.hp <= p.maxHp * 0.2;
     const adjCount = adjacentEnemyCount(s);
-    if (!critical && adjCount >= 2 && p.hasSkill && p.skillCd === 0) return { type: 'skill' };
+    // v2修正: 1マス幅の縦シャフトを掘り進む都合上、敵は基本的に進行方向(背後)の1体しか同時接敵し得ず、
+    // adjCount>=2は実測でほぼ発生しない（v1のskillUses=0はこの構造的理由が優先度リストの問題より大きかった）。
+    // skill側のダメージ効率を単体でも見合う水準へ引き上げた（下記game.ts参照）ため、単体でも使う判断に変更した
+    if (!critical && adjCount >= 1 && p.hasSkill && p.skillCd === 0) return { type: 'skill' };
     const adjDir = adjacentEnemyDir(s);
     if (!critical && adjDir) return { type: 'attack', dir: adjDir };
 
@@ -129,8 +141,20 @@ class Bot {
       (p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
     if (needsReturn) {
       const dir = bfsToSurface(s);
-      if (dir) return { type: 'move', dir };
-      if (adjDir) return { type: 'attack', dir: adjDir }; // 退路なしなら戦うしかない
+      if (dir) {
+        const [dx, dy] = DELTA[dir];
+        if (enemyAt(s, p.x + dx, p.y + dy)) {
+          // 退路上に敵がいて塞がれている: dash中ならすり抜け、発動可能ならdash、CD中なら戦って道を開ける
+          // (v1バグ#1「チョークポイント詰み」への対応。dashが数値でなく構造的に退路を保証する)
+          if (p.dashActive > 0) return { type: 'move', dir };
+          if (p.dashCd === 0) return { type: 'dash' };
+          if (adjDir) return { type: 'attack', dir: adjDir };
+        } else {
+          return { type: 'move', dir };
+        }
+      } else if (adjDir) {
+        return { type: 'attack', dir: adjDir }; // 退路なしなら戦うしかない
+      }
     }
 
     for (const dir of ['down', 'right', 'left', 'up'] as Dir[]) {
@@ -165,6 +189,7 @@ interface RunResult {
   tripsToSurface: number;
   milestonesReached: number;
   skillUses: number;
+  dashUses: number;
   fuelEmptyTicks: number;
   score: number;
 }
@@ -195,6 +220,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     tripsToSurface: s.metrics.tripsToSurface,
     milestonesReached: s.metrics.milestonesReached,
     skillUses: s.metrics.skillUses,
+    dashUses: s.metrics.dashUses,
     fuelEmptyTicks: s.metrics.fuelEmptyTicks,
     score: s.metrics.score,
   };
@@ -219,6 +245,6 @@ for (const strategy of ['mining-first', 'combat-first', 'balanced'] as Strategy[
   }
   const avg = (f: (r: RunResult) => number) => (results.reduce((a, r) => a + f(r), 0) / results.length).toFixed(1);
   console.log(
-    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDepth=${avg((r) => r.maxDepth)} avgKills=${avg((r) => r.kills)} avgOreMined=${avg((r) => r.oreMined)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgTrips=${avg((r) => r.tripsToSurface)} avgMilestones=${avg((r) => r.milestonesReached)} deaths=${results.filter((r) => r.over).length}/${results.length}`,
+    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDepth=${avg((r) => r.maxDepth)} avgKills=${avg((r) => r.kills)} avgOreMined=${avg((r) => r.oreMined)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgTrips=${avg((r) => r.tripsToSurface)} avgMilestones=${avg((r) => r.milestonesReached)} avgSkillUses=${avg((r) => r.skillUses)} avgDashUses=${avg((r) => r.dashUses)} deaths=${results.filter((r) => r.over).length}/${results.length}`,
   );
 }

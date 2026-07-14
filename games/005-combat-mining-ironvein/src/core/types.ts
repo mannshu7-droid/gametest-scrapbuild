@@ -20,6 +20,7 @@ export type Action =
   | { type: 'move'; dir: Dir }
   | { type: 'attack'; dir: Dir }
   | { type: 'skill' }
+  | { type: 'dash' }
   | { type: 'buy'; item: UpgradeId }
   | { type: 'wait' };
 
@@ -62,6 +63,7 @@ export interface Metrics {
   tripsToSurface: number;
   milestonesReached: number;
   skillUses: number;
+  dashUses: number;
   fuelEmptyTicks: number;
   score: number;
 }
@@ -93,6 +95,11 @@ export interface GameState {
     noise: number;
     /** 直近の移動直後、被ダメージ軽減が乗っている残りtick数（0なら未発動） */
     moveEvasion: number;
+    /** 緊急離脱（dash）の残り無敵・すり抜けtick数。0なら未発動 */
+    dashActive: number;
+    /** dashの残りクールダウン。0なら発動可能 */
+    dashCd: number;
+    dashCdMax: number;
     digging: Digging | null;
     /** 現在地から既に掘った床だけを通って地上へ戻るのに必要な推定燃料（BFS距離×消費率） */
     estFuelToReturn: number | null;
@@ -126,6 +133,12 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
     description: '指定方向に隣接する敵1体を攻撃（単体）。クールダウン中は不発',
   },
   { type: 'skill', params: {}, description: '範囲攻撃: 周囲8方向すべての隣接敵にダメージ。習得済み・クールダウン明けのみ発動' },
+  {
+    type: 'dash',
+    params: {},
+    description:
+      '緊急離脱: 発動後は数tickの間、敵のいるマスへも無敵ですり抜け移動でき、被ダメージを受けない。固定HPコストを消費し、クールダウン中は不発。退路が敵に塞がれた詰みを構造的に回避する手段（購入不要・常時使用可）',
+  },
   {
     type: 'buy',
     params: { item: 'drill|capacity|fuel|atk|hp|atkspeed|skill|muffler' },
