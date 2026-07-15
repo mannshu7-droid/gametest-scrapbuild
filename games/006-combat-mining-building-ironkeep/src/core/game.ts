@@ -29,7 +29,7 @@ const NOISE_MAX = 100;
 const NOISE_DIG_GAIN = 6;
 const NOISE_DECAY_IDLE = 3;
 const NOISE_DECAY_MOVE = 10;
-const SPAWN_BASE = 0.003;
+const SPAWN_BASE = 0.0042; // v1指摘#2: 0.003→0.0042。湧き頻度を上げチョークポイント遭遇を増やす
 const SPAWN_NOISE_COEF = 0.0004;
 
 const MOVE_EVASION_TICKS = 2;
@@ -41,7 +41,7 @@ const DASH_HP_COST = 12;
 
 const LABOR_INCOME_INTERVAL = 15;
 const LABOR_INCOME_AMOUNT = 1;
-const SURFACE_HP_REGEN = 3;
+const SURFACE_HP_REGEN = 2; // v1指摘#2: 3→2。死亡率0%の安全すぎるバランスを是正するため地上回復を鈍らせる
 const MILESTONE_BONUS_PER_BAND = 30;
 
 const SPAWN_RADIUS_MIN = 3;
@@ -51,9 +51,9 @@ const SPAWN_RADIUS_MAX = 7;
 const PROP_BASE_HP = 30;
 const PROP_HP_PER_LEVEL = 15;
 const BUILD_COOLDOWN = 10;
-const BRIDGE_BASE_COST = 10;
-const BRIDGE_TIER_COST = 6;
-const BRIDGE_BAND_COST = 2;
+const BRIDGE_BASE_COST = 12;
+const BRIDGE_TIER_COST = 7;
+const BRIDGE_BAND_COST = 4; // v1指摘#4: 2→4。連続する壁を迂回橋だけで踏破する戦略の総コストを引き上げ、drill投資との差をつける
 const BARRICADE_BASE_COST = 14;
 const BARRICADE_BAND_COST = 2;
 
@@ -103,13 +103,13 @@ function oreValue(type: TileId, band: number): number {
   return Math.round(base * (1 + band * 0.12));
 }
 function bandMult(band: number): number {
-  return 1 + band * 0.35;
+  return 1 + band * 0.5; // v1指摘#2: 0.35→0.5。深部の湧き頻度を引き上げる
 }
 function depthMult(band: number): number {
-  return 1 + band * 0.2;
+  return 1 + band * 0.25; // v1指摘#2: 0.2→0.25。深部の敵HP/ATKを引き上げる
 }
 function enemyCap(band: number): number {
-  return Math.min(2 + Math.floor(band / 3), 6);
+  return Math.min(2 + Math.floor(band / 2), 8); // v1指摘#2/#3: 深部で同時接敵数を増やしバリケードの必要性を作る
 }
 
 /** バンドごとの出現重み。深いほど土が減り、鉱石が増える */
