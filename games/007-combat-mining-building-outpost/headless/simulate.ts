@@ -125,11 +125,37 @@ function priorityFor(strategy: Strategy): UpgradeId[] {
 const RETURN_HP_THRESHOLD = 0.25;
 const RESUME_DIVE_HP_THRESHOLD = 0.6;
 
+/**
+ * v2追加（バグ#3対応）: 「1つ下の行(y+1、次のband)」全16列を見て、現在の採掘威力で1列でも掘れるか、
+ * 既に床/支保工/前線基地で通行可能かを調べる。1列も無ければband境界の完全な壁（実測: drillLevel0だと
+ * band2は全タイルが要求採掘威力2以上でband1のdrillPower1では1列も掘れない）とみなし、
+ * 抜けるのに必要な最安の迂回橋コストを返す（1つでもあれば0=壁ではない）。
+ * 直前の実装は同じ行(y)内のleft/rightも「進行可能」と誤判定していたため、同じband内を
+ * 横移動できることを理由に壁を壁と認識できず、前線基地を建てた直後にband境界の壁へ当たって
+ * 「基地と壁の間を無限往復するだけで進行が完全停止する」個体を解消できていなかった
+ */
+function minEscapeBridgeCost(s: GameState, costMult: number): number {
+  const ny = s.player.y + 1;
+  if (ny >= s.map.h) return 0;
+  const band = bandAt(ny);
+  let minCost = Infinity;
+  for (let x = 0; x < s.map.w; x++) {
+    const t = tileAt(s, x, ny);
+    if (t === null) continue;
+    if (t === TILE.FLOOR || t === TILE.PROP || t === TILE.OUTPOST) return 0;
+    if (requiredDrillPower(t as TileId, band) <= s.player.drillPower) return 0;
+    minCost = Math.min(minCost, bridgeCost(t as TileId, band, costMult));
+  }
+  return Number.isFinite(minCost) ? minCost : 0;
+}
+
 class Bot {
   private awaitingHeal = false;
   /** 直近のmineフェーズで観測した「今building可能な位置に前線基地を建てるとしたらの費用」。
    * shopフェーズでの購入判断時にこれを現金の予約分として扱い、outpost建設の機会を潰さないようにする */
   private outpostReserve = 0;
+  /** v2追加: 壁に当たっている間だけ、迂回橋代を通常購入より優先して確保する */
+  private wallReserve = 0;
   /** 007新規: balanced-no-outpost はA/B比較用に前線基地を一切建てない */
   private readonly buildsOutposts: boolean;
 
@@ -139,7 +165,7 @@ class Bot {
 
   private tryBuy(s: GameState): Action | null {
     const bridgeReserve = this.strategy === 'bridge-reliant' ? BRIDGE_RELIANT_RESERVE : 0;
-    const reserve = bridgeReserve + (this.buildsOutposts ? this.outpostReserve : 0);
+    const reserve = Math.max(bridgeReserve, this.wallReserve) + (this.buildsOutposts ? this.outpostReserve : 0);
     const skillItem = s.shop.find((it) => it.id === 'skill');
     if (
       skillItem &&
@@ -161,13 +187,17 @@ class Bot {
   decide(s: GameState): Action {
     // depthSinceLastBaseだけを条件に予約すると、貧しいうちから毎トリップ「今日はどうせ届かない貯金」に
     // 全予算を凍結し、序盤の安い購入すら一切できず永久に成長しないままの停滞（実測で確認済み）を招く。
-    // 「既にコストの4割以上貯まっている」を条件に加えることで、貧しいうちは通常どおり買い物して
-    // 成長し、ある程度貯まった後だけ前線基地のために手元の資金を守るようにする
-    if (s.phase === 'mine' && this.buildsOutposts) {
+    // 「既にコストの一定割合貯まっている」を条件に加えることで、貧しいうちは通常どおり買い物して
+    // 成長し、ある程度貯まった後だけ前線基地のために手元の資金を守るようにする。
+    // v2修正: 従来は`s.phase==='mine'`のときだけ再計算していたため、基地到着直後（鉱石売却で所持金が
+    // 一気に増えた直後）のshopフェーズでは売却前の古い（低い）所持金を基準にした予約額のまま買い物してしまい、
+    // 大口の売却益がそのまま通常購入に溶けて一向に貯まらないバグがあった。phase判定を外し毎tick再計算する
+    if (this.buildsOutposts) {
       const cost = s.player.nextOutpostCost;
-      const closeEnough = s.player.depthSinceLastBase >= OUTPOST_MIN_GAP * 0.3 && s.player.money >= cost * 0.4;
+      const closeEnough = s.player.depthSinceLastBase >= OUTPOST_MIN_GAP * 0.2 && s.player.money >= cost * 0.25;
       this.outpostReserve = closeEnough ? cost : 0;
     }
+    this.wallReserve = minEscapeBridgeCost(s, buildCostMultOf(engineeringLevel(s)));
 
     if (s.phase === 'shop') {
       if (this.awaitingHeal) {

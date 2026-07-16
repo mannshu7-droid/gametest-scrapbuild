@@ -61,10 +61,12 @@ const BARRICADE_BAND_COST = 2;
 // ---- 007新規: 前線基地（OUTPOST）関連定数 ----
 const OUTPOST_MIN_GAP = 25; // 直前の基地からこのマス数以上深く進まないと次の基地を建てられない
 // v1実測: 20000tick中の総稼得金(moneyEarned)は50〜100程度に留まる経済規模（006から不変）のため、
-// 当初仮説値150は「実質建てられない」水準だった。単発の迂回橋(12)より明確に高いが、
-// 数トリップの貯金で届く50に調整した
-const OUTPOST_BASE_COST = 50;
-const OUTPOST_BAND_COST_MULT = 0.35; // band1で+35%、band4で+140%…と深いほど加速度的に高くなる
+// 当初仮説値150は「実質建てられない」水準だった。単発の迂回橋(12)より明確に高い50へ引き下げたが、
+// v1レビューの時点でなお「ブラウザ6000tickセッションではP01/P02とも1本も建てられない」という
+// 重大指摘が残った。v2でさらに20へ引き下げ、band倍率も0.35→0.15へ緩め、深部でも加速度的に
+// 高額化しすぎないようにした（band1で+15%、band4で+60%程度）
+const OUTPOST_BASE_COST = 20;
+const OUTPOST_BAND_COST_MULT = 0.15;
 const OUTPOST_SAFE_RADIUS = 2; // チェビシェフ距離。地上のSAFE_ZONE_Yと同格の安全圏
 const OUTPOST_SCORE_BONUS = 20;
 
@@ -457,11 +459,35 @@ export class Game {
     const band = bandAt(Math.max(1, this.player.y));
     return outpostCost(band);
   }
+  /**
+   * v2追加（バグ#3対応）: 建設地点のすぐ先(y+1の行)全16列が、建設費用を払った「後」の所持金でも
+   * 一切突破できない完全な壁になっていないかを確認する。実測で「drillPower不足の壁の直前に前線基地を
+   * 建て、以後は基地と壁の間を無限に往復するだけで進行が完全停止する」個体を検出した。原因は、
+   * 建設直後にshopフェーズで所持金をほぼ使い切るボットの挙動と、壁の手前だけを見る建設可否判定が
+   * 「理論上は迂回橋で抜けられるが、建設費用を払った時点でもう迂回橋代が残っていない」ケースを
+   * 見逃していたこと。建設費用支払い後に残る所持金で判定することで、「安全圏は確保できたが
+   * 一歩も進めない」という無意味な停滞の固定化を未然に防ぐ
+   */
+  private hasForwardProgressBelow(y: number, moneyAfterCost: number): boolean {
+    const ny = y + 1;
+    if (ny >= H) return true; // 最深部到達済みなら壁の心配自体が無意味
+    const band = bandAt(ny);
+    const costMult = this.buildCostMult();
+    for (let x = 0; x < W; x++) {
+      const t = this.tiles[ny * W + x] as TileId;
+      if (t === TILE.FLOOR || t === TILE.PROP || t === TILE.OUTPOST) return true;
+      if (requiredDrillPower(t, band) <= this.drillPower()) return true;
+      if (moneyAfterCost >= bridgeCost(t, band, costMult)) return true;
+    }
+    return false;
+  }
   private canBuildOutpost(): boolean {
     if (this.player.y === 0) return false;
     if (this.tileAt(this.player.x, this.player.y) !== TILE.FLOOR) return false;
     if (this.depthSinceLastBase() < OUTPOST_MIN_GAP) return false;
-    return this.player.money >= this.nextOutpostCostValue();
+    const cost = this.nextOutpostCostValue();
+    if (this.player.money < cost) return false;
+    return this.hasForwardProgressBelow(this.player.y, this.player.money - cost);
   }
 
   // ---- メインループ: 1ティック進める ----
