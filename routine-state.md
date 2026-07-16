@@ -6,8 +6,8 @@
 
 - サイクル: 6
 - 要素: 組み合わせ（戦闘×採掘×建築、深部拠点/前線基地による目標再生成が主眼）
-- 次に行う回: **1回目（BUILD+REVIEW）**
-- 対象ゲーム番号: 007-combat-mining-building-outpost（暫定名。仕様書作成時に確定）
+- 次に行う回: **2回目（FIX+REVIEW）**
+- 対象ゲーム番号: 007-combat-mining-building-outpost
 
 ## 実行履歴
 
@@ -58,6 +58,7 @@ v2と完全に同一の結果（死亡2/80、avgBridges/avgBarricades等すべ�
 specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更を見送った項目」として追記した。レビューは
 書かず（3回目FIX onlyの規約通り）、両指摘とも解消済みとしてfinal（次回）へ引き継ぐ | (本PR) |
 | 2026-07-16 | 5 | 4（FINAL REVIEW） | 006-combat-mining-building-ironkeepの総括レビュー（reviews/006-combat-mining-building-ironkeep-final.md）を作成。20シード×4戦略のヘッドレス再検証でv2・v3と完全に同一の結果（死亡2/80、avgBridges/avgMaxDepth等すべて一致）を再確認し、v3以降ソースコード無変更であることを裏付けた。bridge-reliant戦略（drill投資ゼロ）がavgMaxDepth40.5でmining-first(43.9)と遜色ない深さに到達し続けており、迂回橋のコアファン仮説が5回の検証を通じて一貫して成立していることを確認。ブラウザAIPでP01(seed301)/P02(seed302)を6000tickフルセッション実行し、両者とも死亡せず完走（P01 finalHp84/100・maxDepth39、P02 finalHp143/160・maxDepth40）、P02は今回バリケードを帰路（depth4）で使用する新しいパターンを確認した。判定はFIX完了・本命ゲーム採用を推奨。002〜005で確立した5つの共通パターン（常設ショップ・安全マージン数値公開・固定範囲保護・詰みからの脱出手段・緊急離脱dash）に加え「建築を第三の選択肢にする（迂回橋・バリケード）」を第6のパターンとして確立したと総括する一方、005から持ち越されたP02のA6課題（maxDepth40の壁到達後に次の目標が生まれない）は006でも未解消のまま残ったことを明記。次サイクルの提案として「深部拠点（前線基地）による目標の再生成」を最優先課題とする007-combat-mining-building-outpost（暫定名）を提案し、routine-state.mdをサイクル6・run1へ進めた。games/README.mdの状態列を更新。screenshot取得は9サイクル連続タイムアウト（既知の環境制約） | (本PR) |
+| 2026-07-16 | 6 | 1（BUILD+REVIEW） | 007-combat-mining-building-outpost（006-combat-mining-building-ironkeepの最終確定バランスをベースに、前線基地(OUTPOST)による「目標再生成」システムを新規追加）を新規実装。006最終レビューの提案（深部拠点/前線基地を最優先課題とすること）をspecに反映し、前線基地は「直前の基地から一定深さ(OUTPOST_MIN_GAP=25マス)以上進み、かつ建設費用を払えば、現在地が新しい地上（帰還先・ショップ・回復地点）になる」1種類のみの最小構成とした。実装中にヘッドレスシミュレーションで、初期仮説値OUTPOST_BASE_COST=150がこの経済規模（20000tick全体の総稼得金70〜120程度）に対し過大で、ボットが「建設費用を貯めるために通常購入を全停止→成長が止まり収入も伸びない」という貧困の罠に陥り全戦略でavgOutposts=avgUpgradesBought=0に固着する致命的なバランス崩壊を検出し、コストを150→50へ引き下げ、ボットの貯蓄ロジックも「コストの4割貯まってから予約」というヒステリシス方式へその場で応急修正した（詳細はspec.mdの「実装中に判明したバランス調整」節）。それでも20シード×5戦略（006由来の4戦略+A/B比較用のbalanced-no-outpost）のヘッドレス比較で、前線基地を実際に活用できたmining-first/balancedはavgMaxDepthが58.3/56.5(no-outpost対照群39.9比+42〜46%)まで伸び002〜006で一度も破れなかった「深さ40の壁」を明確に超えた一方、avgOutposts自体は最大でも0.8本と低頻度に留まり、ブラウザAIPでP01(seed301)/P02(seed302)を6000tickプレイしたところ両者とも前線基地を1本も建てられなかった（深さ条件は早期に満たすが所持金がコストの1/6程度で頭打ち）。加えてbridge-reliant戦略でavgTrips=919.8という突出値を検出し、「drillPower不足の壁の直前に前線基地を建て、以後は基地と壁の間を往復するだけで進行が完全停止する」新種の停滞パターンを確認した。reviews/007-combat-mining-building-outpost-v1.mdに記載し判定FIX、v2で建設費用のさらなる引き下げ（または収入源の追加）と壁直前建設による停滞固定化への対処を最優先修正予定 | (本PR) |
 
 ## 備考・引き継ぎ事項
 
