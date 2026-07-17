@@ -177,6 +177,21 @@ class Bot {
     ) {
       return { type: 'buy', item: 'skill' };
     }
+    // v2追加（008 v1指摘#2対応）: drillはbaseCost30と全アイテム中最高額なうえ、wallReserve/outpostReserveが
+    // 常に上乗せされるため「money - 30 >= reserve」が満たされるまで所持金が育たず、6000tickのセッション全体で
+    // 一度もdrillLevelが上がらない個体が確認された（迂回橋の都度払いが恒久投資の代替として機能しすぎた副作用）。
+    // bridge-reliant戦略はdrill非投資自体がA/B比較の検証対象のため対象外とし、それ以外の戦略では初回の
+    // drill購入だけはwallReserve/outpostReserveを無視してよいことにし、投資の第一歩を踏み出せるようにする
+    const drillItem = s.shop.find((it) => it.id === 'drill');
+    if (
+      this.strategy !== 'bridge-reliant' &&
+      drillItem &&
+      drillItem.level === 0 &&
+      drillItem.nextCost !== null &&
+      s.player.money >= drillItem.nextCost
+    ) {
+      return { type: 'buy', item: 'drill' };
+    }
     for (const id of priorityFor(this.strategy)) {
       const item = s.shop.find((it) => it.id === id);
       if (item && item.nextCost !== null && s.player.money - item.nextCost >= reserve) {

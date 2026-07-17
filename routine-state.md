@@ -6,7 +6,7 @@
 
 - サイクル: 7
 - 要素: 本命ゲーム統合実装（新要素追加ではなく002〜007で確立した7パターンの磨き上げ。007final提案参照）
-- 次に行う回: **2回目（FIX+REVIEW）**
+- 次に行う回: **3回目（FIX only）**
 - 対象ゲーム番号: 008-flagship-frontierhold
 
 ## 実行履歴
@@ -63,6 +63,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-17 | 6 | 3（FIX only） | 007-combat-mining-building-outpostのv2残課題（band境界の壁のすぐ隣で小刻みな往復を続ける軽度の停滞パターン、combat-first戦略のavgTripsが261.1→374.4に上昇・P02ブラウザセッションでtripsToSurface=269）に対応。原因はv2で追加した`wallReserve`（壁を検知したら迂回橋代を優先確保する仕組み）を`s.phase`を問わず毎tick再計算していたことで、「深部の壁で足止め→撤退して基地(shopフェーズ)に戻る」瞬間にwallReserveが基地の足元の（とっくに通行可能な）行を見て0にリセットされ、実際にブロックされている深部の壁の存在をshopフェーズ側が忘れる構造になっていたと判明（`headless/simulate.ts`のボットロジックのみが原因で、`src/core/game.ts`本体は無関係だったため変更なし）。修正: wallReserveの再計算を`s.phase==='mine'`のときだけに限定し、shopフェーズでは直前にブロックされた地点の値を保持するようにした。加えて、shopフェーズで購入するものが無く、かつ保持しているwallReserveより所持金が少ない場合は無駄に潜行して即撤退するのではなく基地でwaitして資金が貯まるのを待つよう変更した（基地滞在中はLABOR_INCOMEで資金が必ず増え続けるため待機自体は新種の停滞にならない）。20シード×5戦略のヘッドレス比較でcombat-first戦略のavgTripsが374.4→217.2（-42%）まで改善し、mining-first（158.3→145.7）・balanced（214.7→207.6）でも同様の改善を確認、avgMaxDepth・avgUpgradesBought・deaths（7/20, 0/20, 2/20, 4/20, 0/20）はいずれもほぼ変化なし（誤差程度）で新たな死亡・停滞パターンは発生しなかった。npm run build / npm run simulateとも正常終了。package.jsonのversionを0.3.0へ、spec.mdにv3 FIX内容を追記、games/README.mdの状態列を更新。レビューは書かず（3回目FIX onlyの規約通り）、final（次回）で総括すること |
 | 2026-07-17 | 6 | 4（FINAL REVIEW） | 007-combat-mining-building-outpostの総括レビュー（reviews/007-combat-mining-building-outpost-final.md）を作成。20シード×5戦略のヘッドレス再検証でv2・v3と完全に同一の結果を再確認しv3以降ソースコード無変更であることを裏付けた（前線基地を活用できたmining-first/balancedがno-outpost対照群比+72〜78%のavgMaxDepthを維持）。ブラウザAIPでは`headless/simulate.ts`のv3ボットロジックをJS移植してP01(seed301)/P02(seed302)を6000tickフル実行し、両者とも死亡せず前線基地1本の建設に成功した一方、**P02セッションでtick1000〜6000（セッションの約83%）y=41のband境界の壁に固着し続ける事例を新規発見**。tripsToSurfaceはv2の269→final73へ改善したが「往復の回数が減っただけで壁を抜けられない根本原因は解消していない」ことが判明し、v2/v3で「軽度」と見積もっていたよりも実際の停滞は深刻と判定した。原因を`hasForwardProgressBelow()`が「理論上突破可能か」の二値しか見ておらず「実際にどれだけの時間で突破できるか」を無視している設計限界と診断し、ボットの近視眼的探索だけが原因ではないと結論づけた。判定はFIX完了・本命ゲーム採用を推奨としつつ、この残課題（#3）を本命ゲーム統合時の最優先対応事項として明記。games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run1（本命ゲーム統合実装、新要素追加ではなく002〜007の7パターンの磨き上げ）へ進めた |
 | 2026-07-18 | 7 | 1（BUILD+REVIEW） | 008-flagship-frontierhold（007-combat-mining-building-outpostのコードベースをそのまま土台にした本命ゲーム統合実装。新要素の追加は行わず、007final #3で最優先課題とされた「前線基地を壁のすぐ隣に建てると迂回橋代が貯まるまで長時間停滞する」問題の解消に着手）を新規実装。修正は2点: (1) `src/core/game.ts`の`hasForwardProgressBelow()`に、即座に突破できなくても前線基地に居座りLABOR_INCOMEで稼げば`OUTPOST_MAX_WAIT_TICKS`(400tick)以内に迂回橋代が届くかを判定する「待ち時間」の概念を追加し、それを超える配置では建設自体を拒否するようにした。(2) `headless/simulate.ts`のボットが持つ`wallReserve`（壁を検知したら迂回橋代を優先確保する仕組み）の再計算バグを修正: v3実装は壁を検知した後、撤退のため上に戻る途中でも毎tick「現在地の1つ下の行」を再評価しており、既に通行済みの浅い行を見て`wallReserve`が0にリセットされてしまっていた。壁の行を`wallRow`として明示的に記憶し、実際にその行へ到達・通過するまで保持するよう変更した。20シード×5戦略のヘッドレス比較で、002〜007を通じて一度も破れなかった「band1境界の壁」をcombat-first（avgMaxDepth41.6→70.5）・bridge-reliant（42.9→62.8、死亡4/20→0/20）が初めて明確に突破したことを確認。ブラウザAIPでP01(seed301)/P02(seed302)を6000tickプレイし、y座標の時系列トレースで007finalが検出した「y=41に固着し続ける」パターンが「潜るたびに深度が単調に伸びるサイクル」に変わったことを確認した（P01 maxDepth42→52・tripsToSurface58→29、P02 maxDepth42→56・tripsToSurface73→28、両者とも死亡なし完走）。一方で新規の中程度課題として、修正後は「迂回橋の都度払い」が効率的すぎるためP01(drill最優先設定)・P02とも6000tick終了時点でdrillLevelが0のまま変化しないことを発見し、005final以来の「drill投資インセンティブの弱さ」が形を変えて再発していると判定した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-v1.md作成、判定FIX。games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-07-18 | 7 | 2（FIX+REVIEW） | 008-flagship-frontierholdのv1指摘#2（中・迂回橋の都度払いがdrill投資の代替として機能しすぎ、P01/P02とも6000tickの全セッションでdrillLevelが0のまま変化しなかった）に対応。`headless/simulate.ts`の`tryBuy()`に、既存のskill初回購入特例と対になる「drill初回購入だけはwallReserve/outpostReserveを無視してよい」特例を追加した（bridge-reliant戦略はdrill非投資がA/B比較の検証対象のため対象外）。`src/core/game.ts`（ゲーム本体）は無変更。20シード×5戦略のヘッドレス比較で、drillが優先度中〜後方にあるcombat-firstが最も恩恵を受け、avgMaxDepth70.5→81.1（+15%）・avgUpgradesBought5.2→9.0（+73%）まで改善した一方、bridge-reliant・balanced-no-outpost（対照群）は完全に無変化で修正の副作用がないことを確認した。あわせてv1指摘#3（軽微・mining-first死亡率7/20→9/20）を再調査し、死亡9シード全てが深部（maxDepth57〜160）で発生していることから「到達深度に見合わない積極的すぎる潜行」という自然な難易度上昇と原因を特定、005final・006v2の前例に倣いバランス調整は見送った。ブラウザAIPでP01(seed301)/P02(seed302)を6000tick再プレイし、両者ともdrillPowerが実際に上昇（P01 1→4、P02 1→2）したことを確認した一方、P01はv1では完走していたのにv2ではdrill投資により早期に深部(depth85)へ到達した結果、atk/hp後回しの生存力不足でtick4524に死亡する新規パターンを発見した（003finalが確立した「ビルド次第で生死が分かれる」パターンの一種と解釈し致命とは判断せず）。P02は逆にmaxDepth91まで到達しながら死亡せず完走（finalHp180/180満タン）し、生存力優先ビルドの合理性を裏付けた。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-v2.md作成、判定FIX。package.jsonのversionを0.2.0へ、spec.mdにv2修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
@@ -297,3 +298,24 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
   3) サイクル7は4回で1サイクル。2回目はFIX+REVIEW（上記の優先度順に致命・重大は必須、今回は
      致命・重大指摘がないため中項目から着手可）、3回目はFIX only、4回目にFINAL REVIEWで総括し
      次サイクルへの提案を行うこと
+  → 上記1)2)はv2（reviews/008-flagship-frontierhold-v2.md）で対応済み: 1)`tryBuy()`にdrill初回購入の
+    reserve除外特例を追加し、combat-firstのavgMaxDepth+15%・avgUpgradesBought+73%、ブラウザAIPの
+    P01/P02双方でdrillPowerが実際に上昇（1→4、1→2）したことを確認した。2)死亡9シード全てが深部
+    （maxDepth57〜160）で発生していることから自然な難易度上昇と原因を特定し、バランス調整は見送った
+- 008-flagship-frontierhold v2（reviews/008-flagship-frontierhold-v2.md）から3回目（FIX only）への
+  引き継ぎ事項:
+  1) 【中・新規】v2のdrill特例修正により、P01(seed301, drill最優先)がv1では6000tick完走していたのに
+     対しv2ではtick4524で死亡する新規パターンが発生した。drill投資で早期にmaxDepth85（深部）へ
+     到達した結果、atk/hp強化が後回しになるP01のビルドが深部の敵の強さに見合う打たれ強さを
+     持たないまま深く進みすぎたことが原因。003finalが確立した「ビルド次第で生死が分かれる」
+     パターンの一種と解釈でき致命ではないが、「drill最優先」という一見合理的な優先度設定が
+     実は最もリスクの高いビルドになっている点は、実プレイヤー向けのUIヒント（危険域への接近を
+     示す警告等）や軽微なバランス調整（深部の敵の強さの伸び方を緩やかにする等）で対応する余地が
+     ないか、3回目またはfinalで検討すること。対応必須ではなく、費用対効果を見て判断してよい
+  2) 【軽微・継続】mining-first戦略の死亡率9/20は死因（深すぎる潜行に見合う生存力不足）を
+     特定済みで、005final・006v2の前例に倣い意図的にバランス調整を見送っている。同じ判断枠組みで
+     良いか、本命ゲーム統合という文脈（新規プレイヤーが初見で詰みやすい印象を与えないか）を踏まえ
+     finalで再検討すること
+  3) サイクル7は4回で1サイクル。3回目はFIX only（レビューなし、修正内容はPR本文・spec.mdに記載）、
+     4回目にFINAL REVIEWで総括し、本命ゲーム統合実装（サイクル7）全体の完成度評価と次サイクルへの
+     提案を行うこと
