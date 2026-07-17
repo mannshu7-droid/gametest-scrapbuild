@@ -197,7 +197,16 @@ class Bot {
       const closeEnough = s.player.depthSinceLastBase >= OUTPOST_MIN_GAP * 0.2 && s.player.money >= cost * 0.25;
       this.outpostReserve = closeEnough ? cost : 0;
     }
-    this.wallReserve = minEscapeBridgeCost(s, buildCostMultOf(engineeringLevel(s)));
+    // v3修正（バグ#3残存パターン対応）: v2まではshopフェーズでも毎tick再計算していたため、
+    // 「深部の壁で足止めされて撤退→基地(shopフェーズ)に戻った瞬間、wallReserveが基地の足元の
+    // （とっくに通行可能な）行を見て0にリセットされる」ことで、実際にブロックされている深部の壁の
+    // 存在をshopフェーズ側が忘れてしまい、資金不足のまま何度も同じ壁へ突っ込んでは即撤退する
+    // 「小刻みな往復」を引き起こしていた。mineフェーズ（実際にその深さにいる間）でのみ再計算し、
+    // shopフェーズでは直前にブロックされた地点のwallReserveを保持することで、資金が貯まるまで
+    // 基地で待機できるようにする
+    if (s.phase === 'mine') {
+      this.wallReserve = minEscapeBridgeCost(s, buildCostMultOf(engineeringLevel(s)));
+    }
 
     if (s.phase === 'shop') {
       if (this.awaitingHeal) {
@@ -206,7 +215,14 @@ class Bot {
         }
         this.awaitingHeal = false;
       }
-      return this.tryBuy(s) ?? { type: 'move', dir: 'down' };
+      const buy = this.tryBuy(s);
+      if (buy) return buy;
+      // 直前のmineフェーズで壁に当たっていて、迂回橋代がまだ貯まっていないなら、
+      // 「潜行→壁で足止め→即帰還」という無駄な小刻みな往復（tripsToSurfaceを浪費するだけで
+      // 何も進展しない）を作らず、基地で待機して資金が貯まるのを待つ。基地滞在中はLABOR_INCOMEで
+      // 資金が必ず増え続けるため、待機自体が新種の停滞（凍結）にはならない
+      if (this.wallReserve > 0 && s.player.money < this.wallReserve) return { type: 'wait' };
+      return { type: 'move', dir: 'down' };
     }
 
     const p = s.player;
