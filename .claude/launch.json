@@ -42,6 +42,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/007-combat-mining-building-outpost", "run", "dev", "--", "--port", "5179"],
       "port": 5179
+    },
+    {
+      "name": "frontierhold",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/008-flagship-frontierhold", "run", "dev", "--", "--port", "5180"],
+      "port": 5180
     }
   ]
 }
