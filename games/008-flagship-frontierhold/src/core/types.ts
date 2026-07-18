@@ -134,6 +134,10 @@ export interface GameState {
     nextOutpostCost: number;
     /** 今この場所に前線基地を建てられるか（床タイル上・間隔条件・所持金すべて満たす） */
     canBuildOutpost: boolean;
+    /** 現在地の深さの敵に対して、目安として耐えられるとされる最大HP（平均的な敵の一撃×5発分） */
+    recommendedHp: number;
+    /** maxHpがrecommendedHpを下回っている度合い。'safe'=recommendedHp以上、'caution'=70%以上100%未満、'danger'=70%未満 */
+    combatRiskLevel: 'safe' | 'caution' | 'danger';
   };
   map: {
     w: number;

@@ -134,6 +134,14 @@ export class Renderer {
       8,
       hudY + 90,
     );
+    const riskColor = { safe: '#7dffb0', caution: '#f1c40f', danger: '#e74c3c' }[s.player.combatRiskLevel];
+    const riskLabel = { safe: '安全', caution: '注意', danger: '危険' }[s.player.combatRiskLevel];
+    ctx.fillStyle = riskColor;
+    ctx.fillText(
+      `この深さの目安HP ${s.player.recommendedHp}（現在maxHP ${s.player.maxHp}） [${riskLabel}]`,
+      8,
+      hudY + 108,
+    );
     ctx.fillStyle = '#fff';
 
     if (s.phase === 'shop') {

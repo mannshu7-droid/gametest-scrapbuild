@@ -6,7 +6,7 @@
 
 - サイクル: 7
 - 要素: 本命ゲーム統合実装（新要素追加ではなく002〜007で確立した7パターンの磨き上げ。007final提案参照）
-- 次に行う回: **3回目（FIX only）**
+- 次に行う回: **4回目（FINAL REVIEW）**
 - 対象ゲーム番号: 008-flagship-frontierhold
 
 ## 実行履歴
@@ -64,6 +64,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-17 | 6 | 4（FINAL REVIEW） | 007-combat-mining-building-outpostの総括レビュー（reviews/007-combat-mining-building-outpost-final.md）を作成。20シード×5戦略のヘッドレス再検証でv2・v3と完全に同一の結果を再確認しv3以降ソースコード無変更であることを裏付けた（前線基地を活用できたmining-first/balancedがno-outpost対照群比+72〜78%のavgMaxDepthを維持）。ブラウザAIPでは`headless/simulate.ts`のv3ボットロジックをJS移植してP01(seed301)/P02(seed302)を6000tickフル実行し、両者とも死亡せず前線基地1本の建設に成功した一方、**P02セッションでtick1000〜6000（セッションの約83%）y=41のband境界の壁に固着し続ける事例を新規発見**。tripsToSurfaceはv2の269→final73へ改善したが「往復の回数が減っただけで壁を抜けられない根本原因は解消していない」ことが判明し、v2/v3で「軽度」と見積もっていたよりも実際の停滞は深刻と判定した。原因を`hasForwardProgressBelow()`が「理論上突破可能か」の二値しか見ておらず「実際にどれだけの時間で突破できるか」を無視している設計限界と診断し、ボットの近視眼的探索だけが原因ではないと結論づけた。判定はFIX完了・本命ゲーム採用を推奨としつつ、この残課題（#3）を本命ゲーム統合時の最優先対応事項として明記。games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run1（本命ゲーム統合実装、新要素追加ではなく002〜007の7パターンの磨き上げ）へ進めた |
 | 2026-07-18 | 7 | 1（BUILD+REVIEW） | 008-flagship-frontierhold（007-combat-mining-building-outpostのコードベースをそのまま土台にした本命ゲーム統合実装。新要素の追加は行わず、007final #3で最優先課題とされた「前線基地を壁のすぐ隣に建てると迂回橋代が貯まるまで長時間停滞する」問題の解消に着手）を新規実装。修正は2点: (1) `src/core/game.ts`の`hasForwardProgressBelow()`に、即座に突破できなくても前線基地に居座りLABOR_INCOMEで稼げば`OUTPOST_MAX_WAIT_TICKS`(400tick)以内に迂回橋代が届くかを判定する「待ち時間」の概念を追加し、それを超える配置では建設自体を拒否するようにした。(2) `headless/simulate.ts`のボットが持つ`wallReserve`（壁を検知したら迂回橋代を優先確保する仕組み）の再計算バグを修正: v3実装は壁を検知した後、撤退のため上に戻る途中でも毎tick「現在地の1つ下の行」を再評価しており、既に通行済みの浅い行を見て`wallReserve`が0にリセットされてしまっていた。壁の行を`wallRow`として明示的に記憶し、実際にその行へ到達・通過するまで保持するよう変更した。20シード×5戦略のヘッドレス比較で、002〜007を通じて一度も破れなかった「band1境界の壁」をcombat-first（avgMaxDepth41.6→70.5）・bridge-reliant（42.9→62.8、死亡4/20→0/20）が初めて明確に突破したことを確認。ブラウザAIPでP01(seed301)/P02(seed302)を6000tickプレイし、y座標の時系列トレースで007finalが検出した「y=41に固着し続ける」パターンが「潜るたびに深度が単調に伸びるサイクル」に変わったことを確認した（P01 maxDepth42→52・tripsToSurface58→29、P02 maxDepth42→56・tripsToSurface73→28、両者とも死亡なし完走）。一方で新規の中程度課題として、修正後は「迂回橋の都度払い」が効率的すぎるためP01(drill最優先設定)・P02とも6000tick終了時点でdrillLevelが0のまま変化しないことを発見し、005final以来の「drill投資インセンティブの弱さ」が形を変えて再発していると判定した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-v1.md作成、判定FIX。games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-07-18 | 7 | 2（FIX+REVIEW） | 008-flagship-frontierholdのv1指摘#2（中・迂回橋の都度払いがdrill投資の代替として機能しすぎ、P01/P02とも6000tickの全セッションでdrillLevelが0のまま変化しなかった）に対応。`headless/simulate.ts`の`tryBuy()`に、既存のskill初回購入特例と対になる「drill初回購入だけはwallReserve/outpostReserveを無視してよい」特例を追加した（bridge-reliant戦略はdrill非投資がA/B比較の検証対象のため対象外）。`src/core/game.ts`（ゲーム本体）は無変更。20シード×5戦略のヘッドレス比較で、drillが優先度中〜後方にあるcombat-firstが最も恩恵を受け、avgMaxDepth70.5→81.1（+15%）・avgUpgradesBought5.2→9.0（+73%）まで改善した一方、bridge-reliant・balanced-no-outpost（対照群）は完全に無変化で修正の副作用がないことを確認した。あわせてv1指摘#3（軽微・mining-first死亡率7/20→9/20）を再調査し、死亡9シード全てが深部（maxDepth57〜160）で発生していることから「到達深度に見合わない積極的すぎる潜行」という自然な難易度上昇と原因を特定、005final・006v2の前例に倣いバランス調整は見送った。ブラウザAIPでP01(seed301)/P02(seed302)を6000tick再プレイし、両者ともdrillPowerが実際に上昇（P01 1→4、P02 1→2）したことを確認した一方、P01はv1では完走していたのにv2ではdrill投資により早期に深部(depth85)へ到達した結果、atk/hp後回しの生存力不足でtick4524に死亡する新規パターンを発見した（003finalが確立した「ビルド次第で生死が分かれる」パターンの一種と解釈し致命とは判断せず）。P02は逆にmaxDepth91まで到達しながら死亡せず完走（finalHp180/180満タン）し、生存力優先ビルドの合理性を裏付けた。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-v2.md作成、判定FIX。package.jsonのversionを0.2.0へ、spec.mdにv2修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run3（FIX only）へ進めた | (本PR) |
+| 2026-07-18 | 7 | 3（FIX only） | 008-flagship-frontierholdのv2指摘#3（中・新規。drill最優先のP01がv2ではmaxDepth85到達直後に生存力不足でtick4524に死亡。対応必須ではなく費用対効果で判断可）に対応。003finalの「ビルド次第で生死が分かれる」設計意図（バランス数値そのもの）は変更せず、v2レビューが提案した2案のうち「実プレイヤー向けUIヒント」を採用した。`src/core/game.ts`に、既存の「安全マージンの数値公開」パターン（`estFuelToReturn`等）を踏襲した`GameState.player.recommendedHp`（現在地の深さで遭遇する敵の期待攻撃力から算出した目安の耐久HP）と`combatRiskLevel`（'safe'/'caution'/'danger'。maxHpがrecommendedHpの何%かで判定）を追加し、`src/render/renderer.ts`のHUDに色分け表示した。閾値はv2で実際に死亡したP01（band4到達時点でatk/hpとも未強化のデフォルト値）がちょうどdanger判定になるよう較正した。このヒントはボットの購入・行動ロジックには一切接続していない（`headless/simulate.ts`は無変更）ため、20シード×5戦略のヘッドレス比較は全指標がv2から完全に不変（ゼロ差分）であることを確認し、既存のバランス・A/B比較用の対照群を汚染しないことを検証した。ブラウザAIPでv2と同じボットロジック（JS移植）でP01(seed301)/P02(seed302)を6000tick再実行したところ、両者ともv2と完全に同一の結果（P01: tick4524死亡・maxDepth85・score447、P02: maxDepth91・score409で完走）を再現し決定論に影響がないことを確認した上で、P01の`combatRiskLevel`は死亡の3400tick以上前（tick1110）から`danger`/`caution`を継続して示し続け、一度も`safe`に戻らなかった一方、P02は6000tick全てで`safe`のまま（誤検知ゼロ）だったことを確認した。npm run build / npm run simulateとも正常終了。レビューは書かず（3回目FIX onlyの規約通り）、package.jsonのversionを0.3.0へ、spec.mdに3回目の修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル7・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
@@ -319,3 +320,27 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
   3) サイクル7は4回で1サイクル。3回目はFIX only（レビューなし、修正内容はPR本文・spec.mdに記載）、
      4回目にFINAL REVIEWで総括し、本命ゲーム統合実装（サイクル7）全体の完成度評価と次サイクルへの
      提案を行うこと
+  → 上記1)は3回目（本PR、spec.md「3回目で実施した修正内容」節）でUIヒントの追加により対応した:
+    `combatRiskLevel`/`recommendedHp`をGameState.player・HUDに追加し、ボットロジックには非接続
+    （ヘッドレス20シード×5戦略はv2から完全にゼロ差分）。ブラウザAIPでP01(seed301)を再実行し
+    v2と完全に同一の結果（tick4524死亡・maxDepth85・score447）を再現した上で、死亡の3400tick以上前
+    （tick1110）から一度も`safe`に戻らず`danger`/`caution`を示し続けていたことを確認した。P02は
+    6000tick全て`safe`で誤検知ゼロ。ただしこれは「情報を見せるだけ」の対応であり、ボット
+    （＝実プレイヤーの意思決定モデル）がこの警告を実際に見て行動を変えるかどうかまでは検証して
+    いない。バランス数値自体は変更していないため、P01がこの警告を無視すれば同じ死に方をする
+    （ヘッドレスの決定論的再現がそれを証明している）。UIヒントが実際に「合理的に見えて実は
+    高リスクなビルド」を回避させる効果を持つかは、4回目（FINAL REVIEW）でブラウザAIPの意思決定
+    ロジック側にこの警告を読ませて反応させる簡易実験を行うか、次サイクルの課題として持ち越すかを
+    判断すること
+  2) は未対応のまま持ち越し。4回目で最終判断すること
+- 008-flagship-frontierhold 3回目（本PR）からサイクル7・4回目（FINAL REVIEW）への引き継ぎ事項:
+  1) サイクル7全体（008 v1〜v3）の総括レビュー（reviews/008-flagship-frontierhold-final.md）を作成し、
+     本命ゲーム統合実装として「クリア後も自主的に遊びたくなるか」（P01）「人に話したくなる自分の
+     物語ができたか」（P02）を最終評価すること。007final #3（壁際停滞）の解消、v2のdrill投資
+     インセンティブ回復、v3の危険度ヒント追加を通じて、002〜007で確立した7パターンが本命ゲームとして
+     機能しているかを判定する
+  2) 上記の【中・新規】【軽微・継続】2件について、UIヒント追加だけで十分か、追加のバランス調整
+     （深部の敵の強さの伸び方の緩和、mining-first戦略の生存力調整）が必要かを最終判断すること
+  3) サイクル7完了後、次サイクル（サイクル8）で取り組むべき提案を明記すること（新要素追加は
+     引き続き避け、本命ゲームの磨き上げを継続するか、007final・008で確立した知見を踏まえた
+     別の統合改善に着手するか）
