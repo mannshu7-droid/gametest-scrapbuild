@@ -1,4 +1,4 @@
-import { W, H, OUTPOST_MIN_GAP } from '../core/game';
+import { W, H, OUTPOST_MIN_GAP, BOTTOM_REACHED_BONUS } from '../core/game';
 import { TILE, type GameState } from '../core/types';
 
 const TILE_PX = 24;
@@ -160,6 +160,22 @@ export class Renderer {
         const costText = item.nextCost === null ? 'MAX' : `¥${item.nextCost}`;
         ctx.fillText(`${i + 1}. ${item.name} Lv${item.level}/${item.maxLevel}  ${costText}`, 18, y + 15);
       });
+    }
+
+    if (s.firstRiskWarningBanner > 0) {
+      ctx.fillStyle = 'rgba(231,76,60,0.85)';
+      ctx.fillRect(0, 0, VIEW_W * TILE_PX, 30);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('危険度上昇！この深さの目安HPをHUDで確認し、攻撃力・体力の強化を検討してください', 8, 20);
+    }
+
+    if (s.bottomReachedBanner > 0) {
+      ctx.fillStyle = 'rgba(224,195,61,0.85)';
+      ctx.fillRect(0, 30, VIEW_W * TILE_PX, 30);
+      ctx.fillStyle = '#1b1b1b';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText(`最深部(y=${H - 1})に到達！ 未知の奥底を踏破したボーナス +¥${BOTTOM_REACHED_BONUS}`, 8, 50);
     }
 
     if (s.over) {

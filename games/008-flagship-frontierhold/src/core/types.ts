@@ -85,6 +85,8 @@ export interface Metrics {
   barricadesBuilt: number;
   propsDestroyedByEnemy: number;
   outpostsBuilt: number;
+  /** マップ最下段(y=H-1)へ到達済みか（サイクル8新規: 最深部到達の区切り演出用） */
+  bottomReached: boolean;
   score: number;
 }
 
@@ -92,6 +94,10 @@ export interface GameState {
   tick: number;
   phase: Phase;
   over: boolean;
+  /** 最深部到達バナーの残り表示tick数（0なら非表示。サイクル8新規） */
+  bottomReachedBanner: number;
+  /** combatRiskLevelが初めてsafe以外になった際の強調バナーの残り表示tick数（0なら非表示。サイクル8新規） */
+  firstRiskWarningBanner: number;
   player: {
     x: number;
     y: number;

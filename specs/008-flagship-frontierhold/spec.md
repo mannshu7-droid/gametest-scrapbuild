@@ -216,3 +216,95 @@ band0-1はsafe、band2-3はcaution、band4以降はdefaultビルドでdanger判�
 
 007のスコープ外項目（前線基地の複数種類・破棄・移動・ワープ、環境ハザードタイル、マルチプレイ）を
 継続して踏襲する。加えて、本サイクルでは**新しい要素の追加は一切行わない**（統合実装フェーズの方針）。
+
+## サイクル8（磨き上げ継続）で実施した修正内容
+
+サイクル7で本命ゲームの統合実装は完成度に達したとfinalで判定されたため、サイクル8は新しいゲーム番号を
+切らず、games/008-flagship-frontierholdをそのまま拡張する。008finalが提案した3つの優先課題
+（(1)危険度UIヒントに反応する適応型ボット戦略の追加検証、(2)マップ最深部到達時の区切り・報酬演出、
+(3)mining-first戦略の初見詰みやすさの再検討）に対応した。いずれも既存のバランス数値（敵HP/ATK・
+経済パラメータ）は変更しない。
+
+### 1. 適応型ボット戦略の追加（008final提案#1、`headless/simulate.ts`）
+
+008finalは「combatRiskLevelは正確に危険を示すが、それを見て実際に行動を変える主体（固定優先度の
+ヘッドレスbot）が存在しないため、UIヒントの効果そのものは検証できていない」と結論していた。
+この盲点に対応するため、既存の3戦略（mining-first/combat-first/balanced）それぞれに`-adaptive`版を
+追加した:
+
+- **購入優先度の動的変更**: `combatRiskLevel`が`'danger'`のとき、hp・atkをショップ優先度リストの
+  先頭へ繰り上げる（`'caution'`のときはhpのみ繰り上げ）。`'safe'`のときは元の優先度のまま
+- **危険域での自主的な撤退**: `combatRiskLevel==='danger'`になった時点で、低HPを待たずに帰還判断
+  （`needsReturn`）を発火させる。P01のような「drill優先で深く潜れるが打たれ強さが伴わないまま死ぬ」
+  パターンを、ヒントに反応する行動で回避できるかを検証する
+
+固定戦略（`mining-first`/`combat-first`/`balanced`等）のロジック・優先度リストは無変更。
+
+### 2. 最深部到達の区切り・報酬演出（008final提案#2、`src/core/game.ts` / `src/render/renderer.ts`）
+
+マップ最下段(y=H-1=160)へ初めて到達した瞬間に一度だけ金銭ボーナス(`BOTTOM_REACHED_BONUS=300`)を
+付与し、`GameState.bottomReachedBanner`（残り表示tick数、初期値`BOTTOM_REACHED_BANNER_TICKS=150`）を
+HUDに一定時間表示する。`Metrics.bottomReached`で到達済みかを常時公開する。バランス数値（敵・経済）は
+変更していないため、最深部に到達しない戦略・シードの結果には影響しない。
+
+### 3. mining-first初見詰みやすさへの対応（008final提案#3、`src/core/game.ts` / `src/render/renderer.ts`）
+
+`combatRiskLevel`が初めて`'safe'`以外になった瞬間に一度だけ強調バナー（`GameState.firstRiskWarningBanner`、
+初期値`FIRST_RISK_WARNING_BANNER_TICKS=200`）を表示する。既存の常時HUD表示（008 v3の`recommendedHp`/
+`combatRiskLevel`）が新規プレイヤーに見落とされやすいという課題に対し、バランス調整（敵を弱める）
+ではなく「初回だけ目立たせる」という情報伝達側の対応を選んだ。このバナーもボットの購入・行動
+ロジックには一切接続していない。
+
+### 検証結果（20シード×8戦略のヘッドレス比較、final→サイクル8）
+
+`npm run simulate -- --seeds 1,2,...,20 --maxTicks 20000`:
+
+| 戦略 | avgScore | avgMaxDepth | avgUpgradesBought | 死亡 | bottomReached |
+|---|---|---|---|---|---|
+| mining-first | 528.2 | 78.8 | 10.3 | 9/20 | 3/20 |
+| combat-first | 546.6 | 81.1 | 9.0 | 0/20 | 0/20 |
+| balanced | 548.1 | 75.8 | 10.1 | 2/20 | 1/20 |
+| bridge-reliant（対照群） | 370.6 | 62.8 | 2.6 | 0/20 | 0/20 |
+| balanced-no-outpost（対照群） | 523.5 | 39.9 | 5.0 | 0/20 | 0/20 |
+| mining-first-adaptive（新規） | 446.6 | 69.0 | 8.7 | **6/20** | 0/20 |
+| combat-first-adaptive（新規） | 539.5 | 81.5 | 9.1 | 0/20 | 0/20 |
+| balanced-adaptive（新規） | 552.5 | 72.5 | 9.7 | **1/20** | 0/20 |
+
+- **combat-first・bridge-reliant・balanced-no-outpost（最深部に到達しない3戦略）はfinal時点の数値と
+  完全に一致（ゼロ差分）した。** これは今回の3つの追加（適応型戦略・最深部演出・初回警告バナー）が
+  既存の固定戦略・既存のバランスに一切副作用を与えていないことを裏付ける
+- **mining-first・balancedはavgScore等がfinalからわずかに変化した。** これは最深部到達時の+300money
+  ボーナス（3/20・1/20のシードで発生）が、その後の購買判断の分岐点をわずかに変え、以降の行動系列が
+  変化した結果であり、意図した仕様どおりの挙動である
+- **mining-first-adaptiveは死亡9/20→6/20（-33%）まで改善した。** 引き換えにavgMaxDepthが78.8→69.0、
+  avgScoreが528.2→446.6と下がっており、「危険を感じたら安全側に倒す」という判断が実際に
+  生存率とリターンのトレードオフとして機能していることを定量的に確認できた
+- balanced-adaptiveも死亡2/20→1/20に改善。combat-first-adaptiveは元の戦略がほぼ常にsafe/caution圏内
+  （atk/hpを優先度上位に持つため）のため、適応ロジックが介入する場面がほとんどなく数値もfinalと
+  ほぼ変化しなかった
+
+### ブラウザAIPでの検証（P01/P02、v2ボットロジックをJS移植）
+
+P01(seed301, mining-first相当の優先度)を`mining-first`（固定）と`mining-first-adaptive`の両方で
+6000tick再生した:
+
+| 指標 | mining-first（固定、final再現） | mining-first-adaptive |
+|---|---|---|
+| 生死 | **tick4524で死亡** | 6000tick完走 |
+| 最終HP | 0/100 | 41/140 |
+| maxHp | 100（hp投資なし） | 140（adaptiveでhp2レベル追加購入） |
+| maxDepth | 85 | 85 |
+| score | 447 | 501 |
+| combatRiskLevel推移 | tick1500以降ほぼ`danger`固定、死亡まで一度もsafeに戻らない | tick1500以降`caution`が主体（`danger`は稀）、死亡なし |
+
+**固定戦略ではfinalと完全に同一のtick4524死亡を再現した一方、適応型戦略は同一シード・同一初期条件で
+死亡を完全に回避した。** これは008finalが「情報を見せる効果は確認できたが、見た情報で実プレイヤーが
+行動を変える効果は検証できない」と留保していた仮説に対する、初めての肯定的な定量結果である。
+
+P02(seed302, `combat-first`相当の優先度)は`combat-first`と`combat-first-adaptive`で完全に同一の結果
+（finalHp70/140、maxDepth79、score447）となった。P02のビルドはcombatRiskLevelがセッション全体で
+一度も`danger`にならなかったため、適応ロジックが介入する場面がなく「安全なビルドには何も起きない」
+という期待通りの結果になった。
+
+以上より、008finalが最優先課題とした「UIヒントが実際に行動を変える効果を持つか」という問いに、
+少なくとも適応型ボットという模擬プレイヤーの範囲では**Yes**という結果が得られた。
