@@ -159,6 +159,42 @@ seed9: ticks1412）はマップ最下部(y=160、H=161の物理的な下限)ま�
 インセンティブ回復が「進みやすさ」と「死のリスク」を両方引き上げるトレードオフとして
 機能していることが分かった。
 
+## 3回目（FIX only）で実施した修正内容（v2指摘#3対応）
+
+v2レビュー（reviews/008-flagship-frontierhold-v2.md）で新規に見つかった「P01(seed301, drill最優先)が
+v2ではdrill投資により早期にmaxDepth85へ到達した結果、生存力不足でtick4524に死亡した」指摘（重要度:
+中、対応必須ではなく費用対効果で判断可）への対応。003finalが確立した「ビルド次第で生死が分かれる」
+という設計意図（バランス数値そのもの）は変更せず、v2レビューが提案した2案のうち「実プレイヤー向けの
+UIヒント」の方を採用した。
+
+**変更内容**: `src/core/game.ts`に、既存の「安全マージンの数値公開」パターン（`estFuelToReturn`等、
+007以来のHUD/AIP共通パターン）を踏襲した新フィールドを追加した。
+
+- `recommendedHpForBand(band)`: そのバンドで遭遇する敵（crawler/brute加重平均、depthMult込み）の
+  一撃を、同時に2体分・5発耐えられる目安の最大HPを返す純関数（`avgEnemyAtkForBand()`使用）
+- `GameState.player.recommendedHp`: 現在地の深さでの目安HP
+- `GameState.player.combatRiskLevel`: `'safe' | 'caution' | 'danger'`。`maxHp() / recommendedHp()`が
+  1.0以上ならsafe、0.7〜1.0未満はcaution、0.7未満はdanger
+- `src/render/renderer.ts`のHUDに上記を色分け表示するテキスト行を追加（危険度に応じて緑/黄/赤）
+
+CONCURRENT_ENEMY_FACTOR（同時2体分）とSURVIVAL_HITS_TARGET（5発）は、v2で実際に死亡したP01
+（band4到達時点でdrillLevel0・atkLevel0・hpLevel0のデフォルト値のまま）の組み合わせが
+ちょうど`danger`判定になることを基準に較正した。ヘッドレスでバンドごとの値を検証したところ、
+band0-1はsafe、band2-3はcaution、band4以降はdefaultビルドでdanger判定になることを確認した。
+
+**このヒントはボットの購入・行動ロジックには一切接続していない**（`headless/simulate.ts`は無変更）。
+20シード×5戦略のヘッドレス比較で全指標がv2から完全に不変（ゼロ差分）であることを確認済みで、
+既存のバランス・A/B比較用の対照群を一切汚染しない。
+
+**ブラウザAIPでの検証**: v2と同じくP01(seed301)/P02(seed302)の優先度でボットロジックをJS移植し
+6000tick再実行した。P01はtick4524でfinalHp0/maxDepth85/score447という**v2と完全に同一の結果**で
+死亡し、決定論が壊れていないことを確認した。その上で`combatRiskLevel`はtick1110（y=81、死亡の
+3400tick以上前）で初めて`danger`になり、以後死亡まで`danger`/`caution`を行き来し続けていた
+（`safe`に戻ることは一度もなかった）。一方P02はmaxDepth91/score409という**v2と完全に同一の結果**で
+6000tick完走し、`combatRiskLevel`は6000tick全てで`safe`のまま（caution/danger共に0tick）だった。
+「合理的に見えて実は高リスクなビルド」（P01）には十分早期から継続的に警告が出て、安全に生存できた
+ビルド（P02）には誤検知（false positive）が一切発生しないことを両ペルソナで確認できた。
+
 ## AI評価の観点
 
 - **007final #3は本当に解消されたか**: ブラウザAIPでP01/P02をフルセッションプレイし、

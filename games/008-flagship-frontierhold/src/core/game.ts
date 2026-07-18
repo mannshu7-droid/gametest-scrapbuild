@@ -76,6 +76,15 @@ const OUTPOST_SCORE_BONUS = 20;
 // 迂回橋代を稼ぐのに何tick待たされるか」を建設可否判定自体に組み込み、待ち時間が長すぎる配置では
 // 前線基地の建設そのものを拒否する（無限に近い足踏みが発生する前に防ぐ）
 const OUTPOST_MAX_WAIT_TICKS = 400;
+// v2指摘#3対応（新規）: drill優先ビルドが「早く深く潜れるが打たれ強さが伴わないまま死ぬ」現象への
+// 対処として、バランス数値そのものは変えず（003finalの「ビルド次第で生死が分かれる」設計意図を維持）、
+// 既存の「安全マージンの数値公開」パターン（estFuelToReturn等）を踏襲したHUD/AIP向けヒントを追加する。
+// 「平均的な敵の一撃をこの回数・体数分は耐えられるHP」を安全の目安とし、実際のmaxHpと比較する。
+// CONCURRENT_ENEMY_FACTORは深部ほど同時接敵数が増える(enemyCap)ことを踏まえた実測ベースの係数:
+// band4・drillLevel0のP01(v2で実際に死亡した組み合わせ)がdanger判定になることを基準に較正した
+const SURVIVAL_HITS_TARGET = 5;
+const CONCURRENT_ENEMY_FACTOR = 2;
+const COMBAT_RISK_CAUTION_RATIO = 0.7; // recommendedHpの70%未満はdanger、70%以上100%未満はcaution
 
 const DIGGABLE: TileId[] = [TILE.DIRT, TILE.ROCK, TILE.ORE_COPPER, TILE.ORE_IRON, TILE.ORE_GOLD];
 
@@ -154,9 +163,21 @@ function pickTileType(band: number, rng: Rng): TileId {
   }
   return TILE.DIRT;
 }
+function pBruteOf(band: number): number {
+  return Math.min(0.35, band * 0.05);
+}
 function pickEnemyType(band: number, rng: Rng): EnemyType {
-  const pBrute = Math.min(0.35, band * 0.05);
-  return rng() < pBrute ? 'brute' : 'crawler';
+  return rng() < pBruteOf(band) ? 'brute' : 'crawler';
+}
+/** そのバンドで遭遇する敵の期待攻撃力（crawler/bruteの出現比率で加重平均） */
+function avgEnemyAtkForBand(band: number): number {
+  const pBrute = pBruteOf(band);
+  const base = ENEMY_STATS.crawler.atk * (1 - pBrute) + ENEMY_STATS.brute.atk * pBrute;
+  return base * depthMult(band);
+}
+/** そのバンドで「平均的な敵からCONCURRENT_ENEMY_FACTOR体分の攻撃をSURVIVAL_HITS_TARGET回耐えられる」目安の最大HP */
+function recommendedHpForBand(band: number): number {
+  return Math.round(avgEnemyAtkForBand(band) * SURVIVAL_HITS_TARGET * CONCURRENT_ENEMY_FACTOR);
 }
 
 const DELTA: Record<Dir, [number, number]> = {
@@ -495,6 +516,17 @@ export class Game {
     const shortfall = minBridgeCost - moneyAfterCost;
     const waitTicks = Math.ceil(shortfall / LABOR_INCOME_AMOUNT) * LABOR_INCOME_INTERVAL;
     return waitTicks <= OUTPOST_MAX_WAIT_TICKS;
+  }
+  private recommendedHp(): number {
+    return recommendedHpForBand(bandAt(Math.max(1, this.player.y)));
+  }
+  private combatRiskLevel(): 'safe' | 'caution' | 'danger' {
+    const rec = this.recommendedHp();
+    if (rec <= 0) return 'safe';
+    const ratio = this.maxHp() / rec;
+    if (ratio < COMBAT_RISK_CAUTION_RATIO) return 'danger';
+    if (ratio < 1) return 'caution';
+    return 'safe';
   }
   private canBuildOutpost(): boolean {
     if (this.player.y === 0) return false;
@@ -1052,6 +1084,8 @@ export class Game {
         depthSinceLastBase: this.depthSinceLastBase(),
         nextOutpostCost: this.nextOutpostCostValue(),
         canBuildOutpost: this.canBuildOutpost(),
+        recommendedHp: this.recommendedHp(),
+        combatRiskLevel: this.combatRiskLevel(),
       },
       map: { w: W, h: H, tiles: [...this.tiles] },
       enemies: this.enemies.map((e) => ({ ...e })),
