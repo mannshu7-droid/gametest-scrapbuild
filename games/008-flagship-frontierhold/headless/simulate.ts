@@ -103,7 +103,18 @@ function engineeringLevel(s: GameState): number {
   return s.shop.find((it) => it.id === 'engineering')?.level ?? 0;
 }
 
-type Strategy = 'mining-first' | 'combat-first' | 'balanced' | 'bridge-reliant' | 'balanced-no-outpost';
+type BaseStrategy = 'mining-first' | 'combat-first' | 'balanced' | 'bridge-reliant' | 'balanced-no-outpost';
+// サイクル8新規（008final提案#1）: combatRiskLevelを読んで動的に優先度・帰還判断を調整する「適応型」戦略。
+// 固定優先度戦略のバリアント名に`-adaptive`を付けて表現する（例: mining-first-adaptive）
+type AdaptiveStrategy = 'mining-first-adaptive' | 'combat-first-adaptive' | 'balanced-adaptive';
+type Strategy = BaseStrategy | AdaptiveStrategy;
+
+function isAdaptive(strategy: Strategy): boolean {
+  return strategy.endsWith('-adaptive');
+}
+function baseOf(strategy: Strategy): BaseStrategy {
+  return (isAdaptive(strategy) ? strategy.slice(0, -'-adaptive'.length) : strategy) as BaseStrategy;
+}
 
 const MINING_FIRST: UpgradeId[] = ['drill', 'capacity', 'fuel', 'engineering', 'atk', 'hp', 'skill', 'atkspeed', 'muffler'];
 const COMBAT_FIRST: UpgradeId[] = ['atk', 'hp', 'skill', 'atkspeed', 'engineering', 'drill', 'fuel', 'capacity', 'muffler'];
@@ -115,11 +126,25 @@ const BALANCED: UpgradeId[] = ['drill', 'atk', 'engineering', 'hp', 'capacity', 
 const BRIDGE_RELIANT: UpgradeId[] = ['atk', 'hp', 'skill', 'atkspeed', 'engineering', 'fuel', 'capacity', 'muffler'];
 const BRIDGE_RELIANT_RESERVE = 30;
 
-function priorityFor(strategy: Strategy): UpgradeId[] {
+function basePriorityFor(strategy: BaseStrategy): UpgradeId[] {
   if (strategy === 'mining-first') return MINING_FIRST;
   if (strategy === 'combat-first') return COMBAT_FIRST;
   if (strategy === 'bridge-reliant') return BRIDGE_RELIANT;
   return BALANCED; // balanced / balanced-no-outpost 共通
+}
+
+/**
+ * 008final提案#1: combatRiskLevelが'danger'/'caution'のとき、適応型戦略はhp/atkをベース優先度リストの
+ * 先頭へ繰り上げる（重複除去）。固定戦略（isAdaptive=false）はベースの優先度をそのまま返す。
+ * これにより「危険度ヒントを見て装備投資の優先順位を変える」という008finalが検証できなかった仮説を
+ * 定量比較できる
+ */
+function priorityFor(strategy: Strategy, riskLevel: 'safe' | 'caution' | 'danger'): UpgradeId[] {
+  const base = basePriorityFor(baseOf(strategy));
+  if (!isAdaptive(strategy) || riskLevel === 'safe') return base;
+  const boosted: UpgradeId[] = riskLevel === 'danger' ? ['hp', 'atk'] : ['hp'];
+  const rest = base.filter((id) => !boosted.includes(id));
+  return [...boosted, ...rest];
 }
 
 const RETURN_HP_THRESHOLD = 0.25;
@@ -192,7 +217,7 @@ class Bot {
     ) {
       return { type: 'buy', item: 'drill' };
     }
-    for (const id of priorityFor(this.strategy)) {
+    for (const id of priorityFor(this.strategy, s.player.combatRiskLevel)) {
       const item = s.shop.find((it) => it.id === id);
       if (item && item.nextCost !== null && s.player.money - item.nextCost >= reserve) {
         return { type: 'buy', item: id };
@@ -285,13 +310,18 @@ class Bot {
     // 帰還判断: 燃料切れ・満載・低HP・estFuelToReturn残不足のいずれか（estFuelToReturnは最寄りの前線基地も考慮する）
     const returnMargin = 15;
     const lowHp = p.hp <= p.maxHp * RETURN_HP_THRESHOLD;
+    // 008final提案#1: 適応型戦略はcombatRiskLevelが'danger'になった時点で、低HPを待たずに自主的に撤退し、
+    // 装備投資（hp/atk優先度の繰り上げ）を挟んでから再潜行する。P01のような「drill優先で深く潜れるが
+    // 打たれ強さが伴わないまま死ぬ」パターンを、ヒントに反応する行動で回避できるかを検証する
+    const adaptiveRiskRetreat = isAdaptive(this.strategy) && p.combatRiskLevel === 'danger';
     const needsReturn =
       p.fuel <= 0 ||
       p.cargoUnits >= p.maxCapacity ||
       lowHp ||
+      adaptiveRiskRetreat ||
       (p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
     if (needsReturn) {
-      if (lowHp) this.awaitingHeal = true;
+      if (lowHp || adaptiveRiskRetreat) this.awaitingHeal = true;
       const dir = bfsToNearestBase(s);
       if (dir) {
         const [dx, dy] = DELTA[dir];
@@ -360,6 +390,7 @@ interface RunResult {
   barricadesBuilt: number;
   propsDestroyedByEnemy: number;
   outpostsBuilt: number;
+  bottomReached: boolean;
   score: number;
 }
 
@@ -395,6 +426,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     barricadesBuilt: s.metrics.barricadesBuilt,
     propsDestroyedByEnemy: s.metrics.propsDestroyedByEnemy,
     outpostsBuilt: s.metrics.outpostsBuilt,
+    bottomReached: s.metrics.bottomReached,
     score: s.metrics.score,
   };
 }
@@ -415,6 +447,9 @@ for (const strategy of [
   'balanced',
   'bridge-reliant',
   'balanced-no-outpost',
+  'mining-first-adaptive',
+  'combat-first-adaptive',
+  'balanced-adaptive',
 ] as Strategy[]) {
   const results: RunResult[] = [];
   for (const seed of seeds) {
@@ -424,6 +459,6 @@ for (const strategy of [
   }
   const avg = (f: (r: RunResult) => number) => (results.reduce((a, r) => a + f(r), 0) / results.length).toFixed(1);
   console.log(
-    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDepth=${avg((r) => r.maxDepth)} avgKills=${avg((r) => r.kills)} avgOreMined=${avg((r) => r.oreMined)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgTrips=${avg((r) => r.tripsToSurface)} avgMilestones=${avg((r) => r.milestonesReached)} avgSkillUses=${avg((r) => r.skillUses)} avgDashUses=${avg((r) => r.dashUses)} avgBridges=${avg((r) => r.bridgesBuilt)} avgBarricades=${avg((r) => r.barricadesBuilt)} avgPropsDestroyed=${avg((r) => r.propsDestroyedByEnemy)} avgOutposts=${avg((r) => r.outpostsBuilt)} deaths=${results.filter((r) => r.over).length}/${results.length}`,
+    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDepth=${avg((r) => r.maxDepth)} avgKills=${avg((r) => r.kills)} avgOreMined=${avg((r) => r.oreMined)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgTrips=${avg((r) => r.tripsToSurface)} avgMilestones=${avg((r) => r.milestonesReached)} avgSkillUses=${avg((r) => r.skillUses)} avgDashUses=${avg((r) => r.dashUses)} avgBridges=${avg((r) => r.bridgesBuilt)} avgBarricades=${avg((r) => r.barricadesBuilt)} avgPropsDestroyed=${avg((r) => r.propsDestroyedByEnemy)} avgOutposts=${avg((r) => r.outpostsBuilt)} bottomReached=${results.filter((r) => r.bottomReached).length}/${results.length} deaths=${results.filter((r) => r.over).length}/${results.length}`,
   );
 }

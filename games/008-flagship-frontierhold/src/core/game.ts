@@ -86,6 +86,19 @@ const SURVIVAL_HITS_TARGET = 5;
 const CONCURRENT_ENEMY_FACTOR = 2;
 const COMBAT_RISK_CAUTION_RATIO = 0.7; // recommendedHpの70%未満はdanger、70%以上100%未満はcaution
 
+// ---- サイクル8新規: 008final提案#2（最深部到達の区切り・報酬演出）----
+// マップ最下段(y=H-1=160)へ初めて到達したとき、金銭ボーナスと一定時間のバナー表示で
+// 「これが探索の終端」という手応えを与える（008finalが指摘した「スコア加算以外に到達の意味がない」
+// への対応。バランス数値は変更せず、演出のみ追加する）
+const BOTTOM_REACHED_BONUS = 300;
+const BOTTOM_REACHED_BANNER_TICKS = 150;
+// ---- サイクル8新規: 008final提案#3（mining-first初見詰みやすさの再検討）----
+// combatRiskLevelが初めてsafe以外になったタイミングで一度だけ強調バナーを表示する。
+// バランス数値(SURVIVAL_HITS_TARGET等)やAIの購買・行動ロジックには一切接続しない
+// 「情報を目立たせるだけ」の追加であり、既存の常時HUD表示（008 v3）が新規プレイヤーに
+// 見落とされやすいという課題への対応
+const FIRST_RISK_WARNING_BANNER_TICKS = 200;
+
 const DIGGABLE: TileId[] = [TILE.DIRT, TILE.ROCK, TILE.ORE_COPPER, TILE.ORE_IRON, TILE.ORE_GOLD];
 
 /** タイルの硬さ階層（0=最も柔らかい）。要求採掘威力・掘削時間の基礎になる */
@@ -311,6 +324,9 @@ export class Game {
   private enemies: Enemy[] = [];
   private nextEnemyId = 1;
   private lastMilestoneBand = 0;
+  private bottomReachedBannerTicks = 0;
+  private firstRiskWarningIssued = false;
+  private firstRiskWarningBannerTicks = 0;
   private outposts: OutpostState[] = [];
   /** 直前に確立した基地（地上 or 最も新しい前線基地）の深さ。地上は0 */
   private lastBaseY = 0;
@@ -357,6 +373,7 @@ export class Game {
     barricadesBuilt: 0,
     propsDestroyedByEnemy: 0,
     outpostsBuilt: 0,
+    bottomReached: false,
     score: 0,
   };
 
@@ -541,6 +558,8 @@ export class Game {
   step(action: Action = { type: 'wait' }): void {
     if (this._over) return;
     this.tick++;
+    if (this.bottomReachedBannerTicks > 0) this.bottomReachedBannerTicks--;
+    if (this.firstRiskWarningBannerTicks > 0) this.firstRiskWarningBannerTicks--;
 
     if (this.player.y === 0 || this.tileAt(this.player.x, this.player.y) === TILE.OUTPOST) {
       if (this.tick % LABOR_INCOME_INTERVAL === 0) this.player.money += LABOR_INCOME_AMOUNT;
@@ -590,6 +609,8 @@ export class Game {
 
     this.metrics.maxDepth = Math.max(this.metrics.maxDepth, this.player.y);
     this.checkMilestone();
+    this.checkBottomReached();
+    this.checkFirstRiskWarning();
     this.recomputeScore();
   }
 
@@ -610,6 +631,22 @@ export class Game {
       this.metrics.milestonesReached++;
       this.lastMilestoneBand = band;
     }
+  }
+
+  /** サイクル8新規: マップ最下段(y=H-1)へ初めて到達した瞬間、一度だけ金銭ボーナスとバナー表示を発生させる */
+  private checkBottomReached(): void {
+    if (this.metrics.bottomReached || this.player.y < H - 1) return;
+    this.metrics.bottomReached = true;
+    this.player.money += BOTTOM_REACHED_BONUS;
+    this.bottomReachedBannerTicks = BOTTOM_REACHED_BANNER_TICKS;
+  }
+
+  /** サイクル8新規: combatRiskLevelが初めてsafe以外になった瞬間、一度だけ強調バナーを表示する（バランス非接続） */
+  private checkFirstRiskWarning(): void {
+    if (this.firstRiskWarningIssued) return;
+    if (this.combatRiskLevel() === 'safe') return;
+    this.firstRiskWarningIssued = true;
+    this.firstRiskWarningBannerTicks = FIRST_RISK_WARNING_BANNER_TICKS;
   }
 
   /** @returns dug=このtickに掘削したか, moved=既に掘った床/支保工へ実際に移動したか（採掘音の増減判定に使う） */
@@ -1052,6 +1089,8 @@ export class Game {
       tick: this.tick,
       phase: this.phase,
       over: this._over,
+      bottomReachedBanner: this.bottomReachedBannerTicks,
+      firstRiskWarningBanner: this.firstRiskWarningBannerTicks,
       player: {
         x: this.player.x,
         y: this.player.y,
@@ -1107,4 +1146,5 @@ export {
   buildCostMultOf,
   outpostCost,
   OUTPOST_MIN_GAP,
+  BOTTOM_REACHED_BONUS,
 };
