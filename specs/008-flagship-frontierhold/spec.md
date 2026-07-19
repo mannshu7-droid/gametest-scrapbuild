@@ -308,3 +308,58 @@ P02(seed302, `combat-first`相当の優先度)は`combat-first`と`combat-first-
 
 以上より、008finalが最優先課題とした「UIヒントが実際に行動を変える効果を持つか」という問いに、
 少なくとも適応型ボットという模擬プレイヤーの範囲では**Yes**という結果が得られた。
+
+## サイクル8・2回目（FIX+REVIEW）で実施した修正内容
+
+cycle8-v1レビューの指摘#2（combat-first-adaptiveの介入機会不足）・#3（mining-first-adaptiveの
+安全側への振れすぎ懸念）について、それぞれ要否判断を行った（`headless/simulate.ts`のみ変更、
+`src/core/game.ts`/`src/render/renderer.ts`は無変更）。
+
+### 指摘#2（combat-first-adaptiveの介入機会不足）: 対応不要と判断
+
+combat-first(-adaptive)は元の優先度自体がatk/hpを高順位に置くため、combatRiskLevelがほぼ常に
+safe/caution圏内に留まり適応ロジックが介入する場面が少ない。これは「安全なビルドには何も起きない」
+という設計上の期待通りの挙動であり、無理に介入機会を増やす（例: より危険なビルドを追加する）ことは
+今回のスコープ外（新要素の追加は行わない方針）とも矛盾するため、対応不要と判断した。
+
+### 指摘#3（mining-first-adaptiveの安全側への振れすぎ懸念）: 診断の上、大部分は意図した代償と判断
+
+`priorityFor`を強制的にbaseへ固定する診断実行により、mining-first-adaptiveのavgMoneyEarned-44%・
+avgMaxDepth-12%等の低下は、`adaptiveRiskRetreat`（撤退判断）ではなく`'caution'`
+（maxHp/recommendedHp比0.7〜1.0、`'danger'`よりはるかに頻繁に発生）でのhp優先繰り上げが
+drill投資を長期間後回しにすることが主因と特定した。`'caution'`側の繰り上げを外す変更も試したが、
+適用するとcycle8-v1で確認済みの中核シナリオ（P01 seed301: 適応型戦略が固定戦略のtick4524死亡を
+回避）がtick4414死亡に戻る回帰を招いたため、`'caution'`/`'danger'`とも繰り上げは維持することにした。
+aggregate指標の低下はP01のシナリオを救う安全機構の意図した代償と判断し、変更しなかった。
+
+一方、変更しても副作用が無いと確認できた2点は反映した:
+
+1. **'danger'側の繰り上げからatkを除外**: `combatRiskLevel()`はmaxHpとrecommendedHpForBandの比
+   だけで決まりatkを一切考慮しないため、atkの繰り上げはcombatRiskLevel自体を改善しない無駄な
+   drill投資の後回しにしかならない
+2. **adaptiveRiskRetreatにHP閾値を追加**: 従来は`combatRiskLevel==='danger'`になった瞬間、被弾ゼロ・
+   満タンHPのままでも即座に撤退していた。実際に被弾してHPが`maxHp*0.85`を下回るまでは通常戦略と
+   同じく行動を続けるよう変更した
+
+20シード×8戦略のヘッドレス再検証（`npm run simulate -- --seeds 1,...,20 --maxTicks 20000`）:
+
+| 戦略 | avgScore | avgMoneyEarned | avgMaxDepth | 死亡 |
+|---|---|---|---|---|
+| mining-first-adaptive | 446.6（v1と完全一致） | 128.6（v1と完全一致） | 69.0（v1と完全一致） | 6/20 |
+| combat-first-adaptive | 539.9（v1: 539.5） | 121.0 | 81.6（v1: 81.5） | 0/20 |
+| balanced-adaptive | 553.0（v1: 552.5） | 142.0（v1: 143.2） | 72.7（v1: 72.5） | **0/20（v1: 1/20）** |
+
+mining-first-adaptiveの数値はv1と完全に一致（'caution'側の繰り上げを変更しなかったため）。
+combat-first-adaptive・balanced-adaptiveはatk除外・HP閾値追加の効果でわずかに改善した
+（balanced-adaptiveは死亡1/20→0/20）。
+
+ブラウザAIPでP01(seed301)/P02(seed302相当)をmining-first-adaptiveで6000tick再生し、
+`getState()`がheadlessと完全一致することを確認した:
+
+- seed301: finalHp41/140・maxDepth85・score501・6000tick完走（headlessと一致、P01の死亡回避シナリオを維持）
+- seed302: finalHp0・maxDepth114・score667・tick5334で死亡（headlessと一致）。これは今回新たに
+  判明した挙動で、固定戦略のmining-first（同シードでmaxDepth133まで到達し6000tick完走）の方が
+  適応型より深く・安全に進む逆転現象である。原因コードは今回の変更前後で同一（`git stash`で
+  変更前のコードでも同一のtick5334死亡を再現）であり、今回の修正が持ち込んだ回帰ではなく
+  cycle8-v1から存在した既存の挙動と確認した。適応型戦略は期待値としてのリスク低減であり
+  全シードでの安全を保証するものではないことを示す新規の知見として記録する

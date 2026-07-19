@@ -134,21 +134,44 @@ function basePriorityFor(strategy: BaseStrategy): UpgradeId[] {
 }
 
 /**
- * 008final提案#1: combatRiskLevelが'danger'/'caution'のとき、適応型戦略はhp/atkをベース優先度リストの
+ * 008final提案#1: combatRiskLevelが'danger'/'caution'のとき、適応型戦略はhpをベース優先度リストの
  * 先頭へ繰り上げる（重複除去）。固定戦略（isAdaptive=false）はベースの優先度をそのまま返す。
  * これにより「危険度ヒントを見て装備投資の優先順位を変える」という008finalが検証できなかった仮説を
  * 定量比較できる
+ *
+ * サイクル8・2回目（cycle8-v1指摘#3「mining-first-adaptiveの安全側への振れすぎ懸念」の要否判断）:
+ * `priorityFor`を強制的にbaseへ固定する診断実行で原因を切り分けたところ、mining-first-adaptiveの
+ * avgMoneyEarned-44%等の低下は`adaptiveRiskRetreat`（撤退判断）ではなく、'caution'（maxHp/recommendedHp
+ * 比0.7〜1.0の広い範囲、'danger'よりはるかに頻繁）でのhp優先繰り上げがdrill投資を長期間後回しにする
+ * ことが主因と特定した。'caution'の繰り上げ自体を外す変更も試したが、それを適用すると008final・
+ * cycle8-v1で確認済みの中核シナリオ（P01 seed301: 固定戦略はtick4524死亡、適応型戦略は6000tick完走・
+ * finalHp41/140）が再びtick4414死亡に戻ってしまう回帰を招いた。'caution'でのhp優先繰り上げは
+ * 「実害が出る前の早期投資」としてこの生存シナリオに不可欠な役割を果たしており、aggregate指標の
+ * 低下はこの安全機構の意図した代償と判断し、'caution'/'danger'とも繰り上げは維持することにした
+ * （routine-state.md参照）。唯一変更したのは'danger'側からatkを外したこと: `game.ts`の
+ * `combatRiskLevel()`はmaxHp()とrecommendedHpForBand()の比だけで決まりatkを一切考慮しないため、
+ * atkの繰り上げはcombatRiskLevel自体を改善しない無駄なdrill投資の後回しにしかならず、外しても
+ * 20シード比較・P01/P02シナリオともに悪影響が無いことを確認済み
  */
 function priorityFor(strategy: Strategy, riskLevel: 'safe' | 'caution' | 'danger'): UpgradeId[] {
   const base = basePriorityFor(baseOf(strategy));
   if (!isAdaptive(strategy) || riskLevel === 'safe') return base;
-  const boosted: UpgradeId[] = riskLevel === 'danger' ? ['hp', 'atk'] : ['hp'];
+  const boosted: UpgradeId[] = ['hp'];
   const rest = base.filter((id) => !boosted.includes(id));
   return [...boosted, ...rest];
 }
 
 const RETURN_HP_THRESHOLD = 0.25;
 const RESUME_DIVE_HP_THRESHOLD = 0.6;
+// サイクル8・2回目（cycle8-v1指摘#1対応）: 当初のadaptiveRiskRetreatはcombatRiskLevel==='danger'に
+// なった瞬間（=現在のbandの推奨maxHpに対し自分のmaxHpが70%未満、という「装備の静的な不足」であり
+// 現在HPの実際の減り具合とは無関係）に、被弾ゼロ・満タンHPのままでも即座に撤退していた。
+// 実際に被弾してHPがこの比率を下回るまでは通常戦略と同じく採掘・戦闘を続け、そこで初めて早期撤退する
+// （通常のRETURN_HP_THRESHOLD=0.25より早い安全マージン）よう変更し、「危険を感知しても無傷のうちから
+// パニック撤退しない」という現実的な判断に近づけた。20シード比較・P01(seed301)/P02(seed302)シナリオの
+// いずれでも数値・生死とも変化がないことを確認済み（優先度側の`priorityFor`の方がaggregate指標への
+// 影響が大きいため、この変更単独の効果は本セット内では観測できなかったが、論理的な正しさとして残す）
+const ADAPTIVE_DANGER_HP_RATIO = 0.85;
 
 /**
  * v2追加（バグ#3対応）: 「1つ下の行(y+1、次のband)」全16列を見て、現在の採掘威力で1列でも掘れるか、
@@ -313,7 +336,10 @@ class Bot {
     // 008final提案#1: 適応型戦略はcombatRiskLevelが'danger'になった時点で、低HPを待たずに自主的に撤退し、
     // 装備投資（hp/atk優先度の繰り上げ）を挟んでから再潜行する。P01のような「drill優先で深く潜れるが
     // 打たれ強さが伴わないまま死ぬ」パターンを、ヒントに反応する行動で回避できるかを検証する
-    const adaptiveRiskRetreat = isAdaptive(this.strategy) && p.combatRiskLevel === 'danger';
+    const adaptiveRiskRetreat =
+      isAdaptive(this.strategy) &&
+      p.combatRiskLevel === 'danger' &&
+      p.hp <= p.maxHp * ADAPTIVE_DANGER_HP_RATIO;
     const needsReturn =
       p.fuel <= 0 ||
       p.cargoUnits >= p.maxCapacity ||
