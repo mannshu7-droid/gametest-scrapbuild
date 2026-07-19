@@ -208,6 +208,13 @@ class Bot {
   private wallRow = -1;
   /** 007新規: balanced-no-outpost はA/B比較用に前線基地を一切建てない */
   private readonly buildsOutposts: boolean;
+  /** サイクル9新規: 直前に潜行を再開した地点（基地の座標）。潜行セッション中の最大移動距離を測るための基準点 */
+  private diveStartPos: { x: number; y: number } | null = null;
+  private diveMaxDist = 0;
+  /** 潜行を再開しても基地の隣接1マスから一歩も出られないセッションが連続した回数 */
+  private deadEndStreak = 0;
+  /** マップ最深部(H-1)の袋小路等、行き止まりが確定したら以後は潜行を再開せず基地で待機する */
+  private giveUpDiving = false;
 
   constructor(private strategy: Strategy) {
     this.buildsOutposts = strategy !== 'balanced-no-outpost';
@@ -286,6 +293,22 @@ class Bot {
       }
     }
 
+    // サイクル9新規（ストレステストで検出）: マップ最深部(H-1)の隅で前線基地が孤立し、掘る先も
+    // 迂回橋を架ける先も無い完全な袋小路に入ると、shopフェーズが機械的に「潜行再開(move down)」を
+    // 出し続け、基地の隣接1マスへ一歩踏み出してすぐ舞い戻るだけの3tickサイクルを無限に繰り返し
+    // tripsToSurfaceが無意味に積み上がる現象を80シードのストレステストで検出した（balanced seed61で
+    // 6142回）。基地の隣接1マス圏から実質的に一歩も出られない潜行セッションが3回連続したら、
+    // それ以上再開を試みても進展しないと判断し、以後は基地で待機するだけにする
+    if (s.phase === 'mine' && this.diveStartPos) {
+      const dist = Math.max(Math.abs(s.player.x - this.diveStartPos.x), Math.abs(s.player.y - this.diveStartPos.y));
+      this.diveMaxDist = Math.max(this.diveMaxDist, dist);
+    }
+    if (s.phase === 'shop' && this.diveStartPos) {
+      this.deadEndStreak = this.diveMaxDist <= 1 ? this.deadEndStreak + 1 : 0;
+      if (this.deadEndStreak >= 3) this.giveUpDiving = true;
+      this.diveStartPos = null;
+    }
+
     if (s.phase === 'shop') {
       if (this.awaitingHeal) {
         if (s.player.hp < s.player.maxHp * RESUME_DIVE_HP_THRESHOLD) {
@@ -300,6 +323,9 @@ class Bot {
       // 何も進展しない）を作らず、基地で待機して資金が貯まるのを待つ。基地滞在中はLABOR_INCOMEで
       // 資金が必ず増え続けるため、待機自体が新種の停滞（凍結）にはならない
       if (this.wallReserve > 0 && s.player.money < this.wallReserve) return { type: 'wait' };
+      if (this.giveUpDiving) return { type: 'wait' };
+      this.diveStartPos = { x: s.player.x, y: s.player.y };
+      this.diveMaxDist = 0;
       return { type: 'move', dir: 'down' };
     }
 

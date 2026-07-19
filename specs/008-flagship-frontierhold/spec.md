@@ -415,3 +415,62 @@ hp優先購入や早期撤退）が変わるとその時点から敵の湧き判
    適応型戦略も含めて「同じシードでも選択次第で結果が変わる」こと自体は本命ゲームの意図した性質
 
 `npm run build`・`npm run simulate`（20シード×8戦略）とも既存コードのまま正常終了することを再確認した。
+
+## サイクル9・1回目（統合ストレステスト）で実施した修正内容
+
+cycle8-finalの提案どおり、新規ゲーム番号は切らずgames/008-flagship-frontierholdを対象に、
+シード数を50〜100へ拡大した稀な組み合わせ探索と、9つの共通パターン間の相互干渉確認
+（特に適応型リスク撤退とwallReserve/outpostReserveの資金予約が競合し得るか）を実施した。
+
+### 検出したバグ: マップ最深部の袋小路でtripsToSurfaceが数千回に発散する
+
+seed 1〜100・8戦略（計800ラン）のヘッドレス比較で、`balanced`戦略seed=61（tripsToSurface=6142）と
+`balanced-adaptive`戦略seed=77（同6009）の2件で、他の同種ラン（bottomReached=trueの他13件は
+13〜153回）と比べて桁違いのtripsToSurfaceを検出した。
+
+デバッグ用の一時トレーススクリプト（`headless/debug-bottom-loop.ts`、調査後に削除済み）で
+tick単位の座標・phase・タイル種別を追跡した結果、原因は`src/core/game.ts`本体ではなく
+`headless/simulate.ts`のBotの探索ヒューリスティックにあると判明した:
+
+1. マップ最深部(y=H-1=160)の隅に前線基地を建てた後、隣接する採掘済みタイル1マス以外に
+   掘る先も迂回橋を架ける先も無い完全な袋小路に入る個体が稀に発生する
+   （down方向は常にマップ外＝`minEscapeBridgeCost`が「壁ではない(0)」と正しく判定するため
+   wallReserveは働かない。文字通り"その先に何も無い"ケースであり、迂回橋で解決可能な壁とは別種）
+2. shopフェーズのボットは購入すべきものが無いと機械的に`{type:'move',dir:'down'}`で潜行を再開する
+3. 再開した潜行は隣接1マス（例: 基地の右隣）へ移動→そこでも前進不可→基地(OUTPOSTタイル)へ
+   戻る、という3tickの往復で完結し、基地タイルへ戻るたびに`arriveAtBase()`が呼ばれ
+   `tripsToSurface`が1増える。これが行き止まりと気づかず無限に繰り返される
+
+### 修正: 行き止まりを検知したら潜行の自動再開を止める
+
+`headless/simulate.ts`のBotクラスに、潜行セッションごとの最大移動距離（基地からのチェビシェフ距離）を
+測る`diveStartPos`/`diveMaxDist`を追加し、基地の隣接1マス圏（距離1以下）から実質的に一歩も
+出られないセッションが3回連続したら`giveUpDiving`フラグを立てて以後は基地で待機するだけにする
+よう変更した。既存のwallReserve（迂回橋代を貯めて資金が貯まるまで待つ、資金面で解決可能な壁向け）
+とは独立した仕組みで、「そもそも資金では解決不可能な行き止まり」だけを対象にする設計とした。
+
+`src/core/game.ts`（ゲーム本体）は無変更。実プレイヤーがこの状況に陥ることは想定していない
+（自分で行き止まりと判断して別行動を選べるため）ため、この修正はヘッドレス検証ボット固有の
+ナビゲーション改善であり、バランス調整ではない。
+
+### 検証結果
+
+- 修正前後でseed=61 balanced: tripsToSurface 6142→28、seed=77 balanced-adaptive: 6009→31
+  （いずれも副次効果として、無駄な往復に費やしていた残り時間を通常の稼ぎ・購入に回せるようになり
+  upgradesBought・scoreも改善した）
+- 20シード（1〜20）×8戦略のヘッドレス再比較で、死亡数（mining-first 9/20、mining-first-adaptive 6/20
+  等）を含む全指標がcycle8-finalの記録値と完全一致し、今回の修正が既存の主要シード集計に
+  一切影響しないことを確認した
+- 拡大した100シード（1〜100）×8戦略（計800ラン）の再検証で、上記2件以外の異常は
+  `combat-first`/`combat-first-adaptive`のseed=77（bridgesBuilt=53、中央値1）のみで、
+  これはpropsDestroyedByEnemy=0・finalHp160/160・6000tick完走・score483（同戦略の中央値付近）と
+  健全であり、「drill投資が少ないcombat-firstが壁の多いマップで迂回橋に頼る」という設計通りの
+  自然な分散と判断し、対応不要とした
+- 適応型リスク撤退とwallReserve/outpostReserveの資金予約競合については、mining-first/combat-first/
+  balancedの各adaptive戦略とその固定版を100シード全件で突き合わせ、「固定版が完走するのに
+  adaptive版だけが停滞・低進捗になる」パターンを機械的に検出したが該当ゼロ件だった。両者は
+  それぞれ別の条件（wallReserve/outpostReserveは金額、adaptiveRiskRetreatはHP比率）で
+  ゲーティングされており、資金予約を奪い合って共倒れになるような競合は本100シードの範囲では
+  発生しないことを確認した
+
+`npm run build`・`npm run simulate`とも正常終了。
