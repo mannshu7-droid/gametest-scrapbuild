@@ -4,12 +4,14 @@
 
 ## 現在位置
 
-- サイクル: 8
-- 要素: 本命ゲームの磨き上げ継続（新規ゲーム番号は切らず、games/008-flagship-frontierholdをそのまま拡張。
-  008final提案参照: (1)危険度UIヒントに反応する適応型ボット戦略の追加検証、(2)マップ最深部到達時の
-  区切り・報酬演出、(3)mining-first戦略の初見詰みやすさの再検討）
-- 次に行う回: **4回目（FINAL REVIEW。games/008-flagship-frontierholdの総括レビューを作成し、
-  routine-state.mdを次サイクルへ進める）**
+- サイクル: 9
+- 要素: 本命ゲームの統合ストレステスト（新規ゲーム番号は切らず、games/008-flagship-frontierholdを
+  そのまま対象にする。cycle8-final提案参照: (1)シード数を50〜100に拡大した稀な組み合わせ探索、
+  (2)9つの共通パターン間の相互干渉確認〔特に適応型リスク撤退とwallReserve/outpostReserveの資金
+  予約が競合し得るか〕。目立った新規課題が見つからなければ本命ゲームのコアループ検証が収束したと
+  判断し、以降は低頻度のメンテナンス的な磨き上げへ移行することも検討する）
+- 次に行う回: **1回目（BUILD+REVIEW相当。上記のストレステストを実施し、必要な修正があれば着手して
+  reviews/008-flagship-frontierhold-cycle9-v1.mdを書く）**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -72,6 +74,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-19 | 8 | 1（BUILD+REVIEW相当） | 008finalが提案した3つの優先課題に対応。(1)適応型ボット戦略: `headless/simulate.ts`に`mining-first-adaptive`/`combat-first-adaptive`/`balanced-adaptive`を新規追加。`combatRiskLevel`が`danger`のとき購入優先度でhp/atkを繰り上げ、低HPを待たずに自主的に帰還するロジックを追加した。(2)最深部到達演出: `src/core/game.ts`にy=160到達時の一度きりの+300moneyボーナスと`Metrics.bottomReached`、`src/render/renderer.ts`にHUDバナー（`GameState.bottomReachedBanner`）を追加。(3)初見詰みやすさ対策: `combatRiskLevel`が初めてsafe以外になった瞬間に一度だけ強調バナー（`GameState.firstRiskWarningBanner`）を表示（バランス・ボットロジックには非接続）。20シード×8戦略のヘッドレス比較で、最深部に到達しない3戦略（combat-first/bridge-reliant/balanced-no-outpost）がfinal時点と完全にゼロ差分であることを確認し副作用なしを裏付けた一方、mining-first-adaptiveは死亡9/20→6/20（-33%）・balanced-adaptiveは2/20→1/20に改善した。ブラウザAIPでP01(seed301)を`mining-first`（固定）と`mining-first-adaptive`の両方で6000tick再生し、**固定戦略はfinalと完全に同一のtick4524死亡を再現し、適応型戦略は同一シードで死亡を完全に回避した**（finalHp41/140、maxHp100→140、score447→501）ことを確認。P02(seed302)は`combat-first`/`combat-first-adaptive`で完全に同一の結果となり、安全なビルドには適応ロジックが介入しないことも確認した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle8-v1.md作成、判定FIX（適応型戦略のパラメータ調整、combat-first-adaptiveの介入機会不足への対応可否はv2で判断）。package.jsonのversionを0.4.0へ、spec.mdにサイクル8の修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル8・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-07-19 | 8 | 2（FIX+REVIEW） | cycle8-v1指摘#1〜#3の要否判断を実施。(1)combat-first-adaptiveの介入機会不足（指摘#2）は「安全なビルドには何も起きない」設計通りの挙動と再確認し対応不要と判断。(2)mining-first-adaptiveの安全側への振れすぎ（指摘#1/#3）は、`priorityFor`を強制的にbaseへ固定する診断実行でavgMoneyEarned-44%等の主因が`adaptiveRiskRetreat`ではなく`'caution'`状態でのhp優先繰り上げ（drill投資を長期間後回しにする）と特定。'caution'側の繰り上げを外す変更も試したが、適用するとcycle8-v1の中核シナリオ（P01 seed301の死亡回避）がtick4414死亡へ回帰することをheadless・ブラウザAIP両方で確認したため不採用とし、'caution'/'danger'とも繰り上げは維持することにした。aggregate指標の低下はP01シナリオを救う安全機構の意図した代償と判断。副作用が無いと確認できた2点のみ反映: `'danger'`側の繰り上げからatkを除外（combatRiskLevelはmaxHpのみで決まりatkを考慮しないため無駄なdrill投資の後回しにしかならない）、`adaptiveRiskRetreat`にHP閾値（`maxHp*0.85`）を追加（被弾ゼロの満タンHPでの即時撤退を防止）。20シード比較でmining-first-adaptiveはv1と完全一致（判断通り）、combat-first-adaptive・balanced-adaptiveはわずかに改善（balanced-adaptive死亡1/20→0/20）。ブラウザAIPでP01(seed301)/P02(seed302相当)をmining-first-adaptiveで6000tick再生し、headlessと完全一致する結果（seed301: finalHp41/140で完走・死亡回避シナリオ維持、seed302: tick5334死亡）を確認。seed302の死亡は`git stash`で変更前コードでも同一に再現することを確認し、本回の回帰ではなくcycle8-v1から存在する既存挙動（適応型戦略は期待値のリスク低減であり個別シードの安全を保証しない）と判明、新規課題#3として記録。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle8-v2.md作成、判定FIX。package.jsonのversionを0.5.0へ、spec.mdにサイクル8・2回目の修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル8・run3（FIX only）へ進めた | (本PR) |
 | 2026-07-19 | 8 | 3（FIX only） | cycle8-v2指摘#3（seed302でmining-first-adaptiveがmining-first固定より早く死ぬ逆転現象）の対応可否を費用対効果で判断した結果、**対応不要**と判断（`src/core/game.ts`・`headless/simulate.ts`とも変更なし）。追加調査として、逆転がseed302固有の現象か主要20シード（1〜20）でも起きるかを`over`フラグで突き合わせたところ、「適応型が死亡を救う」ケースが4件（seed9/16/17/20、固定は道中で死亡・適応型は完走）に対し「適応型の方が悪化する」逆転ケースは1件のみ（seed10、固定はmaxDepth160で完走・適応型はtick2041で死亡）と判明し、seed302と合わせても救済4件・逆転2件で救済の方が明確に多いことを定量確認した。逆転の発生メカニズムをseed10のログ（kills・damageDealt・damageTakenいずれも適応型側が大幅に大きい）で調べ、本ゲームが単一PRNGストリームをtickごとに消費する決定論設計のため、ボットの行動差（'caution'/'danger'での優先度変更・早期撤退）がその時点からのRNG消費タイミングを変え、以降の敵配置・遭遇順が固定戦略と別の展開へ分岐することが原因と特定した（適応ロジック固有の欠陥ではなく、行動依存でRNG消費が分岐する設計に内在する性質）。cycle8-v2で「'caution'側の繰り上げを弱めるとaggregate指標は改善するがP01 seed301の中核救済シナリオが壊れる」トレードオフが既に確認済みであるため、個別シードの逆転を潰す方向の変更はこのリスクを再び持ち込むと判断し見送った。npm run build / npm run simulateとも既存コードのまま正常終了することを確認。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspecs/008-flagship-frontierhold/spec.mdの「サイクル8・3回目（FIX only）で実施した判断」節に記載し、routine-state.mdをサイクル8・run4（FINAL REVIEW）へ進めた | (本PR) |
+| 2026-07-20 | 8 | 4（FINAL REVIEW） | 008-flagship-frontierholdサイクル8の総括レビュー（reviews/008-flagship-frontierhold-cycle8-final.md）を作成。`src/core/game.ts`・`headless/simulate.ts`ともcycle8・2回目以降無変更のため、本回はコード修正ではなく最終確認と総括判定のみを実施。20シード×8戦略のヘッドレス再検証で全指標がcycle8-v2と完全に一致（ゼロ差分）することを再確認。ブラウザAIPでは`headless/simulate.ts`のBotクラス（適応型リスク判定・wallReserve・outpostReserve等cycle8の全修正を含む最終版）をJS移植してP01(seed301)/P02(seed302)を6000tick再実行し、既存レビュー記録（P01: 固定tick4524死亡→適応型6000tick完走・finalHp41/140・score501、P02: combat-first系は固定/適応型で完全同一のfinalHp70/140・score447、P02をmining-first-adaptiveで実行するとtick5334死亡する逆転現象）を**すべて完全一致で再現**した。さらに最深部到達演出・初回警告バナーをseed10（mining-first、20000tick完走・maxDepth160）で時系列トレースし、firstRiskWarningBannerがtick550、bottomReachedBannerがtick998で発火してから正しく減衰することを確認した。判定はFIX完了・本命ゲーム採用を維持。007final/008finalの3優先課題（適応型ボット・最深部演出・初見詰みやすさ対策）がいずれも解決し、直近の変更が2回連続で「対応不要」判断に収束したことを「磨き上げの収穫逓減」の肯定的シグナルと総括した。次サイクル（サイクル9）はコード修正を前提とせず、シード数を50〜100に拡大した稀な組み合わせ探索と、9つの共通パターン間の相互干渉確認（適応型リスク撤退とwallReserve/outpostReserveの資金予約の競合可能性等）による**本命ゲームの統合ストレステスト**を提案し、目立った新規課題が無ければコアループ検証の収束と低頻度メンテナンスへの移行を検討することとした。games/README.mdの状態列を更新し、routine-state.mdをサイクル9・run1へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
