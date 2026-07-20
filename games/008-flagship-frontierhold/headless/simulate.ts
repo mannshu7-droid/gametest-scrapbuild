@@ -103,6 +103,59 @@ function engineeringLevel(s: GameState): number {
   return s.shop.find((it) => it.id === 'engineering')?.level ?? 0;
 }
 
+/**
+ * サイクル10新規（cycle9-final指摘#1の調査で判明した副次課題への対応）: 既に掘った床
+ * (FLOOR/PROP/OUTPOST)のネットワーク全体をBFSし、現在の採掘威力で掘り進められる最も近い
+ * 「minY行以上の深さにある」未掘削タイルへの次の一手を返す。FORWARD_DIRS（down/right/left）は
+ * 現在地の隣接1マスしか見ないため、既知の坑道網を辿れば掘削可能な行き止まりが別ルート上に
+ * 存在していても発見できない（実測: seed302のP02がマップ右端(x=W-1)付近で完全停滞したケースで、
+ * 直下は要求採掘威力6・drillPower4で掘削不能、右は地図外、左は迂回橋代不足という状況が続き、
+ * FORWARDS_DIRSの単純な1マス判定だけでは永久に手詰まりになっていた）。
+ * minYで深さ下限を絞るのは、既に掘った1マス幅の坑道は左右どちらかの壁に浅い場所の未掘削タイル
+ * （岩・鉱石の欠片等）が高確率で隣接しており、それを無条件に「フロンティア」とみなすと
+ * 実際にはmaxDepthより浅い場所へ逆走するだけで進捗にならない発見をした（実測でfrontierDirが
+ * ほぼ毎回浅い側へのルートを返してしまい、本来必要な迂回橋の貯蓄判断まで到達できなかった）ため。
+ * 固定戦略はこのケースで停滞が確認されていないため、既存の実測値（回帰確認済み）に影響しないよう
+ * isAdaptive戦略限定で使う
+ */
+function bfsToFrontier(s: GameState, minY: number): Dir | null {
+  const p = s.player;
+  const w = s.map.w;
+  const h = s.map.h;
+  const visited = new Uint8Array(w * h);
+  visited[p.y * w + p.x] = 1;
+  const queue: { x: number; y: number; root: Dir }[] = [];
+  let head = 0;
+  const passable = (t: number | null) => t === TILE.FLOOR || t === TILE.PROP || t === TILE.OUTPOST;
+  for (const d of DIRS) {
+    const [dx, dy] = DELTA[d];
+    const nx = p.x + dx;
+    const ny = p.y + dy;
+    if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
+    if (ny >= minY && canDig(s, nx, ny)) return d;
+    const t = tileAt(s, nx, ny);
+    if (!passable(t)) continue;
+    visited[ny * w + nx] = 1;
+    queue.push({ x: nx, y: ny, root: d });
+  }
+  while (head < queue.length) {
+    const cur = queue[head++];
+    for (const d of DIRS) {
+      const [dx, dy] = DELTA[d];
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      if (ny < 0 || ny >= h || nx < 0 || nx >= w) continue;
+      if (visited[ny * w + nx]) continue;
+      if (ny >= minY && canDig(s, nx, ny)) return cur.root;
+      const t = tileAt(s, nx, ny);
+      if (!passable(t)) continue;
+      visited[ny * w + nx] = 1;
+      queue.push({ x: nx, y: ny, root: cur.root });
+    }
+  }
+  return null;
+}
+
 type BaseStrategy = 'mining-first' | 'combat-first' | 'balanced' | 'bridge-reliant' | 'balanced-no-outpost';
 // サイクル8新規（008final提案#1）: combatRiskLevelを読んで動的に優先度・帰還判断を調整する「適応型」戦略。
 // 固定優先度戦略のバリアント名に`-adaptive`を付けて表現する（例: mining-first-adaptive）
@@ -152,10 +205,31 @@ function basePriorityFor(strategy: BaseStrategy): UpgradeId[] {
  * `combatRiskLevel()`はmaxHp()とrecommendedHpForBand()の比だけで決まりatkを一切考慮しないため、
  * atkの繰り上げはcombatRiskLevel自体を改善しない無駄なdrill投資の後回しにしかならず、外しても
  * 20シード比較・P01/P02シナリオともに悪影響が無いことを確認済み
+ *
+ * サイクル10・1回目（cycle9-final指摘#1対応、routine-state.md参照）: 'caution'/'danger'中のhp優先
+ * 繰り上げは、band境界通過直後にmaxDepthの更新が長時間止まっている（＝停滞している）場合には
+ * 適用しない。P02(seed302,balanced-adaptive)で見つかった「'caution'のままdrill/atk投資が
+ * 一生後回しにされ続け、band境界の1歩先で6000tickの83%を棒に振る」問題は、「hpを積んでも
+ * combatRiskLevelがsafeへ改善しない」状況と「単にhpが足りていないだけの状況」を区別できて
+ * いないことが原因（cycle9-final「原因の切り分け」節）。maxDepthの実進捗という結果指標そのものを
+ * 停滞シグナルに使うことで、時間ベースの単純な打ち切りより「本当に行き詰まっているか」を正確に
+ * 判定できる（bot側`stagnantTicks`、直近STAGNATION_TICKS_LIMIT tick以上maxDepthが更新されて
+ * いなければ、hp優先を止めて通常優先度（drill等）に戻す。進捗が再開すれば即座にhp優先へ復帰する）。
+ * cycle8-v2で確認済みの中核救済シナリオ（P01 seed301: 固定戦略は死亡、適応型は完走）はhp優先が
+ * 効き始めてから短時間で発動するため、この停滞判定が長めの閾値である限り干渉しないことを
+ * 20シード比較・P01/P02フルセッションで確認して閾値を決定した（詳細はroutine-state.md参照）
  */
-function priorityFor(strategy: Strategy, riskLevel: 'safe' | 'caution' | 'danger'): UpgradeId[] {
+const STAGNATION_TICKS_LIMIT = 800;
+// 停滞中に基地で貯蓄のみ試みる上限tick数。LABOR_INCOME(1/15tick)ベースでも十分な回数の購入機会を
+// 確保しつつ、際限ない足止めにはしない（詳細はdecide()内コメント参照）
+const STAGNATION_SAVE_CAP = 500;
+function priorityFor(
+  strategy: Strategy,
+  riskLevel: 'safe' | 'caution' | 'danger',
+  stagnant: boolean,
+): UpgradeId[] {
   const base = basePriorityFor(baseOf(strategy));
-  if (!isAdaptive(strategy) || riskLevel === 'safe') return base;
+  if (!isAdaptive(strategy) || riskLevel === 'safe' || stagnant) return base;
   const boosted: UpgradeId[] = ['hp'];
   const rest = base.filter((id) => !boosted.includes(id));
   return [...boosted, ...rest];
@@ -197,6 +271,34 @@ function minEscapeBridgeCost(s: GameState, costMult: number): number {
   return Number.isFinite(minCost) ? minCost : 0;
 }
 
+const FORWARD_DIRS: Dir[] = ['down', 'right', 'left'];
+
+/**
+ * サイクル10新規（cycle9-final指摘#1の調査で判明した副次バグへの対応）: `minEscapeBridgeCost`は
+ * 「次の行のどこかの列に迂回橋不要のタイルがあれば即cost=0」と判定するが、その列が既知の坑道網から
+ * 実際に到達可能かどうかは見ていない。到達不可能な列を根拠にcost=0（＝壁ではない）と誤判定すると、
+ * wallReserveが一切機能せず、貯めるべき金額が定まらないまま停滞し続ける（実測: seed302で
+ * wallReserveが常に0のまま、実際にはx=W-1（地図右端）の直下が要求採掘威力6・drillPower4で
+ * 掘削不能、右は地図外、左は迂回橋代不足という現実の壁に当たっていた）。この関数は
+ * bfsToFrontier（既知の坑道網を辿った到達可能性の確認）が失敗した後の最終手段として、
+ * 「現在地から直接迂回橋を架けられる（＝確実に到達可能な）隣接タイル」の最安コストだけを返す
+ */
+function nearestBlockedBridgeCost(s: GameState, costMult: number): number {
+  const p = s.player;
+  let minCost = Infinity;
+  for (const dir of FORWARD_DIRS) {
+    const [dx, dy] = DELTA[dir];
+    const nx = p.x + dx;
+    const ny = p.y + dy;
+    const t = tileAt(s, nx, ny);
+    if (t === null || enemyAt(s, nx, ny)) continue;
+    if (t === TILE.FLOOR || t === TILE.PROP || t === TILE.OUTPOST) continue;
+    if (requiredDrillPower(t as TileId, bandAt(ny)) <= p.drillPower) continue;
+    minCost = Math.min(minCost, bridgeCost(t as TileId, bandAt(ny), costMult));
+  }
+  return minCost;
+}
+
 class Bot {
   private awaitingHeal = false;
   /** 直近のmineフェーズで観測した「今building可能な位置に前線基地を建てるとしたらの費用」。
@@ -215,12 +317,24 @@ class Bot {
   private deadEndStreak = 0;
   /** マップ最深部(H-1)の袋小路等、行き止まりが確定したら以後は潜行を再開せず基地で待機する */
   private giveUpDiving = false;
+  /** サイクル10新規: これまでに観測したmaxDepthの最大値。停滞（進捗停止）検出の基準点 */
+  private lastMaxDepth = 0;
+  /** maxDepthが更新されないまま経過したtick数。STAGNATION_TICKS_LIMIT以上ならadaptiveのhp優先繰り上げを止める */
+  private stagnantTicks = 0;
+  /** 停滞中に基地で「何も買えないまま」待機し続けたtick数。STAGNATION_SAVE_CAPで頭打ちにし無限待機を防ぐ */
+  private stagnationWaitTicks = 0;
+  /** サイクル10新規: 潜行再開時点でwallReserve分の資金を確保できていたかどうかのスナップショット。
+   * needsReturn内でstagnantを見る際、毎tickの現在の所持金と比較すると、迂回橋を架けて
+   * 支払った直後に「もう資金が足りない」と誤判定して即座に引き返してしまい、せっかく架けた
+   * 橋を渡り切る前に撤退する（実測で確認）。潜行開始時点の1回だけ判定し、その潜行が終わる
+   * （基地に戻る）までは固定する */
+  private diveHasEscapeFunds = true;
 
   constructor(private strategy: Strategy) {
     this.buildsOutposts = strategy !== 'balanced-no-outpost';
   }
 
-  private tryBuy(s: GameState): Action | null {
+  private tryBuy(s: GameState, stagnant: boolean): Action | null {
     const bridgeReserve = this.strategy === 'bridge-reliant' ? BRIDGE_RELIANT_RESERVE : 0;
     const reserve = Math.max(bridgeReserve, this.wallReserve) + (this.buildsOutposts ? this.outpostReserve : 0);
     const skillItem = s.shop.find((it) => it.id === 'skill');
@@ -247,7 +361,7 @@ class Bot {
     ) {
       return { type: 'buy', item: 'drill' };
     }
-    for (const id of priorityFor(this.strategy, s.player.combatRiskLevel)) {
+    for (const id of priorityFor(this.strategy, s.player.combatRiskLevel, stagnant)) {
       const item = s.shop.find((it) => it.id === id);
       if (item && item.nextCost !== null && s.player.money - item.nextCost >= reserve) {
         return { type: 'buy', item: id };
@@ -257,6 +371,18 @@ class Bot {
   }
 
   decide(s: GameState): Action {
+    // サイクル10新規: maxDepthの実進捗を停滞シグナルとして毎tick更新する。tryBuy内のpriorityForが
+    // このtick内で参照するため、他の判定より先に行う
+    if (s.metrics.maxDepth > this.lastMaxDepth) {
+      this.lastMaxDepth = s.metrics.maxDepth;
+      this.stagnantTicks = 0;
+    } else {
+      this.stagnantTicks++;
+    }
+    // 固定戦略は既存のストレステストで停滞が確認されていないため、対象は適応型戦略のみに絞り
+    // 固定戦略の指標（回帰確認済みのベースライン）に一切影響しないようにする
+    const stagnant = isAdaptive(this.strategy) && this.stagnantTicks >= STAGNATION_TICKS_LIMIT;
+
     // depthSinceLastBaseだけを条件に予約すると、貧しいうちから毎トリップ「今日はどうせ届かない貯金」に
     // 全予算を凍結し、序盤の安い購入すら一切できず永久に成長しないままの停滞（実測で確認済み）を招く。
     // 「既にコストの一定割合貯まっている」を条件に加えることで、貧しいうちは通常どおり買い物して
@@ -312,18 +438,43 @@ class Bot {
     if (s.phase === 'shop') {
       if (this.awaitingHeal) {
         if (s.player.hp < s.player.maxHp * RESUME_DIVE_HP_THRESHOLD) {
-          return this.tryBuy(s) ?? { type: 'wait' };
+          return this.tryBuy(s, stagnant) ?? { type: 'wait' };
         }
         this.awaitingHeal = false;
       }
-      const buy = this.tryBuy(s);
-      if (buy) return buy;
+      const buy = this.tryBuy(s, stagnant);
+      if (buy) {
+        this.stagnationWaitTicks = 0;
+        return buy;
+      }
       // 直前のmineフェーズで壁に当たっていて、迂回橋代がまだ貯まっていないなら、
       // 「潜行→壁で足止め→即帰還」という無駄な小刻みな往復（tripsToSurfaceを浪費するだけで
       // 何も進展しない）を作らず、基地で待機して資金が貯まるのを待つ。基地滞在中はLABOR_INCOMEで
-      // 資金が必ず増え続けるため、待機自体が新種の停滞（凍結）にはならない
-      if (this.wallReserve > 0 && s.player.money < this.wallReserve) return { type: 'wait' };
+      // 資金が必ず増え続けるため、待機自体が新種の停滞（凍結）にはならない。
+      // サイクル10新規: wallReserveが判明している（＝壁の実コストを知っている）場合はこちらを
+      // 優先する。money>=wallReserveならこのブロックは待機を返さずすぐ下へ抜け、再潜行して
+      // 実際に迂回橋を架けに行く。以前はここより先に汎用のstagnant待機（下記）を評価していたため、
+      // 貯蓄中にたまたま別の安い購入が挟まるたびにその待機カウンタがリセットされ、money>=wallReserve
+      // に達しても永久に潜行を再試行できない不具合があった（実測: seed302でmoney=54まで貯まっても
+      // 潜行が再開されなかった）
+      if (this.wallReserve > 0) {
+        if (s.player.money < this.wallReserve) return { type: 'wait' };
+      } else if (stagnant) {
+        // サイクル10新規（cycle9-final指摘#1対応）: 壁の実コストがまだ判明していない停滞中は、
+        // 即座に再潜行して同じ壁へ突っ込む（＝進捗ゼロのままtripsToSurfaceだけ浪費する往復）
+        // のではなく、基地に留まってLABOR_INCOMEで資金が貯まるのを待つ。STAGNATION_SAVE_CAP
+        // tick待っても何も買えない場合は、無限に足止めされないよう現在の装備で潜行を再試行する
+        if (this.stagnationWaitTicks < STAGNATION_SAVE_CAP) {
+          this.stagnationWaitTicks++;
+          return { type: 'wait' };
+        }
+        this.stagnationWaitTicks = 0;
+      }
       if (this.giveUpDiving) return { type: 'wait' };
+      // サイクル10新規: この潜行を開始できる＝wallReserveの条件（0か、既に資金を満たしている）を
+      // 満たしたということなので、その判定をこの潜行が終わるまで固定する（詳細はフィールドの
+      // コメント参照）
+      this.diveHasEscapeFunds = this.wallReserve === 0 || s.player.money >= this.wallReserve;
       this.diveStartPos = { x: s.player.x, y: s.player.y };
       this.diveMaxDist = 0;
       return { type: 'move', dir: 'down' };
@@ -382,11 +533,23 @@ class Bot {
       p.digging.remaining <= 3 &&
       p.estFuelToReturn !== null &&
       p.fuel > p.estFuelToReturn + p.digging.remaining * 2 + 2;
+    // サイクル10新規（cycle9-final指摘#1対応）: 停滞中は、既に掘った床の中で行き止まりに突き当たって
+    // 1マスだけ後退する（フェーズC、下記）を繰り返すだけで基地に戻らず、LABOR_INCOMEを一切得られない
+    // まま何もできない往復に陥ることがある（P02 seed302で確認: y=101〜102間で永久往復、基地(y=100)へは
+    // 到達するがtryBuyが何も買えないと即座に再潜行するため滞在時間ゼロで資金が育たない）。
+    // 停滞中はbfsToNearestBase（既に掘った床経由の最短経路）で確実に基地まで戻し、貯蓄の機会を作る。
+    // ただし、この潜行を開始した時点で既に壁の実コスト分を貯め終えていた（diveHasEscapeFunds）場合は
+    // この強制帰還を適用しない。毎tickの現在の所持金で判定すると、迂回橋を架けて支払った直後に
+    // 「もう資金が足りない」と誤判定して即座に引き返してしまい、せっかく架けた橋を渡り切る前に
+    // 撤退する（実測で確認: money>=wallReserveで再潜行した直後、橋を架けて所持金が減った次のtickで
+    // 即座に基地へ引き返し、橋を渡る一手を実行できなかった）
+    const stagnantNeedsReturn = stagnant && !this.diveHasEscapeFunds;
     const needsReturn =
       p.fuel <= 0 ||
       p.cargoUnits >= p.maxCapacity ||
       lowHp ||
       adaptiveRiskRetreat ||
+      stagnantNeedsReturn ||
       (!finishingDigSafely && p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
     if (needsReturn) {
       if (lowHp || adaptiveRiskRetreat) this.awaitingHeal = true;
@@ -410,7 +573,6 @@ class Bot {
     // 横の未探索列を延々と掘り進むだけで、一度も迂回橋を試さないまま同じ深さを横に彷徨い続ける
     // （帯=同じ深さの行は全列が同じ採掘威力を要求するため、横移動では壁を回避できない）。
     // 迂回橋を各方向の「移動/掘削」と同格の選択肢として扱うことで、この横彷徨いより先に迂回橋を検討させる
-    const FORWARD_DIRS: Dir[] = ['down', 'right', 'left'];
     for (const dir of FORWARD_DIRS) {
       const [dx, dy] = DELTA[dir];
       const nx = p.x + dx;
@@ -423,6 +585,26 @@ class Bot {
         const band = bandAt(ny);
         const cost = bridgeCost(t as TileId, band, costMult);
         if (p.money >= cost) return { type: 'build', dir };
+      }
+    }
+
+    // サイクル10新規: 現在地の隣接1マスでは前進も迂回橋も不可能でも、既知の坑道網の別ルート上に
+    // 掘削可能なタイルが残っている場合がある（マップ端で右方向の選択肢が無い等）。フェーズC
+    // （単純な1マス後退）より先に、そこへの経路をBFSで探す。isAdaptive限定（既存コメント参照）
+    if (isAdaptive(this.strategy)) {
+      const frontierDir = bfsToFrontier(s, s.metrics.maxDepth);
+      if (frontierDir) {
+        const [dx, dy] = DELTA[frontierDir];
+        if (!enemyAt(s, p.x + dx, p.y + dy)) return { type: 'move', dir: frontierDir };
+      } else {
+        // サイクル10新規: 既知の坑道網のどこにも掘削可能な逃げ道が無い（bfsToFrontierも失敗）なら、
+        // これは`minEscapeBridgeCost`が誤って見逃していた本物の壁である。現在地から直接迂回橋を
+        // 架けられる隣接タイルの実コストをwallReserveへ設定し直し、貯蓄目標を正しく機能させる
+        const blockedCost = nearestBlockedBridgeCost(s, costMult);
+        if (Number.isFinite(blockedCost)) {
+          this.wallReserve = blockedCost;
+          this.wallRow = p.y + 1;
+        }
       }
     }
 
