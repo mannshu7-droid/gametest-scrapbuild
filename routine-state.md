@@ -6,13 +6,17 @@
 
 - サイクル: 9
 - 要素: 本命ゲームの統合ストレステスト（新規ゲーム番号は切らず、games/008-flagship-frontierholdを
-  そのまま対象にする。1回目で100シードのストレステストを実施し、ゲーム本体の新規課題は0件、
-  唯一の異常（検証ボット固有のtripsToSurface発散バグ）は修正済み。コアループ検証は収束したと
-  判断できる水準に達している）
-- 次に行う回: **2回目（FIX+REVIEW相当。cycle9-v1では致命・重大な指摘が無かったため、追加の
-  ヘッドレス検証項目〔例: さらなるシード拡大、または別の稀な組み合わせの探索〕を軽く実施した上で
-  reviews/008-flagship-frontierhold-cycle9-v2.mdを書く。新規の修正すべき課題が無ければその旨を
-  明記し、3回目（FIX only）は「対応不要」の判断のみで完了させてよい）**
+  そのまま対象にする。1回目で100シードのストレステストを実施しゲーム本体の新規課題は0件、
+  唯一の異常（検証ボット固有のtripsToSurface発散バグ）は修正済み。2回目で新規100シード
+  （101〜200）を追加検証し、検証ボットの帰還判断バグ（掘削完了間際の中断による経済停滞、
+  27%のシードで発生）を検出・修正。副作用として、これまで測れていなかった深部
+  （depth90〜160台）でmining-first/balanced系の死亡率が上昇することが判明した）
+- 次に行う回: **3回目（FIX only。cycle9-v2で可視化された深部の死亡率上昇
+  〔mining-first 51%→64%、balanced 48%→51%等〕について、まずP01/P02のブラウザAIPで
+  実際にこの深さ帯へ到達した際の体感を確認し、通常の被弾蓄積死として妥当か
+  `src/core/game.ts`側のhp/atk投資と敵の深さスケーリングの調整が必要かを判断する。
+  対応不要と判断した場合はその根拠をspec.mdに記載するだけでよい。cycle9-v2で残った
+  「掘削残り4tick以上の貼り付き17シード」への追加対応は優先度低のため今回は見送ってよい）**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -77,8 +81,16 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-19 | 8 | 3（FIX only） | cycle8-v2指摘#3（seed302でmining-first-adaptiveがmining-first固定より早く死ぬ逆転現象）の対応可否を費用対効果で判断した結果、**対応不要**と判断（`src/core/game.ts`・`headless/simulate.ts`とも変更なし）。追加調査として、逆転がseed302固有の現象か主要20シード（1〜20）でも起きるかを`over`フラグで突き合わせたところ、「適応型が死亡を救う」ケースが4件（seed9/16/17/20、固定は道中で死亡・適応型は完走）に対し「適応型の方が悪化する」逆転ケースは1件のみ（seed10、固定はmaxDepth160で完走・適応型はtick2041で死亡）と判明し、seed302と合わせても救済4件・逆転2件で救済の方が明確に多いことを定量確認した。逆転の発生メカニズムをseed10のログ（kills・damageDealt・damageTakenいずれも適応型側が大幅に大きい）で調べ、本ゲームが単一PRNGストリームをtickごとに消費する決定論設計のため、ボットの行動差（'caution'/'danger'での優先度変更・早期撤退）がその時点からのRNG消費タイミングを変え、以降の敵配置・遭遇順が固定戦略と別の展開へ分岐することが原因と特定した（適応ロジック固有の欠陥ではなく、行動依存でRNG消費が分岐する設計に内在する性質）。cycle8-v2で「'caution'側の繰り上げを弱めるとaggregate指標は改善するがP01 seed301の中核救済シナリオが壊れる」トレードオフが既に確認済みであるため、個別シードの逆転を潰す方向の変更はこのリスクを再び持ち込むと判断し見送った。npm run build / npm run simulateとも既存コードのまま正常終了することを確認。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspecs/008-flagship-frontierhold/spec.mdの「サイクル8・3回目（FIX only）で実施した判断」節に記載し、routine-state.mdをサイクル8・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-07-20 | 8 | 4（FINAL REVIEW） | 008-flagship-frontierholdサイクル8の総括レビュー（reviews/008-flagship-frontierhold-cycle8-final.md）を作成。`src/core/game.ts`・`headless/simulate.ts`ともcycle8・2回目以降無変更のため、本回はコード修正ではなく最終確認と総括判定のみを実施。20シード×8戦略のヘッドレス再検証で全指標がcycle8-v2と完全に一致（ゼロ差分）することを再確認。ブラウザAIPでは`headless/simulate.ts`のBotクラス（適応型リスク判定・wallReserve・outpostReserve等cycle8の全修正を含む最終版）をJS移植してP01(seed301)/P02(seed302)を6000tick再実行し、既存レビュー記録（P01: 固定tick4524死亡→適応型6000tick完走・finalHp41/140・score501、P02: combat-first系は固定/適応型で完全同一のfinalHp70/140・score447、P02をmining-first-adaptiveで実行するとtick5334死亡する逆転現象）を**すべて完全一致で再現**した。さらに最深部到達演出・初回警告バナーをseed10（mining-first、20000tick完走・maxDepth160）で時系列トレースし、firstRiskWarningBannerがtick550、bottomReachedBannerがtick998で発火してから正しく減衰することを確認した。判定はFIX完了・本命ゲーム採用を維持。007final/008finalの3優先課題（適応型ボット・最深部演出・初見詰みやすさ対策）がいずれも解決し、直近の変更が2回連続で「対応不要」判断に収束したことを「磨き上げの収穫逓減」の肯定的シグナルと総括した。次サイクル（サイクル9）はコード修正を前提とせず、シード数を50〜100に拡大した稀な組み合わせ探索と、9つの共通パターン間の相互干渉確認（適応型リスク撤退とwallReserve/outpostReserveの資金予約の競合可能性等）による**本命ゲームの統合ストレステスト**を提案し、目立った新規課題が無ければコアループ検証の収束と低頻度メンテナンスへの移行を検討することとした。games/README.mdの状態列を更新し、routine-state.mdをサイクル9・run1へ進めた | (本PR) |
 | 2026-07-20 | 9 | 1（BUILD+REVIEW相当） | cycle8-final提案の統合ストレステストを実施。1〜100シード×8戦略（計800ラン）のヘッドレスシミュレーションを機械的に走査し、`balanced`戦略seed=61（tripsToSurface=6142）・`balanced-adaptive`戦略seed=77（同6009）の2件で、他の同種ラン（13〜153回）と比べ桁違いの異常値を検出した。デバッグトレース（一時スクリプト、調査後に削除済み）で原因を特定: マップ最深部(y=H-1=160)の隅に前線基地を建てた後、掘る先も迂回橋を架ける先も無い完全な袋小路（down方向は常にマップ外＝既存のwallReserve機構が「壁ではない」と正しく判定するため働かない、資金では解決不可能な種類の行き止まり）に入ると、`headless/simulate.ts`のBotが機械的に潜行再開→即座に基地へ戻る3tickサイクルを無限に繰り返し、基地(OUTPOST)タイルへ戻るたびarriveAtBase()が呼ばれtripsToSurfaceが加算され続けていた。**原因は`src/core/game.ts`（ゲーム本体）ではなく検証ボット固有のナビゲーション不備**と特定し、Botに潜行セッションごとの最大移動距離（基地からのチェビシェフ距離）を測る仕組みを追加し、隣接1マス圏から一歩も出られないセッションが3回連続したら以後は潜行を再開せず基地で待機するよう修正した（`src/core/game.ts`は無変更）。修正によりseed=61 tripsToSurface6142→28、seed=77 6009→31まで解消し、20シード基準セットの全指標（死亡数含む）はcycle8-finalと完全一致（回帰なし）を確認。100シード再走査で残った異常は`combat-first`系seed=77のbridgesBuilt=53（同戦略の中央値1）のみで、finalHp160/160・6000tick完走・score483（中央値付近）と健全なため「drill非投資戦略が壁の多い地形で迂回橋に頼る」設計通りの自然な分散と判断し対応不要とした。事前に懸念していた「適応型リスク撤退とwallReserve/outpostReserveの資金予約競合」も、100シード全件で固定戦略とadaptive戦略を突き合わせ「固定版は完走するのにadaptive版だけ停滞」パターンを機械的に検出したが該当ゼロ件で、両者は独立した条件（金額 vs HP比率）でゲートされており競合しないことを確認した。ゲーム本体（`src/core/game.ts`）に関わる新規課題は800ラン中1件も見つからず、routine-state.mdの「目立った新規課題が見つからなければ収束と判断」基準に照らし収束のシグナルと判定した。`src/core/game.ts`を一切変更していないためブラウザAIP再実行は次回（final）にまとめて行うこととし本回は見送った。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle9-v1.md作成、判定FIX。package.jsonのversionを0.6.0へ、spec.mdにサイクル9・1回目の修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル9・run2（FIX+REVIEW相当）へ進めた | (本PR) |
+| 2026-07-20 | 9 | 2（FIX+REVIEW相当） | cycle9-v1の提案どおり新規100シード（101〜200）×8戦略（計800ラン）で追加ストレステストを実施。「ticks=20000完走・死亡なし・maxDepth<45・oreMined<10」を機械的に抽出したところ198/800ラン該当し、うち34シードは`balanced-no-outpost`（前線基地非運用のA/B対照群）単独の想定内貼り付きだったが、残り27シードは前線基地を運用する戦略（mining-first/combat-first/balanced系、最大7戦略）が同時にdepth37〜43へ貼り付いており看過できないと判断した。一時トレース機能（tick範囲指定でphase/y/money/fuel/wallReserve等を出力、調査後に削除済み）でseed=103・mining-first戦略を追跡し原因を特定: 掘削（`p.digging`、複数tick）が残り1〜3tickまで進んだタイミングで`estFuelToReturn + returnMargin`の帰還安全判定が先に発火して撤退へ切り替わり、`applyMove()`が無条件で`p.digging=null`にするため掘削進捗が丸ごと失われる（004以来の既知パターン「掘削中断で進捗リセット」の別形態）。壁の直前まで到達できる燃料容量ちょうどで運用しているシードでは次のトリップでも全く同じ地点・タイミングで撤退するため貫通が永遠に発生せず、加えて基地到着直後に即座に再潜行してしまいLABOR_INCOMEも貯まらず経済が完全停滞していた。**原因は`src/core/game.ts`（ゲーム本体）ではなく検証ボットの帰還判断の優先順位**と特定し、`needsReturn`判定に「掘削残り3tick以下、かつそれを終えてもなお`estFuelToReturn`以上の燃料が残る」場合に限り安全マージン判定を一時的に無効化する`finishingDigSafely`を追加した（掘削の実質2倍燃料消費＋完了後+1マス分のestFuelToReturn増分を見込んだ`digging.remaining*2+2`の余裕を要求。fuel<=0・満載・低HP・adaptiveRiskRetreatの安全側トリガーは変更せず維持。`src/core/game.ts`は無変更）。修正によりdepth37〜43への複数戦略同時貼り付きは27→17件（-37%）、貼り付き総ラン数は198→99（-50%）に減少し、avgMaxDepth/avgScore/avgMoneyEarnedも軒並み改善した（例: mining-first avgMaxDepth91.9→105.4、balanced 81.0→100.1）。一方で副作用として、貼り付きから解放され深部へ到達できるようになったmining-first/balanced系の死亡数（100中）が上昇した（mining-first 51→64、balanced 48→51、mining-first-adaptive 33→40。combat-first系・bridge-reliantはほぼ変化なし）。個別ラン（finalHp/kills/damageTaken）を確認しこれは新種の理不尽な即死ではなく従来到達できなかった深部での通常の被弾蓄積死と判明したため、`src/core/game.ts`の難易度カーブ自体の後退ではなく「これまで測れていなかった深部の難易度が検証精度向上により初めて可視化された」結果と判断した。20シード基準セットでは`digging.remaining`の安全係数（×1 or ×2+2）による結果への影響は検出できなかったため、より安全側の`×2+2`を採用した。残存する貼り付き（17シード）は掘削残り4tick以上のケース等が原因と推定され本回は対応を見送った。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle9-v2.md作成、判定FIX。spec.mdにサイクル9・2回目の修正内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル9・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
+
+- **[サイクル9・run3への引き継ぎ] 深部（depth90〜160台）でのmining-first/balanced系の死亡率上昇
+  （51%→64%、48%→51%等）への対応要否**: cycle9-v2で検証ボットの帰還判断バグを修正した副作用として
+  可視化された。まずP01/P02のブラウザAIPで実際にこの深さ帯へ到達した際の体感を確認し、通常の
+  被弾蓄積死として妥当か`src/core/game.ts`側のhp/atk投資と敵の深さスケーリングの調整が必要かを
+  判断すること。対応不要と判断した場合はその根拠をspec.mdに記載するだけでよい（詳細は
+  reviews/008-flagship-frontierhold-cycle9-v2.mdのLearnings参照）
 
 - 001-mineforge（ルーチン導入前の複合プロトタイプ）の Learnings:
   敵はプレイヤー近くに湧かせないと脅威にならない／「壁がないと死ぬ」水準から調整を始める／

@@ -366,12 +366,28 @@ class Bot {
       isAdaptive(this.strategy) &&
       p.combatRiskLevel === 'danger' &&
       p.hp <= p.maxHp * ADAPTIVE_DANGER_HP_RATIO;
+    // サイクル9・2回目（ストレステストで検出）: estFuelToReturnの安全マージン(returnMargin)ちょうどで
+    // 燃料切れになるシード（例: 貫通まであと数tickの掘削中）では、毎回「壁の直前まで潜っては
+    // 掘削完了の数tick前にestFuelToReturnトリガーで撤退→進捗リセット」を繰り返し、鉱石も稼げず
+    // LABOR_INCOME（基地滞在中のみ加算）も貯まらないまま経済が完全に停滞する個体を100シードの
+    // ストレステストで確認した（20〜27%のシードでmining-first/combat-first/balanced系がdepth37〜43に
+    // 貼り付いたまま20000tick終了）。掘削残りわずか（3tick以下）かつ、それを終えてもなお
+    // estFuelToReturn以上の燃料が残る場合に限り、通常のreturnMarginより先に掘削完了を優先させることで
+    // 「あと一歩」で進捗を捨てて撤退する無駄なループを避ける。fuel<=0・満載・低HP・adaptiveRiskRetreatの
+    // 安全側トリガーはそのまま優先されるため、危険な深追いにはならない
+    // 掘削中は通常の移動(PASSIVE_FUEL_DRAIN=1/tick)に加えDIG_FUEL_COST=1/tickが上乗せされ実質2倍消費、
+    // かつ掘削完了後は1マス深く進むためestFuelToReturnも(概ね)+1増える。両方を見込んだ余裕を要求する
+    const finishingDigSafely =
+      p.digging !== null &&
+      p.digging.remaining <= 3 &&
+      p.estFuelToReturn !== null &&
+      p.fuel > p.estFuelToReturn + p.digging.remaining * 2 + 2;
     const needsReturn =
       p.fuel <= 0 ||
       p.cargoUnits >= p.maxCapacity ||
       lowHp ||
       adaptiveRiskRetreat ||
-      (p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
+      (!finishingDigSafely && p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + returnMargin);
     if (needsReturn) {
       if (lowHp || adaptiveRiskRetreat) this.awaitingHeal = true;
       const dir = bfsToNearestBase(s);
