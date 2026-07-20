@@ -535,3 +535,72 @@ fuel<=0・満載・低HP・adaptiveRiskRetreatの安全側トリガーは変更�
 `npm run build`・`npm run simulate`とも正常終了。死亡率上昇の妥当性（mining-first/balanced系の
 中盤以降のhp/atk優先度見直しが必要か、あるいは意図通りのビルド間トレードオフか）と残存する
 貼り付き17件への対応要否は、次回（サイクル9・3回目 or 4回目）で判断する。
+
+## サイクル9・3回目（FIX only）で実施した判断（cycle9-v2の死亡率上昇への対応要否）
+
+routine-state.mdの指示どおり、cycle9-v2で可視化された深部（depth90〜160台、band4〜7）での
+mining-first/balanced系の死亡率上昇（mining-first 51%→64%、balanced 48%→51%等）について、
+ブラウザAIPでP01/P02が実際にこの深さ帯へ到達した際の体感を確認し、通常の被弾蓄積死として妥当か
+`src/core/game.ts`側のhp/atk投資と敵の深さスケーリングの調整が必要かを判断した。
+**`src/core/game.ts`・`headless/simulate.ts`とも変更なし**（レビューは書かず、3回目FIX onlyの
+規約通り本節に判断根拠を記載する）。cycle9-v2で残った「掘削残り4tick以上の貼り付き17シード」への
+追加対応は指示どおり優先度が低いため今回は見送った。
+
+### 検証方法
+
+`headless/simulate.ts`のBotクラス（mining-first/balanced優先度）をJavaScriptへ忠実に移植し、
+`window.__AIP__`経由でP01(seed301, mining-first相当)・P02(seed302, balanced相当)を
+`maxTicks=20000`まで実行した。band・combatRiskLevel（`'safe'|'caution'|'danger'`）が変化する
+tickをすべて記録し、死亡までの経過を時系列で確認した。
+
+### P01(seed301, mining-first): band3〜4境界での長期消耗死
+
+tick2759でfinalHp0・maxDepth85（band4境界、y=81）で死亡した（drillLevel3、hpLevel0・atkLevel0の
+まま。mining-firstの優先度リストはhp/atkをdrill/capacity/fuel/engineeringより後段に置くため、
+band4の壁を越える採掘力は確保できてもhp/atk投資が最後まで一度も行われなかった）。
+combatRiskLevelはtick481（band2到達）で初めて`safe`以外（`caution`）になり、tick646
+（band4到達、y=81）で初めて`danger`になった。以後死亡（tick2759）まで**2113tickにわたって
+`caution`/`danger`を行き来し続け、一度も`safe`に戻らなかった**。HPもtick646時点の100から
+6（tick1326）〜63（tick2388）の間で乱高下しながら緩やかに削られ、最終的にtick2759で0になった。
+「band3(y=80)へ撤退→band4(y=81)へ再度飛び込む」を単一の境界上で十数回繰り返す往復パターンが
+観測され、hp/atk投資をしないまま危険域に居座り続けた結果の消耗死であることが明確だった。
+
+### P02(seed302, balanced): 最深部到達後、繰り返しの際どい生還の末の消耗死
+
+tick6037でfinalHp0・maxDepth160（band7、**マップ最下段への到達を含む`bottomReached=true`**）で
+死亡した。死亡時点でdrillLevel6・hpLevel5（maxHp200）・atkLevel7とP01とは対照的に手厚い投資が
+できており、band5(y=101)到達時点でcombatRiskLevelは一時`danger`になったが（tick920）、
+その後の投資でband7(y=141)到達時の一時的な`danger`（tick1221）を最後に、残り約4750tickは
+一貫して`caution`（`danger`には至らない）で推移した。死亡直前のtick4519〜5946の区間では、
+band6/7(y=140/141)への出入りのたびにHPが200中11・18・29・50前後まで落ち込んでは、撤退・
+基地での回復（RESUME_DIVE_HP_THRESHOLD=60%）を経て100超まで戻し再潜行する、という
+「際どい生還」を**7回以上**繰り返していた。最終的な死亡（tick5946のhp78→tick6037のhp0、
+91tickでの決着）も、この一連の危険な潜行パターンの延長線上で「今回はギリギリで生き残れなかった」
+という帰結であり、combatRiskLevelが実際には一切上昇していないタイミングでの理不尽な即死では
+なかった。
+
+### 判断: 対応不要（`src/core/game.ts`は無変更）
+
+以下の理由により、hp/atk投資曲線・敵の深さスケーリングいずれのバランス調整も見送った:
+
+1. **両ペルソナとも、死亡は「警告なしの理不尽な即死」ではなく「長時間かけて可視化された危険の
+   末の消耗死」だった。** P01はdanger初回から2113tick（死亡までの77%の時間）警告が出続けた末の
+   死亡、P02は同じ最深部境界への出入りを7回以上生還した末の8回目の失敗であり、いずれもプレイヤー
+   （ボット）が危険を無視し続けた、または繰り返しリスクを取り続けた結果という筋の通った死因だった
+2. **P02はhp/atk投資を優先すれば同じ深部（band7、マップ最下段）へ実際に到達・長時間活動できる
+   ことを実測で確認した。** 死亡率上昇はband4〜7そのものが理不尽に難しいのではなく、
+   003finalが確立した「同じ被弾数でもビルド次第で生死が分かれる」パターンが、cycle9-v2の
+   finishingDigSafely修正で到達可能になった新しい深度帯でも一貫して機能していることの表れである
+3. **combatRiskLevelは意図どおり「装備の静的な妥当性」を示す指標であり、瞬間的なHP増減には
+   反応しない設計**（cycle8で較正済み）。P02の死亡直前にcombatRiskLevelが上昇しなかったのは
+   バグではなく、hp200・atk投資済みという装備水準そのものは変わらず「妥当」なままで、単に
+   その回の潜行で運悪くダメージを集中して受けたことを示している。これも003finalの
+   「ビルド次第で生死が分かれる」の範疇であり、hp/atk投資と敵の深さスケーリングの数値自体を
+   変更する理由にはならない
+4. **mining-first死亡率の偏りは005final・006v2・cycle8v1〜v3で繰り返し確認済みの「投資判断の
+   帰結」パターンの再確認に留まった。** P01はmining-first優先度がhp/atk投資を後回しにする設計
+   どおりの挙動を示しており、今回新たに発見された欠陥ではない
+
+`npm run build`・`npm run simulate`（既存コードのまま）で正常終了することを再確認した。
+残る論点（mining-first系の死亡率上昇を本命ゲームとして新規プレイヤーにどう見せるか、
+残存する掘削貼り付き17シードへの対応要否）はサイクル9・4回目（FINAL REVIEW）で総括すること。
