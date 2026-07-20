@@ -474,3 +474,64 @@ tick単位の座標・phase・タイル種別を追跡した結果、原因は`s
   発生しないことを確認した
 
 `npm run build`・`npm run simulate`とも正常終了。
+
+## サイクル9・2回目（統合ストレステスト追加検証、FIX+REVIEW相当）で実施した修正内容
+
+cycle9-v1の提案どおり、シード範囲をさらに拡大した新規100シード（101〜200）×8戦略（計800ラン）で
+稀な組み合わせ探索を実施した。
+
+### 検出したバグ: 燃料安全マージンが「あと数tickで貫通」する掘削を毎回中断させ経済が完全停滞する
+
+100シード中20〜27%（戦略により変動）で、mining-first/combat-first/balanced系（前線基地を
+建てられる戦略）がdepth37〜43付近に貼り付いたまま20000tick終了する個体を検出した
+（`balanced-no-outpost`単独で貼り付く34件は007以来の想定通りの対照群挙動だが、それとは別に
+outpost運用戦略も含め7戦略が同時に貼り付く個体が27件あった）。
+
+`headless/simulate.ts`のrunOne()に一時トレース機能（tick範囲・wallReserve/estFuelToReturnの
+可視化、調査後に削除済み）を追加しseed=103・mining-first戦略を追跡したところ、原因は
+`src/core/game.ts`ではなく`headless/simulate.ts`のBotの帰還判断の優先順位にあると判明した:
+
+1. 掘削中(`p.digging`、複数tickかけて完了する)のタイルが「あとdig.remaining=1〜3tickで貫通」
+   という状態でも、`needsReturn`の`estFuelToReturn + returnMargin`判定が掘削完了より先に
+   発火し、掘削途中で撤退へ切り替わる
+2. 撤退のため隣接FLOORへ`move`すると`applyMove()`が無条件で`p.digging = null`にするため、
+   ほぼ完了していた掘削進捗が丸ごと失われる（004以来の既知パターン「掘削中断で進捗リセット」の
+   再発）
+3. この壁の直前まで到達できる燃料容量ちょうどで運用しているシードでは、次のトリップでも
+   全く同じ地点まで潜っては同じタイミングで撤退するため、`貫通`が永遠に発生しない。加えて
+   基地(y=0)に到着した瞬間に即座に再潜行してしまい（wallReserve自体が発火しない: 別の
+   カラムがdrillPowerで貫通可能なため`minEscapeBridgeCost`は「壁ではない(0)」と正しく判定する）
+   LABOR_INCOME（基地滞在中のみ加算）も一切貯まらず、経済が完全に停滞する
+
+### 修正: 掘削完了間際は燃料安全マージンより掘削完了を優先する
+
+`headless/simulate.ts`の`needsReturn`判定に、「掘削残り3tick以下、かつそれを終えてもなお
+`estFuelToReturn`以上の燃料が残る」場合に限り安全マージン判定を一時的に無効化する
+`finishingDigSafely`を追加した。掘削は通常の移動(PASSIVE_FUEL_DRAIN=1/tick)に加え
+DIG_FUEL_COST=1/tickが上乗せされ実質2倍消費すること、掘削完了後は1マス深く進むため
+`estFuelToReturn`も概ね+1増えることの両方を見込んだ余裕（`digging.remaining*2+2`）を要求する。
+fuel<=0・満載・低HP・adaptiveRiskRetreatの安全側トリガーは変更せず維持しているため、
+危険な深追いにはならない。`src/core/game.ts`（ゲーム本体）は無変更。
+
+### 検証結果
+
+- 20シード（1〜20）×8戦略の再比較で、`p.digging.remaining`の係数（×1か×2+2か）による
+  結果への影響は無い（この20シード内では発生する余裕がいずれの係数でも十分だったため）ことを
+  確認したうえで、より安全側の`×2+2`を採用した
+- 修正前後（100シード×8戦略、seed101〜200）で、depth37〜43への複数戦略同時貼り付きは
+  27件→17件（-37%）、貼り付き総ラン数は198→99（-50%）に減少し、avgMaxDepth・avgScore・
+  avgMoneyEarnedも軒並み改善した（例: mining-first avgMaxDepth91.9→105.4、balanced
+  avgMaxDepth81.0→100.1）。一方でdeaths（100中）はmining-first 51→64、balanced 48→51、
+  mining-first-adaptive 33→40、combat-first系・bridge-reliantはほぼ変化なし（3/100・2/100・
+  0/100前後を維持）と、**貼り付きから解放されて到達できるようになった深部（band境界を越えた
+  先）の難易度がmining-first/balanced系のhp/atk投資水準に対して従来より厳しいことが露呈した**
+- この副作用（死亡率上昇）は`src/core/game.ts`の難易度カーブ自体は無変更のまま、検証ボットが
+  従来より深くまで到達できるようになったことで「これまで測れていなかった深部の難易度」を
+  初めて測れるようになった結果であり、新種の理不尽な即死ではなく通常の被弾蓄積死であることを
+  個別ラン（finalHp/kills/damageTaken）で確認した
+- 残存する貼り付き（17件）は今回のfinishingDigSafely以外の要因（掘削残りが4tick以上、または
+  そもそも燃料容量そのものが不足）と推定され、本回では追加修正を見送った
+
+`npm run build`・`npm run simulate`とも正常終了。死亡率上昇の妥当性（mining-first/balanced系の
+中盤以降のhp/atk優先度見直しが必要か、あるいは意図通りのビルド間トレードオフか）と残存する
+貼り付き17件への対応要否は、次回（サイクル9・3回目 or 4回目）で判断する。
