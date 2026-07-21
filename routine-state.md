@@ -14,17 +14,21 @@
   実コスト計算・潜行開始時点スナップショットの6点を`headless/simulate.ts`へ追加し、
   個別シード・20シード・100シードの3段階で検証。固定戦略は完全に無変化（回帰なし）、
   適応型戦略はavgMaxDepth+31〜45%・100シードでのdeaths改善（40→25/100、32→11/100）を確認。
-  ブラウザAIP（ヘッドレスで記録した行動列をwindow.__AIP__.run()で再生）でも
-  ヘッドレスと完全一致する結果を確認済み
-- 次に行う回: **2回目（FIX+REVIEW。v1のバグ・問題リストに致命・重大な残課題はない
-  （#1・#2は同一セッション内で発見・修正済み、#3は100シード規模ではむしろ改善と確認済みの
-  軽微事項、#4は環境制約で対応不可）ため、本回は追加の確度検証を主目的とする。推奨作業:
-  (a) reviews/008-flagship-frontierhold-cycle10-v1.mdの「行動列再生」方式ではなく、
-  修正後のBot決定ロジックを実際にJSへ移植し、ブラウザで生きた（decide()を毎tick呼ぶ）
-  フルセッション（6000tick）をP01・P02それぞれ実行し、決定ロジックの移植自体に誤りがないか
-  確認する、(b) 新しいシード範囲（例: 201〜300）でさらに100シードのストレステストを行い、
-  cycle10-v1で見つけた改善傾向（死亡率低下）が別サンプルでも再現するか確認する、
-  (c) 残課題があれば修正しv2レビューを書く（改善が無ければその旨を明記してFIX判定を維持）**
+  サイクル10・2回目で追加の確度検証を実施（詳細はreviews/008-flagship-frontierhold-cycle10-v2.md
+  参照）: (a) Bot決定ロジックを検証用一時ファイル`src/bot.ts`へ移植し、ブラウザで`decide()`を
+  毎tick呼ぶ生きたフルセッション（6000tick）をP01(seed301,mining-first-adaptive)・
+  P02(seed302,balanced-adaptive)で実行したところ、ヘッドレスの記録値と全指標が完全一致し
+  移植ミスがないことを確認（検証後`src/bot.ts`は削除済み、cycle8由来の一時ファイル方式を踏襲）、
+  (b) 新シード範囲(201〜300)100シード×8戦略で再検証し、101〜200と同水準の改善
+  （mining-first-adaptive deaths25→26/100、balanced-adaptive 11→14/100、いずれも固定版比で
+  大幅に低い）が再現することを確認。残課題は発見されず、`src/core/game.ts`は無変更のまま。
+  判定FIX継続
+- 次に行う回: **3回目（FIX only）。v2で発見された新規の致命・重大な問題はないため、
+  本回は義務的な修正は無い。routine.mdの規約上3回目は「FIXのみ」だが、修正対象が無い場合は
+  cycle10-v1/v2で積み残された軽微事項（cycle10-v1指摘#3: mining-first-adaptiveの20シード規模
+  死亡+1件は100シード規模では改善と判定済みで対応不要、#4: screenshot環境制約は対応不可）の
+  最終確認、または前回提案（本命ゲームのタッチ操作対応の仕様具体化、ビルド差の影響検証）の
+  着手検討を行い、4回目（FINAL REVIEW）でサイクル10の総括とサイクル11への提案をまとめること**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -93,6 +97,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-20 | 9 | 3（FIX only） | cycle9-v2で可視化された深部（depth90〜160台、band4〜7）でのmining-first/balanced系の死亡率上昇（mining-first 51%→64%、balanced 48%→51%等）への対応要否を判断した。`headless/simulate.ts`のBotクラス（mining-first/balanced優先度）をJavaScriptへ忠実に移植し、`window.__AIP__`経由でP01(seed301, mining-first)・P02(seed302, balanced)をブラウザ上でmaxTicks=20000まで実行し、band・combatRiskLevelの変化点を時系列で記録した。P01はtick2759でfinalHp0・maxDepth85（band4境界）で死亡したが、combatRiskLevelはtick646（band4到達）で初めて`danger`になって以降、死亡まで2113tickにわたり`caution`/`danger`を行き来し続け一度も`safe`に戻らなかった（hp/atk投資を最後まで一度も行わないまま危険域に居座り続けた消耗死）。P02はtick6037でfinalHp0・maxDepth160（band7、`bottomReached=true`でマップ最下段へ到達済み）で死亡したが、死亡までにdrillLevel6・hpLevel5（maxHp200）・atkLevel7という手厚い投資を行っており、死亡直前のtick4519〜5946の区間ではband6/7への出入りのたびにHPが200中11〜29まで落ち込んでは基地で回復し再潜行する「際どい生還」を7回以上繰り返した末の消耗死だった。両ペルソナとも「警告なしの理不尽な即死」ではなく「長時間可視化された危険、または繰り返しの際どい生還の末の消耗死」であることを実測で確認し、P02がhp/atk投資を優先すればband7・マップ最下段まで実際に到達・長時間活動できることも確認できたため、**`src/core/game.ts`・`headless/simulate.ts`とも変更なし（対応不要）**と判断した。cycle9-v2で残った「掘削残り4tick以上の貼り付き17シード」への追加対応は指示どおり優先度低のため見送った。npm run build / npm run simulateとも既存コードのまま正常終了。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspecs/008-flagship-frontierhold/spec.mdの「サイクル9・3回目（FIX only）で実施した判断」節に記載し、routine-state.mdをサイクル9・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-07-21 | 9 | 4（FINAL REVIEW） | サイクル9総括レビュー（reviews/008-flagship-frontierhold-cycle9-final.md）を作成。まずヘッドレス再検証として20シード（1〜20）と新規100シード（101〜200）を再走査し、全8戦略の集計値（avgScore/avgMaxDepth/deaths等）がcycle9-v2の「修正後」の値と完全に一致することを確認した（`src/core/game.ts`・`headless/simulate.ts`ともcycle9・2回目以降無変更・回帰なし）。続けて`headless/simulate.ts`のBotをJS移植し、cycle9-v3とは異なり**適応型戦略**（P01=mining-first-adaptive seed301、P02=balanced-adaptive seed302）でブラウザAIPのフルセッション（6000tick）を実行したところ、両者ともtick1000前後（セッションの17%）で深度が頭打ちになり、残り83%（約5000tick）を新たな深度到達なしの停滞に費やす新課題を発見した。P01はmaxDepth85（y65〜85を往復、kills37・skillUses42の活発だが不毛な消耗戦、finalHp79/140で生存）、P02はmaxDepth102（y100〜102で静止、finalHp160/160の満タンHPで安全に足踏み）。cycle9-v3が同一シードで固定戦略を先に検証していたため直接比較したところ、P01のmaxDepth85は固定mining-firstと共通の壁（適応型固有ではない）だったが、**P02のmaxDepth102は適応型固有の停滞**（固定balancedは同一シードでマップ最下段まで到達済み）と判明した。原因は`priorityFor()`の「'caution'/'danger'の間は常にhpを最優先」という単純な二値ルールがdrill/atk投資を長時間後回しにすることと特定し、cycle8-v2で確認済みの「安全機構の意図した代償（aggregate指標の低下）」というトレードオフの実体を、フルセッション実測で「6000tickの83%を停滞に費やす」という具体的な体験として初めて可視化した。両ペルソナの最終問い（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）は**今回のセッションに限りNo**と判定したが、これはゲームシステム全体の欠陥ではなく適応型戦略の設計粒度の課題と切り分けた。判定はFIX（本命ゲーム採用は維持）としつつ、この新課題をサイクル10の最優先課題として持ち越した。games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run1へ進めた | (本PR) |
 | 2026-07-21 | 10 | 1（BUILD+REVIEW相当） | cycle9-finalの最優先課題「適応型戦略のband境界停滞」に対応。P02(seed302, balanced-adaptive)を`headless/simulate.ts`へ一時トレース機能（調査後に削除済み）で追跡したところ、真因は当初の仮説（`priorityFor()`のhp優先繰り上げそのもの）よりさらに深いところにあると判明した: (1)壁（drillPower不足）に当たると1マス後退→即座に前進判定が再成立→また同じ壁へ、を無限に繰り返すだけで前線基地に滞在する時間がほぼゼロになり、基地滞在中のみ加算されるLABOR_INCOMEが一切貯まらない、(2)既存の`minEscapeBridgeCost`が「次の行のどこかに逃げ道があれば即cost=0」と判定するが、その列が既知の坑道網から実際に到達可能かを見ていないため、到達不可能な列を根拠に「壁ではない」と誤判定し`wallReserve`（貯蓄目標）が機能しない。この2つの複合で、`src/core/game.ts`は無変更のまま検証ボット側だけが構造的な経済停滞に陥っていた。対応として`headless/simulate.ts`へ(a)`s.metrics.maxDepth`ベースの停滞シグナル（800tick更新なしで`stagnant`）、(b)停滞中はhp優先を通常優先度へ戻す、(c)停滞中は1マス後退ではなく`bfsToNearestBase`で確実に基地へ戻し貯蓄する、(d)既知の坑道網全体をBFSして深さ制約付きで掘削可能タイルを探す`bfsToFrontier`、(e)到達可能な隣接タイルの実コストで`wallReserve`を上書きする`nearestBlockedBridgeCost`、(f)潜行開始時点の資金充足判定を固定する`diveHasEscapeFunds`（迂回橋を架けて支払った直後に「資金不足」と誤判定し橋を渡り切る前に引き返す新規バグを開発中に発見・修正）を追加した。全修正はisAdaptive限定のため固定戦略は無変化。個別シード（P01 seed301 finalHp79→140・P02 seed302 maxDepth102→133、milestonesReached5→6、bridgesBuilt0→4）、20シード（mining-first-adaptive avgMaxDepth80.8→129.8、balanced-adaptive 83.6→141.2、bottomReached2/20→14/20、固定戦略は完全に無変化）、100シード（101〜200、balanced-adaptive avgMaxDepth96.6→140.3・deaths32→11/100、mining-first-adaptive avgMaxDepth100.4→132.0・deaths40→25/100、固定戦略はcycle9-final報告値と完全一致）の3段階で検証し、100シード規模ではむしろ死亡率が改善することを確認した。cycle8-v2で確認済みの中核救済シナリオ（P01 seed301の死亡回避）も維持されている。ブラウザAIPはヘッドレスで記録した6000tick分の行動列を`window.__AIP__.run()`で再生する方式で検証し、P01・P02とも全指標がヘッドレスと完全一致することを確認した（`computer.screenshot`は8サイクル連続タイムアウト、既知の環境制約）。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle10-v1.md作成、判定FIX。package.jsonのversionを0.8.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-07-21 | 10 | 2（FIX+REVIEW相当） | cycle10-v1に致命・重大な残課題はないため、指示どおり追加の確度検証を実施。(a) Bot決定ロジック（`headless/simulate.ts`のBotクラス、cycle10-v1の6点の修正すべてを含む）を検証用一時ファイル`src/bot.ts`（cycle8・1回目のJS移植手法を踏襲、検証後に削除済み）へ移植し、`window.__AIP__`経由で`decide()`を毎tick呼び出す生きたフルセッション（6000tick）をP01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)で実行したところ、finalHp/maxDepth/score/bridgesBuilt/milestonesReachedを含む全指標がcycle10-v1のヘッドレス記録値と完全一致し、「行動列再生」方式では検証できなかった決定ロジック移植自体の正しさを確認した。(b) 新シード範囲（201〜300、cycle9・cycle10-v1と非重複）で100シード×8戦略のヘッドレス比較を実施し、cycle10-v1が101〜200で確認した改善傾向がほぼ同水準で再現することを確認した（mining-first-adaptive avgMaxDepth132.0→130.3・deaths25→26/100、balanced-adaptive avgMaxDepth140.3→141.7・deaths11→14/100、combat-first-adaptive deaths0→1/100）。固定版との比較でも優位は維持（201〜300のdeaths: mining-first63%→mining-first-adaptive26%、balanced51%→balanced-adaptive14%）。固定戦略5種の集計値もcycle9-finalの101〜200報告値とほぼ一致し、`src/core/game.ts`無変更下でのシード範囲間の挙動一貫性を裏付けた。新規の致命・重大な問題は発見されず、`src/core/game.ts`・`headless/simulate.ts`とも変更なし。npm run build（一時ファイル追加時・削除後の両方）は正常終了。reviews/008-flagship-frontierhold-cycle10-v2.md作成、判定FIX（判定を維持、追加修正なし）。package.jsonのversionを0.8.1へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
