@@ -10,6 +10,10 @@
  * 4種のショップ優先度（mining-first/combat-first/balanced/bridge-reliant）はすべて前線基地を建てる設定で走らせ、
  * 加えて「balanced-no-outpost」（balancedの優先度だが前線基地を一切建てない）をA/B比較用に追加し、
  * 前線基地が実際にmaxDepth・生存率・往復コストへ与える効果を定量的に確認する。
+ *
+ * サイクル11新規: 上記に加え、9種の「single-stat all-in」戦略（drill/capacity/fuel/atk/hp/atkspeed/
+ * skill/muffler/engineering、それぞれ対象カテゴリのみに全額投資し他は一切買わない）を追加し、
+ * どのアップグレードカテゴリが単独で生存率・到達深度にどれだけ寄与するかを定量的に切り分ける。
  */
 import {
   Game,
@@ -156,7 +160,26 @@ function bfsToFrontier(s: GameState, minY: number): Dir | null {
   return null;
 }
 
-type BaseStrategy = 'mining-first' | 'combat-first' | 'balanced' | 'bridge-reliant' | 'balanced-no-outpost';
+type BaseStrategy =
+  | 'mining-first'
+  | 'combat-first'
+  | 'balanced'
+  | 'bridge-reliant'
+  | 'balanced-no-outpost'
+  // サイクル11新規（cycle10-final提案#1「ビルド差が結果に与える影響のさらなる検証」）:
+  // 既存8戦略は「優先度リスト全体の傾向の違い」の比較にとどまり、個々のアップグレード
+  // カテゴリが単独でどれだけ生存率・到達深度に寄与するかは切り分けられていなかった。
+  // 各カテゴリだけに全力投資し他は一切買わない「single-stat all-in」戦略を全9カテゴリ分
+  // 追加し、定量的に切り分ける
+  | 'drill-all-in'
+  | 'capacity-all-in'
+  | 'fuel-all-in'
+  | 'atk-all-in'
+  | 'hp-all-in'
+  | 'atkspeed-all-in'
+  | 'skill-all-in'
+  | 'muffler-all-in'
+  | 'engineering-all-in';
 // サイクル8新規（008final提案#1）: combatRiskLevelを読んで動的に優先度・帰還判断を調整する「適応型」戦略。
 // 固定優先度戦略のバリアント名に`-adaptive`を付けて表現する（例: mining-first-adaptive）
 type AdaptiveStrategy = 'mining-first-adaptive' | 'combat-first-adaptive' | 'balanced-adaptive';
@@ -179,7 +202,19 @@ const BALANCED: UpgradeId[] = ['drill', 'atk', 'engineering', 'hp', 'capacity', 
 const BRIDGE_RELIANT: UpgradeId[] = ['atk', 'hp', 'skill', 'atkspeed', 'engineering', 'fuel', 'capacity', 'muffler'];
 const BRIDGE_RELIANT_RESERVE = 30;
 
+const ALL_IN_SUFFIX = '-all-in';
+/** 'hp-all-in' → 'hp' のようにsingle-stat all-in戦略が対象とするUpgradeIdを取り出す。対象外の戦略はnull */
+function singleStatOf(strategy: Strategy): UpgradeId | null {
+  if (!strategy.endsWith(ALL_IN_SUFFIX)) return null;
+  return strategy.slice(0, -ALL_IN_SUFFIX.length) as UpgradeId;
+}
+
 function basePriorityFor(strategy: BaseStrategy): UpgradeId[] {
+  const single = singleStatOf(strategy);
+  // single-stat all-inは対象カテゴリ以外は一切買わない（優先度リストに1項目しか入れない）。
+  // maxLevelに達した後は他カテゴリへフォールバックせず金だけ貯まり続ける状態を意図的に許容し、
+  // 「このカテゴリだけに全振りしたら何が起きるか」を他カテゴリの寄与と混ざらない形で観測する
+  if (single) return [single];
   if (strategy === 'mining-first') return MINING_FIRST;
   if (strategy === 'combat-first') return COMBAT_FIRST;
   if (strategy === 'bridge-reliant') return BRIDGE_RELIANT;
@@ -351,9 +386,13 @@ class Bot {
     // 一度もdrillLevelが上がらない個体が確認された（迂回橋の都度払いが恒久投資の代替として機能しすぎた副作用）。
     // bridge-reliant戦略はdrill非投資自体がA/B比較の検証対象のため対象外とし、それ以外の戦略では初回の
     // drill購入だけはwallReserve/outpostReserveを無視してよいことにし、投資の第一歩を踏み出せるようにする
+    // サイクル11新規: single-stat all-in戦略はこの早期drill購入の対象外にする。drill-all-in自身は
+    // 既にpriorityFor先頭がdrillのため無関係、それ以外（hp-all-in等）にこの特例を適用すると
+    // 「対象カテゴリ以外は一切買わない」という単一カテゴリ隔離実験の前提が崩れてしまう
     const drillItem = s.shop.find((it) => it.id === 'drill');
     if (
       this.strategy !== 'bridge-reliant' &&
+      !singleStatOf(this.strategy) &&
       drillItem &&
       drillItem.level === 0 &&
       drillItem.nextCost !== null &&
@@ -700,6 +739,15 @@ for (const strategy of [
   'mining-first-adaptive',
   'combat-first-adaptive',
   'balanced-adaptive',
+  'drill-all-in',
+  'capacity-all-in',
+  'fuel-all-in',
+  'atk-all-in',
+  'hp-all-in',
+  'atkspeed-all-in',
+  'skill-all-in',
+  'muffler-all-in',
+  'engineering-all-in',
 ] as Strategy[]) {
   const results: RunResult[] = [];
   for (const seed of seeds) {
