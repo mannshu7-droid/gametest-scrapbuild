@@ -6,35 +6,31 @@
 
 - サイクル: 11
 - 要素: 本命ゲームの磨き上げ継続（新規ゲーム番号は切らず、games/008-flagship-frontierholdを
-  そのまま対象にする）。サイクル10は3回にわたり(1) cycle9-finalの最優先課題「適応型戦略の
-  band境界停滞」を修正（停滞シグナル・優先度復帰・強制帰還・坑道網フロンティア探索・壁の実
-  コスト計算・潜行開始時点スナップショットの6点を`headless/simulate.ts`へ追加）、(2) 決定
-  ロジックのブラウザ生きた実行での検証と新シード範囲(201〜300)100シードでの再現確認、(3)
-  本命ゲームのタッチ操作仕様具体化（画面レイアウト・D-pad・アクションボタン・ショップUI・
-  マルチタッチ・セーフエリア）と005〜008が継承していた「8方向パッド」誤記の4方向への修正、
-  を実施。4回目（総括、reviews/008-flagship-frontierhold-cycle10-final.md）では、同一シード
-  （seed301 mining-first-adaptive・seed302 balanced-adaptive）でのサイクル間比較により
-  band境界停滞解消を実測で確認した（cycle9-final時点: P01 maxDepth85で83%停滞・finalHp79/140、
-  P02 maxDepth102で83%停滞・finalHp160/160 → 本サイクル: P01 maxDepth91・finalHp140/140満タン、
-  P02 maxDepth133(+30%)・finalHp180/180満タン・score469→656)。20シード×8戦略の再検証でも
-  適応型戦略のbottomReached率（mining-first-adaptive10/20・balanced-adaptive14/20）が固定戦略
-  （最大2/20）を大きく上回ることを確認。ヘッドレス記録行動列のブラウザ再生でゲームエンジンの
-  実行パス一致（回帰なし）も再確認した（検証用一時ファイル・publicへのJSON配置はすべて削除済み、
-  `src/core/game.ts`・`headless/simulate.ts`とも無変更）。両ペルソナともcycle9-finalのNo判定
-  からYesへ反転し、「危険度ヒントを状況適応的に使う（停滞シグナル併用の適応ロジック）」を
-  10番目の共通パターンとして確立したと総括。判定FIX完了・本命ゲーム採用維持
-- 次に行う回: **1回目（BUILD+REVIEW相当）。cycle10-v1/v2から持ち越されていた「ビルド差が
-  結果に与える影響のさらなる検証」に着手すること。cycle10-finalの提案に従い、現在の8戦略
-  （優先度リストの全体的傾向の違い）に加えて、単一カテゴリへの極端な集中投資（例: drillのみ・
-  hpのみ等の"single-stat all-in"戦略）を`headless/simulate.ts`へ新規追加し、どのアップグレード
-  カテゴリが単独で生存率・到達深度にどれだけ寄与するかを定量的に切り分ける検証を行う。
-  `src/core/game.ts`（ゲーム本体）を変更する想定ではなく、検証ボットの拡張が主体になる見込み
-  だが、検証の過程でバランス上の課題（cycle9-v2やcycle10-v1で経験したような、検証精度が
-  上がったことで新たに可視化される問題）が見つかった場合はgame.ts側の修正も検討すること。
-  検証の結果、新たな致命的バランス崩壊が見つからなければ、本命ゲームの磨き上げに一区切りを
-  つけ実際のタッチ操作実装（Capacitor移植）へ進む判断を次々回以降で検討することも視野に入れる
-  （タッチ操作仕様はサイクル10・3回目で具体化済みのため、いつでも着手可能）。新規ゲーム番号は
-  引き続き切らず、games/008-flagship-frontierholdをそのまま対象にすること**
+  そのまま対象にする）。サイクル11・1回目（reviews/008-flagship-frontierhold-cycle11-v1.md）
+  では、cycle10-finalが持ち越した「ビルド差が結果に与える影響のさらなる検証」に着手した。
+  既存8戦略に加え9種の「single-stat all-in」戦略（drill/capacity/fuel/atk/hp/atkspeed/skill/
+  muffler/engineeringの各カテゴリだけに全額投資し他は一切買わない）を`headless/simulate.ts`へ
+  新規追加し、20シード×17戦略で比較した。結果、drill-all-inだけがavgMaxDepth105.5（2位の
+  62.8を大きく引き離す）と死亡率55%（他8カテゴリは0〜5%）という「深さと引き換えの死亡リスク」
+  を明確に持つことを定量確認し、003final・008 v2で個別セッション観察に留まっていたパターンを
+  一般化した。drill以外の8カテゴリはavgMaxDepthが50.5〜62.8の狭い範囲に収束し、これは対象
+  カテゴリの投資完了後に貯まる余剰資金が迂回橋の都度払いに回るためで、「投資した効果」ではなく
+  「迂回橋を買えるだけの資金があるか」がmaxDepthの主因になっていたと判明した。ブラウザAIPで
+  P01相当(seed301, drill-all-in)・P02相当(seed302, hp-all-in)の行動列再生を行い、ヘッドレスと
+  完全一致（drill-all-inはマップ最深部y=160到達と同時に死亡、hp-all-inは死亡なしでHP満タン
+  完走・maxDepth57）することを確認した。`src/core/game.ts`は無変更。新たな致命的バランス崩壊は
+  見つからなかったため判定FIX、本命ゲーム採用は継続
+- 次に行う回: **2回目（FIX+REVIEW相当）。cycle11-v1で新規の致命・重大バグは見つからなかった
+  ため、修正必須の項目はない。cycle11-v1の軽微指摘（`games/008-flagship-frontierhold/index.html`
+  の`<title>`が"Outpost (007)"のまま残っている表記ミス、対応不要と判断したが軽微な修正として
+  ついでに直しても良い）への対応可否を検討しつつ、cycle11-v1が提案した次のテーマ（実際の
+  タッチ操作実装＝Capacitor移植への着手判断）に向けた準備を検討すること。cycle11-v1は
+  「`src/core/game.ts`はcycle9-v2以降8回の検証回を通じて無変更のまま安定しており、これ以上
+  ヘッドレス検証を積み重ねてもゲーム本体への新しい修正には繋がりにくいフェーズに入っている」
+  と総括しているため、2回目はFIX対象が乏しい場合、Capacitor移植の最小スコープ（どこまでを
+  1サイクルで実装するか）を仕様書で具体化する作業に充ててもよい（移植自体の実装着手は3回目
+  以降、または次サイクルへ回すことも検討可）。新規ゲーム番号は引き続き切らず、
+  games/008-flagship-frontierholdをそのまま対象にすること**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -106,6 +102,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-21 | 10 | 2（FIX+REVIEW相当） | cycle10-v1に致命・重大な残課題はないため、指示どおり追加の確度検証を実施。(a) Bot決定ロジック（`headless/simulate.ts`のBotクラス、cycle10-v1の6点の修正すべてを含む）を検証用一時ファイル`src/bot.ts`（cycle8・1回目のJS移植手法を踏襲、検証後に削除済み）へ移植し、`window.__AIP__`経由で`decide()`を毎tick呼び出す生きたフルセッション（6000tick）をP01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)で実行したところ、finalHp/maxDepth/score/bridgesBuilt/milestonesReachedを含む全指標がcycle10-v1のヘッドレス記録値と完全一致し、「行動列再生」方式では検証できなかった決定ロジック移植自体の正しさを確認した。(b) 新シード範囲（201〜300、cycle9・cycle10-v1と非重複）で100シード×8戦略のヘッドレス比較を実施し、cycle10-v1が101〜200で確認した改善傾向がほぼ同水準で再現することを確認した（mining-first-adaptive avgMaxDepth132.0→130.3・deaths25→26/100、balanced-adaptive avgMaxDepth140.3→141.7・deaths11→14/100、combat-first-adaptive deaths0→1/100）。固定版との比較でも優位は維持（201〜300のdeaths: mining-first63%→mining-first-adaptive26%、balanced51%→balanced-adaptive14%）。固定戦略5種の集計値もcycle9-finalの101〜200報告値とほぼ一致し、`src/core/game.ts`無変更下でのシード範囲間の挙動一貫性を裏付けた。新規の致命・重大な問題は発見されず、`src/core/game.ts`・`headless/simulate.ts`とも変更なし。npm run build（一時ファイル追加時・削除後の両方）は正常終了。reviews/008-flagship-frontierhold-cycle10-v2.md作成、判定FIX（判定を維持、追加修正なし）。package.jsonのversionを0.8.1へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run3（FIX only）へ進めた | (本PR) |
 | 2026-07-21 | 10 | 3（FIX only） | cycle10-v2に致命・重大な残課題がなかったため、義務的な修正は無し。routine-state.mdの指示どおり、cycle9-final以来持ち越されてきた提案「本命ゲームのタッチ操作対応の仕様具体化」に着手した。`specs/008-flagship-frontierhold/spec.md`に新セクション「サイクル10・3回目（FIX only）で実施した内容」を追加し、現行の入力セット（4方向移動＋独立ボタン5つ＋ショップ購入9項目、`src/render/input.ts`基準）に対応する画面レイアウトを具体化した: (1)仮想D-pad（画面左下28%×45%、デッドゾーン画面幅3%、タップ即座にfacing更新）、(2)アクションボタン5つ（画面右下、最小48×48dp/44×44pt、ボタン間8px以上、前線基地建設ボタンは条件未達時グレーアウト）、(3)ショップUI（数字キーに対応する物理概念がタッチにはないため、アイコン+名称+価格+レベルのカードを2カラムタップ式に刷新、所持金不足カードはグレーアウト）、(4)マルチタッチ（D-pad保持中の他指ボタンタップをtouch identifierごとに独立判定）、(5)セーフエリア（画面端16pxマージン）。あわせて、007→008へ継承されていた「移動は仮想8方向パッド」という記述が実装（`src/core/types.ts`のDir型はup/down/left/rightの4方向のみ、斜め移動は未実装）と食い違っていることを発見し、005〜008で継承された誤記と特定した上で008では「4方向」へ修正した（005〜007のspec.mdは過去の記録として遡って修正せず）。`src/core/game.ts`・`headless/simulate.ts`はいずれも無変更（spec.mdのみの変更）。npm run build / npm run simulateとも既存コードのまま正常終了を確認。レビューは書かず（3回目FIX onlyの規約通り）、games/README.mdの008行の説明とpackage.jsonのversionは変更なし（コード変更がないため）。cycle10-v1/v2の軽微事項（mining-first-adaptiveの死亡+1件、screenshot環境制約）は引き続き対応不要のまま4回目へ持ち越し。routine-state.mdをサイクル10・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-07-22 | 10 | 4（FINAL REVIEW） | サイクル10総括レビュー（reviews/008-flagship-frontierhold-cycle10-final.md）を作成。`npm run build`正常終了を確認したうえで20シード（1〜20）×8戦略のヘッドレス再検証を行い、適応型戦略のbottomReached率（mining-first-adaptive10/20・balanced-adaptive14/20）が固定戦略（最大2/20）を大きく上回ることを確認した（cycle10-v2で実施済みの決定ロジックのライブ検証・201〜300の100シード再検証は変更なしのため再実行不要と判断し参照のみ）。定性評価として、`headless/simulate.ts`のBotクラス・Strategy型を一時的にexportし（検証後に`git checkout`で復元）、P01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)の6000tick分の行動列を一時ファイルへ記録、`public/`へ一時配置してブラウザで`window.__AIP__.run()`により再生し、全指標（finalHp/maxDepth/score/bridgesBuilt/milestonesReached）がヘッドレスと完全一致することを確認した（検証用ファイルはすべて削除済み、`git status`クリーン確認済み）。さらにcycle9-finalが記録した同一シードの停滞時点の数値と本回を直接比較し、**band境界停滞の解消を実測で裏付けた**（P01: maxDepth85(83%停滞)→91・finalHp79/140→140/140満タン、P02: maxDepth102(83%停滞)→133(+30%)・score469→656）。両ペルソナの最終問い（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はcycle9-finalのNoからYesへ反転したと判定。「危険度ヒントを状況適応的に使う（停滞シグナル併用の適応ロジック）」を10番目の共通パターンとして確立し、タッチ操作仕様の具体化（3回目）と合わせてサイクル10全体を総括した。判定はFIX完了・本命ゲーム採用を維持。次サイクル11への提案として、cycle10-v1/v2から持ち越されていた「ビルド差が結果に与える影響のさらなる検証」（単一カテゴリ全振り戦略の新規追加による定量的な寄与度切り分け）に着手することとし、検証結果次第でタッチ操作実装（Capacitor移植）への移行判断も視野に入れることを明記した。`computer.screenshot`は10サイクル連続タイムアウト（既知の環境制約、コンソールエラー0件は確認）。`src/core/game.ts`・`headless/simulate.ts`とも無変更のためpackage.jsonのversionは0.8.1のまま。games/README.mdの状態列を更新し、routine-state.mdをサイクル11・run1へ進めた | (本PR) |
+| 2026-07-22 | 11 | 1（BUILD+REVIEW相当） | cycle10-finalの提案どおり「ビルド差が結果に与える影響のさらなる検証」に着手。`headless/simulate.ts`へ9種の「single-stat all-in」戦略（drill/capacity/fuel/atk/hp/atkspeed/skill/muffler/engineeringの各カテゴリだけに全額投資し他は一切買わない）を新規追加し、優先度リストを対象カテゴリ1項目のみに固定した（maxLevel到達後もフォールバックせず余剰資金を貯め続ける設計）。既存の「drill以外は初回購入だけwallReserve/outpostReserveを無視できる」特例（008 v2追加）はsingle-stat all-in戦略には適用せず除外し、単一カテゴリ隔離実験の純度を保った。20シード×17戦略（既存8＋新規9）のヘッドレス比較で、既存8戦略はcycle10-finalと完全に同一の結果（回帰なし）を再確認したうえで、新規9戦略から**drillだけが「深さと引き換えの死亡リスク」という明確なトレードオフを持つ**（avgMaxDepth105.5で2位62.8を大きく引き離す一方、死亡率55%で他8カテゴリの0〜5%から突出）ことを定量確認した。drill以外の8カテゴリはavgMaxDepthが50.5〜62.8の狭い範囲に収束し、これは対象カテゴリ投資完了後の余剰資金が（優先度リストと無関係に動く）迂回橋の都度払いに回るためで、「投資効果」ではなく「迂回橋を買えるだけの資金の有無」がmaxDepthの主因になっていたと判明した。ブラウザAIPでBotクラス・Strategy型を一時的にexportし（検証後に`git checkout`で復元）、P01相当(seed301, drill-all-in)・P02相当(seed302, hp-all-in)の6000tick分の行動列を一時ファイルへ記録・`public/`へ一時配置して`window.__AIP__.run()`で再生したところ、全指標（finalHp/maxDepth/score/bridgesBuilt/milestonesReached/over）がヘッドレスと完全一致することを確認した（drill-all-inはマップ最深部y=160到達と同時に死亡、hp-all-inは死亡なしHP満タンで完走・maxDepth57。検証用一時ファイルはすべて削除済み、`git status`クリーン確認済み）。`src/core/game.ts`は無変更。新たな致命的バランス崩壊は見つからず、drill-all-inの死亡率55%はあえて他カテゴリへ一切投資しない極端な戦略にのみ現れる意図通りのトレードオフと判断した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle11-v1.md作成、判定FIX。package.jsonのversionを0.8.2へ、spec.mdにサイクル11・1回目の内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル11・run2（FIX+REVIEW相当）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
@@ -162,6 +159,19 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
   100シードのストレステストを行い、run1で見つけた死亡率低下という改善傾向が別サンプルでも
   再現するか確認する、(c) 残課題があれば修正しv2レビューを書く（改善が無ければその旨を明記して
   FIX判定を維持）
+
+- **[サイクル11・run2への引き継ぎ] cycle11-v1に致命・重大な残課題はない**
+  （reviews/008-flagship-frontierhold-cycle11-v1.mdのバグ・問題リストは軽微2件のみで、いずれも
+  対応不要と判断済み: #1はindex.htmlの`<title>`表記ミスでプレイに無関係、#2はscreenshot未実施
+  だが行動列再生検証で代替済み）。run2は義務的なFIXが乏しい回になる見込みのため、指示どおり
+  以下のいずれかに充てること: (a) cycle11-v1が提案した次のテーマ（実際のタッチ操作実装＝
+  Capacitor移植）に向けて、移植の最小スコープ（1サイクルでどこまで実装するか、
+  `src/render/`への追加範囲、ビルド・依存関係の変更点）を仕様書で具体化する、(b) 軽微な
+  index.html表記ミスをついでに修正する、(c) cycle11-v1で発見した「drill以外の8カテゴリが
+  迂回橋依存でmaxDepthが収束する」知見を踏まえ、迂回橋の都度払いコスト自体のバランス調整が
+  必要かを追加検証する（ただし新たな致命課題ではないため優先度は低い）。`src/core/game.ts`は
+  cycle9-v2以降9回の検証回を通じて無変更のまま安定しているため、無理にコード変更を作る
+  必要はなく、cycle11-v1のLearningsが示すとおりCapacitor移植への移行判断を軸に検討すること
 
 - 001-mineforge（ルーチン導入前の複合プロトタイプ）の Learnings:
   敵はプレイヤー近くに湧かせないと脅威にならない／「壁がないと死ぬ」水準から調整を始める／
