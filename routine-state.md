@@ -23,12 +23,19 @@
   （mining-first-adaptive deaths25→26/100、balanced-adaptive 11→14/100、いずれも固定版比で
   大幅に低い）が再現することを確認。残課題は発見されず、`src/core/game.ts`は無変更のまま。
   判定FIX継続
-- 次に行う回: **3回目（FIX only）。v2で発見された新規の致命・重大な問題はないため、
-  本回は義務的な修正は無い。routine.mdの規約上3回目は「FIXのみ」だが、修正対象が無い場合は
-  cycle10-v1/v2で積み残された軽微事項（cycle10-v1指摘#3: mining-first-adaptiveの20シード規模
-  死亡+1件は100シード規模では改善と判定済みで対応不要、#4: screenshot環境制約は対応不可）の
-  最終確認、または前回提案（本命ゲームのタッチ操作対応の仕様具体化、ビルド差の影響検証）の
-  着手検討を行い、4回目（FINAL REVIEW）でサイクル10の総括とサイクル11への提案をまとめること**
+- 次に行う回: **4回目（FINAL REVIEW）。サイクル10・3回目（本回）でcycle9-final以来
+  持ち越されていた「本命ゲームのタッチ操作対応の仕様具体化」に着手し、
+  specs/008-flagship-frontierhold/spec.mdへ「サイクル10・3回目（FIX only）で実施した内容」
+  節を追加した（画面レイアウト・仮想D-pad・アクションボタン・タップ式ショップUI・マルチタッチ・
+  セーフエリアを具体化。あわせて005〜008の全仕様書が継承していた「仮想8方向パッド」という
+  誤記を、実装（`src/core/types.ts`のDir型）が4方向のみであることを確認のうえ4方向へ修正）。
+  ゲームロジック（`src/core/game.ts`・`headless/simulate.ts`）は無変更、npm run build /
+  npm run simulateとも既存コードのまま正常終了を確認済み。cycle10-v1/v2の軽微事項
+  （mining-first-adaptiveの死亡+1件・screenshot環境制約）は引き続き対応不要のまま。
+  4回目では両ペルソナで総括レビューreviews/008-flagship-frontierhold-cycle10-final.mdを書き、
+  サイクル10全体（band境界停滞修正・確度検証・タッチ操作具体化）の評価と、次サイクル11への
+  提案（前回提案から未着手の「ビルド差が結果に与える影響のさらなる検証」を含めて検討）を
+  まとめ、routine-state.mdをサイクル11・run1へ進めること**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -98,6 +105,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-21 | 9 | 4（FINAL REVIEW） | サイクル9総括レビュー（reviews/008-flagship-frontierhold-cycle9-final.md）を作成。まずヘッドレス再検証として20シード（1〜20）と新規100シード（101〜200）を再走査し、全8戦略の集計値（avgScore/avgMaxDepth/deaths等）がcycle9-v2の「修正後」の値と完全に一致することを確認した（`src/core/game.ts`・`headless/simulate.ts`ともcycle9・2回目以降無変更・回帰なし）。続けて`headless/simulate.ts`のBotをJS移植し、cycle9-v3とは異なり**適応型戦略**（P01=mining-first-adaptive seed301、P02=balanced-adaptive seed302）でブラウザAIPのフルセッション（6000tick）を実行したところ、両者ともtick1000前後（セッションの17%）で深度が頭打ちになり、残り83%（約5000tick）を新たな深度到達なしの停滞に費やす新課題を発見した。P01はmaxDepth85（y65〜85を往復、kills37・skillUses42の活発だが不毛な消耗戦、finalHp79/140で生存）、P02はmaxDepth102（y100〜102で静止、finalHp160/160の満タンHPで安全に足踏み）。cycle9-v3が同一シードで固定戦略を先に検証していたため直接比較したところ、P01のmaxDepth85は固定mining-firstと共通の壁（適応型固有ではない）だったが、**P02のmaxDepth102は適応型固有の停滞**（固定balancedは同一シードでマップ最下段まで到達済み）と判明した。原因は`priorityFor()`の「'caution'/'danger'の間は常にhpを最優先」という単純な二値ルールがdrill/atk投資を長時間後回しにすることと特定し、cycle8-v2で確認済みの「安全機構の意図した代償（aggregate指標の低下）」というトレードオフの実体を、フルセッション実測で「6000tickの83%を停滞に費やす」という具体的な体験として初めて可視化した。両ペルソナの最終問い（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）は**今回のセッションに限りNo**と判定したが、これはゲームシステム全体の欠陥ではなく適応型戦略の設計粒度の課題と切り分けた。判定はFIX（本命ゲーム採用は維持）としつつ、この新課題をサイクル10の最優先課題として持ち越した。games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run1へ進めた | (本PR) |
 | 2026-07-21 | 10 | 1（BUILD+REVIEW相当） | cycle9-finalの最優先課題「適応型戦略のband境界停滞」に対応。P02(seed302, balanced-adaptive)を`headless/simulate.ts`へ一時トレース機能（調査後に削除済み）で追跡したところ、真因は当初の仮説（`priorityFor()`のhp優先繰り上げそのもの）よりさらに深いところにあると判明した: (1)壁（drillPower不足）に当たると1マス後退→即座に前進判定が再成立→また同じ壁へ、を無限に繰り返すだけで前線基地に滞在する時間がほぼゼロになり、基地滞在中のみ加算されるLABOR_INCOMEが一切貯まらない、(2)既存の`minEscapeBridgeCost`が「次の行のどこかに逃げ道があれば即cost=0」と判定するが、その列が既知の坑道網から実際に到達可能かを見ていないため、到達不可能な列を根拠に「壁ではない」と誤判定し`wallReserve`（貯蓄目標）が機能しない。この2つの複合で、`src/core/game.ts`は無変更のまま検証ボット側だけが構造的な経済停滞に陥っていた。対応として`headless/simulate.ts`へ(a)`s.metrics.maxDepth`ベースの停滞シグナル（800tick更新なしで`stagnant`）、(b)停滞中はhp優先を通常優先度へ戻す、(c)停滞中は1マス後退ではなく`bfsToNearestBase`で確実に基地へ戻し貯蓄する、(d)既知の坑道網全体をBFSして深さ制約付きで掘削可能タイルを探す`bfsToFrontier`、(e)到達可能な隣接タイルの実コストで`wallReserve`を上書きする`nearestBlockedBridgeCost`、(f)潜行開始時点の資金充足判定を固定する`diveHasEscapeFunds`（迂回橋を架けて支払った直後に「資金不足」と誤判定し橋を渡り切る前に引き返す新規バグを開発中に発見・修正）を追加した。全修正はisAdaptive限定のため固定戦略は無変化。個別シード（P01 seed301 finalHp79→140・P02 seed302 maxDepth102→133、milestonesReached5→6、bridgesBuilt0→4）、20シード（mining-first-adaptive avgMaxDepth80.8→129.8、balanced-adaptive 83.6→141.2、bottomReached2/20→14/20、固定戦略は完全に無変化）、100シード（101〜200、balanced-adaptive avgMaxDepth96.6→140.3・deaths32→11/100、mining-first-adaptive avgMaxDepth100.4→132.0・deaths40→25/100、固定戦略はcycle9-final報告値と完全一致）の3段階で検証し、100シード規模ではむしろ死亡率が改善することを確認した。cycle8-v2で確認済みの中核救済シナリオ（P01 seed301の死亡回避）も維持されている。ブラウザAIPはヘッドレスで記録した6000tick分の行動列を`window.__AIP__.run()`で再生する方式で検証し、P01・P02とも全指標がヘッドレスと完全一致することを確認した（`computer.screenshot`は8サイクル連続タイムアウト、既知の環境制約）。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle10-v1.md作成、判定FIX。package.jsonのversionを0.8.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-07-21 | 10 | 2（FIX+REVIEW相当） | cycle10-v1に致命・重大な残課題はないため、指示どおり追加の確度検証を実施。(a) Bot決定ロジック（`headless/simulate.ts`のBotクラス、cycle10-v1の6点の修正すべてを含む）を検証用一時ファイル`src/bot.ts`（cycle8・1回目のJS移植手法を踏襲、検証後に削除済み）へ移植し、`window.__AIP__`経由で`decide()`を毎tick呼び出す生きたフルセッション（6000tick）をP01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)で実行したところ、finalHp/maxDepth/score/bridgesBuilt/milestonesReachedを含む全指標がcycle10-v1のヘッドレス記録値と完全一致し、「行動列再生」方式では検証できなかった決定ロジック移植自体の正しさを確認した。(b) 新シード範囲（201〜300、cycle9・cycle10-v1と非重複）で100シード×8戦略のヘッドレス比較を実施し、cycle10-v1が101〜200で確認した改善傾向がほぼ同水準で再現することを確認した（mining-first-adaptive avgMaxDepth132.0→130.3・deaths25→26/100、balanced-adaptive avgMaxDepth140.3→141.7・deaths11→14/100、combat-first-adaptive deaths0→1/100）。固定版との比較でも優位は維持（201〜300のdeaths: mining-first63%→mining-first-adaptive26%、balanced51%→balanced-adaptive14%）。固定戦略5種の集計値もcycle9-finalの101〜200報告値とほぼ一致し、`src/core/game.ts`無変更下でのシード範囲間の挙動一貫性を裏付けた。新規の致命・重大な問題は発見されず、`src/core/game.ts`・`headless/simulate.ts`とも変更なし。npm run build（一時ファイル追加時・削除後の両方）は正常終了。reviews/008-flagship-frontierhold-cycle10-v2.md作成、判定FIX（判定を維持、追加修正なし）。package.jsonのversionを0.8.1へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル10・run3（FIX only）へ進めた | (本PR) |
+| 2026-07-21 | 10 | 3（FIX only） | cycle10-v2に致命・重大な残課題がなかったため、義務的な修正は無し。routine-state.mdの指示どおり、cycle9-final以来持ち越されてきた提案「本命ゲームのタッチ操作対応の仕様具体化」に着手した。`specs/008-flagship-frontierhold/spec.md`に新セクション「サイクル10・3回目（FIX only）で実施した内容」を追加し、現行の入力セット（4方向移動＋独立ボタン5つ＋ショップ購入9項目、`src/render/input.ts`基準）に対応する画面レイアウトを具体化した: (1)仮想D-pad（画面左下28%×45%、デッドゾーン画面幅3%、タップ即座にfacing更新）、(2)アクションボタン5つ（画面右下、最小48×48dp/44×44pt、ボタン間8px以上、前線基地建設ボタンは条件未達時グレーアウト）、(3)ショップUI（数字キーに対応する物理概念がタッチにはないため、アイコン+名称+価格+レベルのカードを2カラムタップ式に刷新、所持金不足カードはグレーアウト）、(4)マルチタッチ（D-pad保持中の他指ボタンタップをtouch identifierごとに独立判定）、(5)セーフエリア（画面端16pxマージン）。あわせて、007→008へ継承されていた「移動は仮想8方向パッド」という記述が実装（`src/core/types.ts`のDir型はup/down/left/rightの4方向のみ、斜め移動は未実装）と食い違っていることを発見し、005〜008で継承された誤記と特定した上で008では「4方向」へ修正した（005〜007のspec.mdは過去の記録として遡って修正せず）。`src/core/game.ts`・`headless/simulate.ts`はいずれも無変更（spec.mdのみの変更）。npm run build / npm run simulateとも既存コードのまま正常終了を確認。レビューは書かず（3回目FIX onlyの規約通り）、games/README.mdの008行の説明とpackage.jsonのversionは変更なし（コード変更がないため）。cycle10-v1/v2の軽微事項（mining-first-adaptiveの死亡+1件、screenshot環境制約）は引き続き対応不要のまま4回目へ持ち越し。routine-state.mdをサイクル10・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
