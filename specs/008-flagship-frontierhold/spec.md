@@ -879,3 +879,22 @@ cycle11-v2時点で新規の致命・重大バグは見つかっておらず、�
 一切影響しないことを確認した。レビューは書かず（3回目FIX onlyの規約通り）、次サイクル
 （サイクル12・1回目）でcycle11-v2が定義した推奨スコープ通り、`src/render/`へのタッチ入力
 レイヤー実装から本格着手すること。
+
+## サイクル11・4回目（FINAL REVIEW）: サイクル11総括
+
+20シード×17戦略のヘッドレス再検証でcycle11-v1の全数値（drill-all-inのavgMaxDepth105.5・
+死亡率55%を含む）が完全に再現され、サイクル11の3回を通じて`src/core/game.ts`・
+`headless/simulate.ts`のボット決定ロジックが無変更であることを裏付けた。加えて、
+`headless/record-actions.ts`（検証用一時ファイル、検証後に削除済み）でP01(seed301,
+mining-first-adaptive)・P02(seed302, balanced-adaptive)の6000tick行動列を記録し、
+Capacitor devDependency追加後・title修正後のブラウザ実行パス（`npm run dev`のVite経由）で
+再生した結果、ヘッドレスおよびcycle10-final時点（Capacitor依存追加前のv0.8.1）の記録値
+（P01: finalHp140/140・maxDepth91・score443、P02: finalHp180/180・maxDepth133・score656）と
+完全に一致することを確認した。これにより、サイクル11・2回目（title修正）・3回目（Capacitor
+devDependency追加＋config生成）というビルド構成に影響しうる変更が、実際のゲームプレイ・
+ビルド成果物のいずれにも一切影響していないことを実測で裏付けた。
+
+判定はFIX完了・本命ゲーム採用を維持。次サイクル（サイクル12）は、cycle11-v2で定義した
+最小スコープに従い`src/render/`へのタッチ入力レイヤー実装（BUILD+REVIEW）から着手することを
+提案し、routine-state.mdをサイクル12・run1へ進めた。詳細は
+reviews/008-flagship-frontierhold-cycle11-final.mdを参照。
