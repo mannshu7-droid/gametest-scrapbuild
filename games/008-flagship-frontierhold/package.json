@@ -1,7 +1,7 @@
 {
   "name": "frontierhold",
   "private": true,
-  "version": "0.8.3",
+  "version": "0.8.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,8 @@
     "simulate": "tsx headless/simulate.ts"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
     "@types/node": "^26.1.1",
     "tsx": "^4.19.0",
     "typescript": "^5.5.4",
