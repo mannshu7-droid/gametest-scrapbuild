@@ -845,3 +845,37 @@ routine-state.mdの指示（「2回目はFIX対象が乏しい場合、Capacitor
 `npm run build`・`npm run simulate`とも既存コードのまま正常終了することを確認した
 （本回のコード変更は`index.html`の`<title>`表記修正のみで、ゲームロジック・検証ボットは
 無変更のため全指標がcycle11-v1と完全に一致する）。詳細はreviews/008-flagship-frontierhold-cycle11-v2.mdを参照。
+
+## サイクル11・3回目（FIX only）: Capacitor移植の低リスクな下準備
+
+cycle11-v2時点で新規の致命・重大バグは見つかっておらず、修正必須の項目は残っていなかった
+（routine-state.md参照）ため、routine-state.mdが提示した選択肢のうち(a)「低リスクな下準備
+として`capacitor.config.json`（実際には現行Capacitor CLIの既定に従い`.ts`拡張子で生成される）
+と`@capacitor/core`・`@capacitor/cli`のdevDependency追加のみ（タッチ入力コードは書かない、
+プラットフォームフォルダも追加しない）を行い`npm run build`が通ることを確認する」を選択した。
+`src/core/game.ts`・`headless/simulate.ts`・`src/render/`はいずれも無変更。
+
+### 実施内容
+
+1. `games/008-flagship-frontierhold/`で`npm install --save-dev @capacitor/core@8.4.2
+   @capacitor/cli@8.4.2`を実行し`package.json`・`package-lock.json`を更新した
+   （インストール直後の`npm audit`で検出された脆弱性1件（moderate、esbuild経由）は
+   `git stash`でCapacitor追加前の状態に戻しても同一件数・同一内容で再現することを確認し、
+   既存の`vite`依存に起因する既存問題（Capacitor追加とは無関係）と切り分けた。修正には
+   `vite`のメジャーバージョンアップ（breaking change）を要するため今回のスコープ外とした）
+2. `npx cap init "Frontierhold" "com.gametestscrapbuild.frontierhold008" --web-dir=dist`を
+   非対話的に実行し、`capacitor.config.ts`を生成した（appIdは今回の自動ルーチン用に暫定で
+   採番したものであり、実際のストア申請時には正式なものへ変更する前提）。プラットフォーム
+   フォルダ（`npx cap add ios/android`）は指示どおり追加していない
+3. `tsconfig.json`の`include`が`["src", "headless"]`のみで`capacitor.config.ts`を含まないため、
+   `tsc --noEmit`の型チェック範囲に影響しないことを確認した
+4. `node_modules/`はリポジトリルートの`.gitignore`で除外済みのため、追加の`.gitignore`変更は
+   不要だった
+
+### 確認
+
+`npm run build`・`npm run simulate`とも正常終了し、`npm run simulate`の全指標（17戦略×5シード）
+は依存関係の追加のみでゲームロジック・検証ボットは無変更のため、既存のバランス検証には
+一切影響しないことを確認した。レビューは書かず（3回目FIX onlyの規約通り）、次サイクル
+（サイクル12・1回目）でcycle11-v2が定義した推奨スコープ通り、`src/render/`へのタッチ入力
+レイヤー実装から本格着手すること。
