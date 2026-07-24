@@ -6,30 +6,34 @@
 
 - サイクル: 12
 - 要素: 本命ゲームの磨き上げ継続（新規ゲーム番号は切らず、games/008-flagship-frontierholdを
-  そのまま対象にする）。サイクル11・4回目（FINAL REVIEW、reviews/008-flagship-frontierhold-
-  cycle11-final.md参照）では、20シード×17戦略のヘッドレス再検証でcycle11-v1の全数値
-  （drill-all-inのavgMaxDepth105.5・死亡率55%を含む）が完全再現することを確認し、加えて
-  P01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)の6000tick行動列を
-  ブラウザAIPで再生し、ヘッドレスおよびcycle10-final時点（Capacitor依存追加前）の記録値と
-  完全一致することを確認した。これによりサイクル11・2回目（title修正）・3回目（Capacitor
-  devDependency追加＋capacitor.config.ts生成）というビルド構成に影響しうる変更が実際の
-  ゲームプレイ・ビルド成果物のいずれにも影響していないことを実測で裏付けた。判定はFIX完了・
-  本命ゲーム採用を維持。spec.mdに「サイクル11・4回目」節を追記し、games/README.mdの状態列を
-  更新した。コード変更は無し（`src/core/game.ts`・`headless/simulate.ts`・`src/render/`とも
-  無変更）のためpackage.jsonのversionは0.8.4のまま据え置き
-- 次に行う回: **1回目（BUILD+REVIEW）。cycle11-v2・cycle11-finalで定義済みの最小スコープに
-  従い、`src/render/`へタッチ入力レイヤーを新規実装すること: 仮想D-pad・アクションボタン5つ
-  （攻撃/範囲攻撃/緊急離脱/支保工設置/前線基地建設）・ショップのタップUI（1〜9キー相当）を
-  キャンバス上のオーバーレイDOM要素として追加し、既存の`Input`クラスと同じ`Action`型を返す
-  クラスとして実装する（キーボード入力は残したまま並存させる。両方を常時pollして先勝ちにする
-  か、pointer系イベントの有無で切り替えるかは実装時に判断してよい）。仕様の詳細（画面
-  レイアウト・マルチタッチ・セーフエリア）はspec.mdのサイクル10・3回目節を参照。`src/core/
-  game.ts`は変更しない想定（`Action`の出所を関知しない設計のため）。検証はBrowser paneの
-  モバイル解像度プリセット（`resize_window`のmobile/tablet）でP01/P02相当の操作をタップで
-  再現し、キーボード操作と同一のAction列・同一の決定論的結果になることを確認すること。
-  もし実装中に`src/core/game.ts`側の変更が必要と判明した場合は、それ自体を重大な設計上の
-  発見として扱い致命度に応じて優先修正すること。両ペルソナでプレイ評価しreviews/008-
-  flagship-frontierhold-cycle12-v1.mdを書くこと**
+  そのまま対象にする）。サイクル12・1回目（BUILD+REVIEW、reviews/008-flagship-frontierhold-
+  cycle12-v1.md参照）では、cycle11-v2・cycle11-finalで定義済みの最小スコープに従い
+  `src/render/touchInput.ts`を新規実装した。仮想D-pad・アクションボタン5つ（攻撃/範囲攻撃/
+  緊急離脱/支保工設置/前線基地建設）・ショップのタップUI・ゲームオーバー時のリスタートを
+  キャンバス上のDOMオーバーレイとして実装し、既存の`Input`（キーボード）と同じ`Action`型を
+  返す`TouchInput`クラスとした。`src/main.ts`で毎tick両方をpollしタッチ優先・wait時は
+  キーボードへフォールバックする方式で並存させた。`src/core/game.ts`は想定通り無変更。
+  D-pad保持による継続move・ボタンの単発発火とクールダウン・マルチタッチの独立性・前線基地
+  ボタンの活性/非活性・ショップの表示切替とタップ購入の7項目をBrowser paneでのDOM実測
+  （`PointerEvent`直接発火）で検証し、いずれもキーボード版と同一のAction変換であることを
+  確認した（Browser paneが非表示状態だとsetIntervalのリアルタイムループがスロットリングで
+  停止する制約を発見したため、長時間セッションの定性評価は`__AIP__.takeControl()`+`step()`の
+  同期呼び出しで代替した）。npm run build / npm run simulateとも成功、`src/core/game.ts`・
+  `headless/simulate.ts`は無変更のため既存の全バランス検証は影響を受けない。判定はFIX。
+  spec.mdに「サイクル12・1回目」節、games/README.mdの状態列を更新し、package.jsonのversionを
+  0.9.0へ更新した。残課題: 実機・可視ブラウザ（screenshotが成功する状態）でのD-pad/ボタンの
+  見た目・触感（グレーアウトの視認性、セーフエリアの余白感）の最終確認が未実施
+- 次に行う回: **2回目（FIX+REVIEW）。cycle12-v1レビュー（reviews/008-flagship-frontierhold-
+  cycle12-v1.md）の指摘事項（いずれも軽微・実装バグではなく確認未了の項目）に対応すること:
+  (1) Browser paneが表示された状態で`preview_start`し、`screenshot`が成功することを確認した
+  上でD-pad・アクションボタン5つ・ショップUI・前線基地ボタンのグレーアウトの実際の見た目を
+  画像で確認する。(2) 可能なら`resize_window`のmobile/tabletプリセットで実際に`computer`ツール
+  のclick/dragによるタップ・ドラッグ操作（合成PointerEventのdispatchではなく本物の入力）で
+  一連の操作（移動・攻撃・ショップ購入・リスタート）が問題なく行えることを確認する。
+  (3) 見た目・触感の確認で新たな問題（ボタンの重なり・デッドゾーンの体感・セーフエリア不足等）
+  が見つかった場合は優先度順に修正し、致命・重大は必須。(4) 修正版を両ペルソナで再評価し、
+  reviews/008-flagship-frontierhold-cycle12-v2.mdにv1からの改善差分を明記して書くこと。
+  問題が見つからなければその旨を記録し、タッチ操作自体の追加修正は不要と結論づけてよい**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -105,6 +109,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-22 | 11 | 2（FIX+REVIEW相当） | cycle11-v1に新規の致命・重大バグはなく、修正必須項目はなかった。cycle11-v1指摘#1（軽微、`games/008-flagship-frontierhold/index.html`の`<title>`が"Outpost (007)"のまま残っていた表記ミス）を"Frontierhold (008)"へ修正し、Browser paneの`document.title`確認とコンソールエラー0件を確認した。あわせてcycle10-final・cycle11-v1が繰り返し提案してきた「Capacitor移植へ進む判断」に向け、実装には入らずspec.mdへ最小スコープを定義した: (1) `src/render/`へのタッチ入力レイヤー追加（`src/core/game.ts`はActionの出所を関知しないcore/render分離設計のため、Browser paneのモバイル解像度プレビューで検証可能な範囲）と、(2) Capacitorによるネイティブアプリ化（`npx cap add ios/android`後のXcode/Android Studioでのビルド・実機確認等、ネイティブSDKを要しこの自動ルーチンの実行環境では原理的に検証不能な範囲）を明確に切り分け、次サイクル（提案:サイクル12）の4回構成案（1回目:タッチ入力レイヤー実装、2回目:タッチUX修正、3回目:残課題修正、4回目:総括＋ネイティブビルドを人手作業へ引き継ぐ文書化）を明記した。`src/core/game.ts`・`headless/simulate.ts`とも無変更のため、`npm run build`・`npm run simulate`ともcycle11-v1から完全にゼロ差分で正常終了することを確認した。ゲームバランスに影響する変更が無いため両ペルソナのフルセッション再プレイは実施せず、定量的な回帰確認とスコープ定義の妥当性検証に絞った。reviews/008-flagship-frontierhold-cycle11-v2.md作成、判定FIX。package.jsonのversionを0.8.3へ、spec.mdにサイクル11・2回目の内容を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル11・run3（FIX only）へ進めた | (本PR) |
 | 2026-07-23 | 11 | 3（FIX only） | cycle11-v2時点で新規の致命・重大バグはなく修正必須項目もなかったため、routine-state.mdが提示した選択肢(a)「Capacitor移植の低リスクな下準備」を実施した。`games/008-flagship-frontierhold/`に`@capacitor/core`・`@capacitor/cli`（8.4.2）をdevDependencyとして追加し、`npx cap init "Frontierhold" "com.gametestscrapbuild.frontierhold008" --web-dir=dist`で`capacitor.config.ts`（現行Capacitor CLIの既定拡張子。routine-state.mdの想定していた`.json`ではないが同等の初期設定ファイル）を生成した。タッチ入力コードは書かず、`npx cap add ios/android`によるプラットフォームフォルダも追加していない。`src/core/game.ts`・`headless/simulate.ts`・`src/render/`はいずれも無変更。インストール直後の`npm audit`が検出したesbuild経由の脆弱性1件（moderate）は`git stash`でCapacitor追加前の状態でも同一件数・同一内容で再現することを確認し、既存の`vite`依存に起因する既存問題（今回の変更とは無関係、修正には`vite`のメジャーアップグレードを要するためスコープ外）と切り分けた。`tsconfig.json`の`include`は`["src","headless"]`のみで`capacitor.config.ts`を含まないため型チェックへの影響もないことを確認した。`node_modules/`はリポジトリルートの`.gitignore`で除外済みのため追加のgitignore変更は不要だった。`npm run build`・`npm run simulate`とも正常終了し、simulateの全指標（17戦略×5シード）は依存追加のみでゲームロジック無変更のため既存のバランス検証に一切影響しないことを確認した。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspecs/008-flagship-frontierhold/spec.mdの「サイクル11・3回目」節に記載。package.jsonのversionを0.8.4へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル11・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-07-24 | 11 | 4（FINAL REVIEW） | サイクル11総括レビュー（reviews/008-flagship-frontierhold-cycle11-final.md）を作成。`npm run build`正常終了を確認したうえで20シード（1〜20）×17戦略のヘッドレス再検証を行い、cycle11-v1の全数値（drill-all-inのavgMaxDepth105.5・死亡率55%を含む）が完全に再現することを確認し、サイクル11の3回を通じて`src/core/game.ts`・`headless/simulate.ts`のボット決定ロジックが無変更であることを裏付けた。定性評価として`headless/simulate.ts`のBot・Strategyを一時的にexportし（検証後`git checkout`で復元、最終的に無変更）、`headless/record-actions.ts`（検証用一時ファイル、検証後削除済み）でP01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)の6000tick行動列を記録、Browser paneの`npm run dev`上で`window.__AIP__.run()`により再生したところ、finalHp/maxDepth/score/bridgesBuilt/milestonesReached/outpostsBuiltの全指標がヘッドレスと完全一致し、さらにcycle10-final時点（Capacitor依存追加前のv0.8.1）の記録値（P01:140/91/443、P02:180/133/656）とも完全一致することを確認した。これにより、cycle11・2回目（index.htmlのtitle修正）・3回目（Capacitor devDependency追加＋capacitor.config.ts生成）というビルド構成に影響しうる変更が実際のゲームプレイ・ビルド成果物のいずれにも一切影響していないことを実測で裏付けた（検証用一時ファイル・`public/`配下のJSONはすべて削除済み、`git status`クリーン確認済み、コンソールエラー0件）。判定はFIX完了・本命ゲーム採用を維持。両ペルソナの最終問い（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はいずれもcycle10-finalのYesを維持したと判定し、002〜008で確立した10の共通パターンに変更なしと結論した。次サイクル12への提案として、cycle11-v2で定義済みの最小スコープ（1回目:`src/render/`へのタッチ入力レイヤー実装、2回目:タッチUX修正、3回目:残課題修正＋余裕があれば`npx cap add android`検討、4回目:総括＋ネイティブビルドの人手引き継ぎ文書化）が依然として有効であることを再確認し、そのまま次サイクルへ適用することを明記した。`src/core/game.ts`・`headless/simulate.ts`・`src/render/`とも無変更のためpackage.jsonのversionは0.8.4のまま据え置き。spec.mdに「サイクル11・4回目」節を追記し、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run1（BUILD+REVIEW、タッチ入力レイヤー実装）へ進めた | (本PR) |
+| 2026-07-24 | 12 | 1（BUILD+REVIEW） | cycle11-v2・cycle11-finalで定義済みの最小スコープに従い`src/render/touchInput.ts`を新規実装。既存`Input`と同じ`Action`型を返す`TouchInput`クラスとして、仮想D-pad（画面左下・左28%×下45%・デッドゾーン画面幅3%）・アクションボタン5つ（攻撃/範囲攻撃/緊急離脱/支保工設置/前線基地建設・各48px以上・間隔8px）・ショップの2カラムタップUI・ゲームオーバー時のリスタートオーバーレイをキャンバス上のDOMオーバーレイとして実装した（`src/core/game.ts`は想定通り無変更）。`src/main.ts`で`TouchInput`と`Input`を毎tick両方pollし、タッチ側が`wait`でなければタッチ優先・`wait`ならキーボードへフォールバックする方式で並存させた。Browser pane（モバイル解像度375×812）で実DOM要素へ`PointerEvent`を直接発火する検証を行い、(1)D-pad保持による継続move（x:8→15）、(2)pointerup即座の停止、(3)ボタン単発発火とクールダウン正常減衰（attackCd 3→0）、(4)マルチタッチの独立性（D-pad保持中に別指でボタンtapしてもy:0→2の移動が継続）、(5)前線基地ボタンの活性/非活性の視覚状態切替、(6)ショップUIのphase連動表示切替、(7)ショップタップ購入（money15減・capacity+5）の7項目すべてが期待通り動作し、キーボード版と同一の`Action`変換であることを確認した。Browser paneが非表示状態だと`setInterval`駆動のリアルタイムループがスロットリングで停止する制約を発見したため、両ペルソナ(P01 seed301・P02 seed302)の6000tickセッションは`__AIP__.takeControl()`+`step()`の同期呼び出しで実施し、いずれも死亡なく完走（P01: maxDepth42/drillLv3/score318、P02: maxDepth40/finalHp178/180/score211）。`npm run build`・`npm run simulate`とも正常終了、`src/core/game.ts`・`headless/simulate.ts`は無変更のため既存の全バランス検証に影響なし。reviews/008-flagship-frontierhold-cycle12-v1.md作成、判定FIX（実機・可視ブラウザでの見た目/触感の最終確認が残課題）。package.jsonのversionを0.9.0へ、spec.mdに「サイクル12・1回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run2（FIX+REVIEW、実機/可視ブラウザでの見た目確認）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 

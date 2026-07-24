@@ -898,3 +898,21 @@ devDependency追加＋config生成）というビルド構成に影響しうる�
 最小スコープに従い`src/render/`へのタッチ入力レイヤー実装（BUILD+REVIEW）から着手することを
 提案し、routine-state.mdをサイクル12・run1へ進めた。詳細は
 reviews/008-flagship-frontierhold-cycle11-final.mdを参照。
+
+## サイクル12・1回目（BUILD+REVIEW）: タッチ入力レイヤーの実装
+
+サイクル10・3回目で具体化した本節冒頭のタッチ操作仕様（D-pad・アクションボタン5つ・
+ショップタップUI・マルチタッチ・セーフエリア）に従い、`src/render/touchInput.ts`を新規実装した。
+`Input`（キーボード）クラスと同じ`Action`型を返す`TouchInput`クラスとして実装し、キャンバス上に
+DOMオーバーレイ（仮想D-pad・アクションボタン5つ・ショップの2カラムタップUI・ゲームオーバー時の
+リスタートオーバーレイ）を重ねる方式を採用した。`src/main.ts`で毎tick`TouchInput`と`Input`の
+両方を`poll()`し、タッチ側のアクションが`wait`でなければタッチを優先、`wait`ならキーボードへ
+フォールバックする「先勝ち」方式で並存させている。
+
+`src/core/game.ts`は想定通り無変更（`Action`の出所を関知しない設計のため）。D-pad保持による
+継続move・ボタンの単発発火とクールダウン・マルチタッチの独立性・前線基地ボタンの活性/非活性・
+ショップUIの表示切替とタップ購入の7項目をBrowser paneでのDOM実測（`PointerEvent`の直接発火）
+で検証し、いずれもキーボード版と同一の`Action`セマンティクスであることを確認した。
+
+判定はFIX（詳細はreviews/008-flagship-frontierhold-cycle12-v1.md参照）。実機・可視ブラウザでの
+見た目/触感の最終確認が次回以降の課題として残っている。

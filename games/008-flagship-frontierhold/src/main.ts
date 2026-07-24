@@ -1,6 +1,7 @@
 import { Game } from './core/game';
 import { Renderer } from './render/renderer';
 import { Input } from './render/input';
+import { TouchInput } from './render/touchInput';
 import { createAIP } from './aip';
 
 const TICK_MS = 100; // 10 tps
@@ -12,6 +13,10 @@ const input = new Input();
 const params = new URLSearchParams(location.search);
 let game = new Game(Number(params.get('seed') ?? 1));
 let aiControlled = false;
+
+const touchInput = new TouchInput(canvas, () => {
+  if (game.over) game = new Game(game.seed);
+});
 
 window.__AIP__ = createAIP({
   getGame: () => game,
@@ -30,7 +35,12 @@ window.addEventListener('keydown', (e) => {
 setInterval(() => {
   if (aiControlled) return; // AIPが step() で進める
   const state = game.getState();
-  if (!state.over) game.step(input.poll());
+  touchInput.update(state);
+  if (!state.over) {
+    const touchAction = touchInput.poll();
+    const action = touchAction.type !== 'wait' ? touchAction : input.poll();
+    game.step(action);
+  }
   renderer.draw(game.getState());
 }, TICK_MS);
 
