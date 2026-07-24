@@ -6,6 +6,7 @@ const DPAD_HEIGHT_RATIO = 0.45;
 const DEADZONE_WIDTH_RATIO = 0.03;
 const MIN_TOUCH_TARGET_PX = 48;
 const BUTTON_GAP_PX = 8;
+const ACTION_BUTTONS_WIDTH_PX = 3 * MIN_TOUCH_TARGET_PX + 2 * BUTTON_GAP_PX;
 
 const ACTION_BUTTONS: { key: 'attack' | 'skill' | 'dash' | 'build' | 'outpost'; label: string }[] = [
   { key: 'attack', label: '攻撃' },
@@ -32,6 +33,7 @@ export class TouchInput {
   private shopOverlay: HTMLDivElement;
   private shopCards: HTMLButtonElement[] = [];
   private restartOverlay: HTMLDivElement;
+  private rotateOverlay: HTMLDivElement;
   private onRestart: () => void;
 
   constructor(canvas: HTMLCanvasElement, onRestart: () => void) {
@@ -57,6 +59,9 @@ export class TouchInput {
 
     this.restartOverlay = this.buildRestartOverlay();
     this.wrap.appendChild(this.restartOverlay);
+
+    this.rotateOverlay = this.buildRotateOverlay();
+    this.wrap.appendChild(this.rotateOverlay);
   }
 
   /** このティックで実行するアクションを返す（`Input.poll()`と同じ契約） */
@@ -77,6 +82,21 @@ export class TouchInput {
     if (state.phase === 'shop') this.updateShopCards(state.shop);
 
     this.restartOverlay.style.display = state.over ? 'flex' : 'none';
+    this.rotateOverlay.style.display = this.dpadOverlapsButtons() ? 'flex' : 'none';
+  }
+
+  /**
+   * 極端な横長・低高さのビューポート（スマホの横向き等）ではcanvasが高さ基準で縮小され、
+   * D-pad（幅%指定）とアクションボタン（固定px）が同じ行に収まりきらず重なる。
+   * 実測の描画幅から重なりの有無を判定し、発生時のみ操作不能である旨を明示する
+   * （レイアウト自体の横向き対応はスコープ外、spec.md参照）。
+   */
+  private dpadOverlapsButtons(): boolean {
+    const wrapW = this.wrap.getBoundingClientRect().width;
+    if (wrapW <= 0) return false;
+    const dpadRight = SAFE_MARGIN_PX + wrapW * DPAD_WIDTH_RATIO;
+    const buttonsLeft = wrapW - SAFE_MARGIN_PX - ACTION_BUTTONS_WIDTH_PX;
+    return dpadRight > buttonsLeft;
   }
 
   private buildDpad(): HTMLDivElement {
@@ -272,6 +292,31 @@ export class TouchInput {
       e.preventDefault();
       this.onRestart();
     });
+    return overlay;
+  }
+
+  private buildRotateOverlay(): HTMLDivElement {
+    const overlay = document.createElement('div');
+    Object.assign(overlay.style, {
+      position: 'absolute',
+      inset: '0',
+      display: 'none',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0,0,0,0.85)',
+      pointerEvents: 'auto',
+      touchAction: 'none',
+    } satisfies Partial<CSSStyleDeclaration>);
+    const label = document.createElement('div');
+    label.textContent = '画面が狭すぎて操作ボタンが重なっています。端末を縦向きにするか、画面を広げてください。';
+    Object.assign(label.style, {
+      color: '#fff',
+      fontSize: '13px',
+      textAlign: 'center',
+      padding: '0 20px',
+    } satisfies Partial<CSSStyleDeclaration>);
+    overlay.appendChild(label);
+    overlay.addEventListener('contextmenu', (e) => e.preventDefault());
     return overlay;
   }
 }
