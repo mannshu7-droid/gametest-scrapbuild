@@ -4,6 +4,24 @@
 
 ## 現在位置
 
+- サイクル: 13
+- 要素: Capacitor移植の後段（`npx cap add android`によるネイティブプラットフォーム雛形生成）。
+  サイクル12（4回）でタッチ入力レイヤーの実装・検証が完了し（cycle12-final参照）、
+  cycle11-v2が定義した2段階計画（タッチ入力レイヤー追加→ネイティブビルド）の前段が完了した
+  ため、次は後段に着手する。新規ゲーム番号は切らず、games/008-flagship-frontierholdを
+  そのまま対象にする
+- 次に行う回: **1回目（BUILD+REVIEW）。`npx cap add android`でAndroidプラットフォーム
+  フォルダの雛形のみを生成する（実機ビルド・Gradleビルドの実行・ストア申請は本自動ルーチンの
+  実行環境では検証不能なため引き続きスコープ外と明記する）。`npm run build`の成果物
+  （`dist/`）が`capacitor.config.ts`の`webDir`設定と整合し、`npx cap sync`がエラーなく
+  完了することを確認する。もしこの自動実行環境（Node/npm限定、Android SDK等の重量級
+  ツールチェーン不在）で失敗する場合は、無理に進めず「雛形生成コマンド自体がローカル環境の
+  前提を必要とする」ことを記録した上で、代わりにspec.mdへ実機ビルド手順書（人間が後で実行する
+  チェックリスト）を書く方向へ切り替えること**
+- 対象ゲーム番号: 008-flagship-frontierhold（継続）
+
+## 過去のサイクル12（完了・アーカイブ）
+
 - サイクル: 12
 - 要素: 本命ゲームの磨き上げ継続（新規ゲーム番号は切らず、games/008-flagship-frontierholdを
   そのまま対象にする）。サイクル12・2回目（FIX+REVIEW、reviews/008-flagship-frontierhold-
@@ -129,6 +147,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-24 | 12 | 1（BUILD+REVIEW） | cycle11-v2・cycle11-finalで定義済みの最小スコープに従い`src/render/touchInput.ts`を新規実装。既存`Input`と同じ`Action`型を返す`TouchInput`クラスとして、仮想D-pad（画面左下・左28%×下45%・デッドゾーン画面幅3%）・アクションボタン5つ（攻撃/範囲攻撃/緊急離脱/支保工設置/前線基地建設・各48px以上・間隔8px）・ショップの2カラムタップUI・ゲームオーバー時のリスタートオーバーレイをキャンバス上のDOMオーバーレイとして実装した（`src/core/game.ts`は想定通り無変更）。`src/main.ts`で`TouchInput`と`Input`を毎tick両方pollし、タッチ側が`wait`でなければタッチ優先・`wait`ならキーボードへフォールバックする方式で並存させた。Browser pane（モバイル解像度375×812）で実DOM要素へ`PointerEvent`を直接発火する検証を行い、(1)D-pad保持による継続move（x:8→15）、(2)pointerup即座の停止、(3)ボタン単発発火とクールダウン正常減衰（attackCd 3→0）、(4)マルチタッチの独立性（D-pad保持中に別指でボタンtapしてもy:0→2の移動が継続）、(5)前線基地ボタンの活性/非活性の視覚状態切替、(6)ショップUIのphase連動表示切替、(7)ショップタップ購入（money15減・capacity+5）の7項目すべてが期待通り動作し、キーボード版と同一の`Action`変換であることを確認した。Browser paneが非表示状態だと`setInterval`駆動のリアルタイムループがスロットリングで停止する制約を発見したため、両ペルソナ(P01 seed301・P02 seed302)の6000tickセッションは`__AIP__.takeControl()`+`step()`の同期呼び出しで実施し、いずれも死亡なく完走（P01: maxDepth42/drillLv3/score318、P02: maxDepth40/finalHp178/180/score211）。`npm run build`・`npm run simulate`とも正常終了、`src/core/game.ts`・`headless/simulate.ts`は無変更のため既存の全バランス検証に影響なし。reviews/008-flagship-frontierhold-cycle12-v1.md作成、判定FIX（実機・可視ブラウザでの見た目/触感の最終確認が残課題）。package.jsonのversionを0.9.0へ、spec.mdに「サイクル12・1回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run2（FIX+REVIEW、実機/可視ブラウザでの見た目確認）へ進めた | (本PR) |
 | 2026-07-24 | 12 | 2（FIX+REVIEW） | cycle12-v1の残課題（実機・可視ブラウザでの見た目確認）に対応するため`screenshot`取得を再試行したが、ユーザー不在の自動実行のためBrowser paneが表示されず今回も失敗。加えて`computer`ツールの`ref`指定クリックがエラーなく実行成功と表示されるにもかかわらず実際にはDOMへイベントが届かない（グローバルpointerdown/click/pointerupリスナーのカウントが0のまま、かつ購入可能な状態での2回のクリックでも所持金・maxCapacityが不変）ことをリスナーカウントと状態変化の両面から実測確認し、cycle12-v1が想定していたより広い環境制約（`screenshot`だけでなく`computer`ツールの入力送信自体が非表示pane下では機能しない）であると判明した。代替手段としてDOM実測（`getBoundingClientRect`）を採用し、4種のビューポート（モバイル縦375×812・タブレット768×1024・スマホ横向き相当812×375・デスクトップ1280×800）でcanvas・D-pad・ボタン群の描画位置を比較した結果、2件の実害あるバグを発見・修正した。(1) `index.html`のcanvasが固定384×600px表示で画面幅375px以下の端末ではD-pad/ボタンの一部がはみ出しうる（修正前実測: canvas右端380.3pxが画面幅381pxに対し左端-5pxでクリップ）問題を、`max-width: calc(100vw - 16px)`/`max-height: calc(100vh - 40px)`＋`width:auto`/`height:auto`のレスポンシブCSSで解消（内部解像度`canvas.width/height`は不変、`TouchInput`のオーバーレイはcanvasを包む`wrap`要素基準の配置のため自動追従）。(2) 上記の縮小により極端な横向き画面ではD-pad（wrap幅28%）とアクションボタン（固定160px幅）が算術的に重なる（812×375実測でD-pad右端376.4px・ボタン群左端338.2pxが38px分重複）ことを発見し、`dpadOverlapsButtons()`で毎tick重なりを検出して警告オーバーレイ（「画面が狭すぎて操作ボタンが重なっています。端末を縦向きにするか、画面を広げてください。」）を表示するよう`src/render/touchInput.ts`に追加、4種のビューポート全てで意図通りの表示/非表示（横向き狭小時のみflex、他はnone）を確認した。この検証過程でspec.mdの見出し誤記（「ランドスケープ固定」は実際のcanvas縦横比384×600（縦長）・D-pad「画面左下」等の記述と矛盾）も発見し「ポートレート固定」へ訂正、「横向きは正式サポートしない」旨をスコープ外として明記した。`src/core/game.ts`は無変更。`npm run build`・`npm run simulate`とも正常終了し、17戦略×5シードの全指標がcycle12-v1と完全一致（コアロジック無傷）を確認。修正版のショップ購入をsynthetic PointerEvent（javascript_toolでの直接dispatch、cycle12-v1と同じ手法）で再検証し、money25→10・maxCapacity20→25で正常動作することを確認した。両ペルソナの再評価はコアゲームプレイ部分（`src/core/game.ts`無変更のため）はcycle12-v1から差分なしとし、タッチ層の新規変更点についてP01視点（レスポンシブ化はA2「見えないコストの解消」に資する）・P02視点（重なり警告はA9「ちゃんとしてる一貫性」・B6「操作性」に資する）で評価した。reviews/008-flagship-frontierhold-cycle12-v2.md作成、判定FIX。package.jsonのversionを0.9.1へ、spec.mdに「サイクル12・2回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run3（FIX only）へ進めた。残課題（実機の指ドラッグの触感）はユーザー不在の自動実行という構造的制約により対応不可であることを明記した | (本PR) |
 | 2026-08-11 | 12 | 3（FIX only） | cycle12-v2のバグ・問題リスト#3（実機の指ドラッグの触感）は構造的制約（ユーザー不在の自動実行ではBrowser paneが不可視でscreenshot/computerツールの実入力が機能しない）により今回も対応不可と再確認。それ以外は`src/render/touchInput.ts`のコードレビューで新規の軽微バグを1件発見・修正: `TouchInput.update()`が横向き重なり警告オーバーレイ（`rotateOverlay`）の表示可否を`state.over`を考慮せず毎tick判定していたため、DOM順で`restartOverlay`より後に描画される`rotateOverlay`が常に手前に来て、狭い横向き画面でゲームオーバーになった場合「タップでリスタート」が重なり警告に阻まれて反応しなくなる詰みが起こり得た。`!state.over && this.dpadOverlapsButtons()`に修正し、ゲームオーバー時はリスタート操作を優先するようにした。重なり検出自体は狭い横向きビューポート（812×375）でのDOM実測（`rotateDisplay`が`flex`になること）で動作を再確認したが、`state.over`側のゲーティングは`__AIP__.getState()`がライブ参照ではなくコピーを返す実装のためAIP経由でゲームオーバーを人為的に発生させてのDOM実証はできず、コードレビューでの正当性確認にとどめた（単純な論理積の追加のため妥当と判断）。`src/core/game.ts`は無変更、`npm run build`・`npm run simulate`とも正常終了し17戦略×5シードの全指標がcycle12-v2と完全一致（コアロジック無傷）を確認。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspec.mdの「サイクル12・3回目」節に記載。package.jsonのversionを0.9.2へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run4（FINAL REVIEW）へ進めた | (本PR) |
+| 2026-08-12 | 12 | 4（FINAL REVIEW） | サイクル12総括レビュー（reviews/008-flagship-frontierhold-cycle12-final.md）を作成。`npm run build`・`npm run simulate`とも正常終了し17戦略×5シードの全指標がcycle12-v1〜v3と完全一致（コアロジック無傷）を確認。cycle12・3回目がコードレビューのみで正当性確認としていた「ゲームオーバー時のリスタート優先ゲーティング」を、`__AIP__.takeControl()`→`step()`で意図的に燃料切れ死亡させ（109tickでhp=0・over=true）→`__AIP__.release()`でmain.tsの実際の`setInterval`ループへ制御を返し→`canvas.parentElement.children`を直接読む、という手順で初めてDOM実証した。横向きの狭いビューポート（812×375）でstate.over=true時、restartOverlayがdisplay:flex（最前面・タップ可能）・rotateOverlayがdisplay:none（正しく非表示）であることを確認し、restartOverlayへのsynthetic pointerdownで実際にリスタート（over: true→false）することも確認した。副産物として`__AIP__.release()`後は非表示のBrowser paneセッションでも`setInterval`ループが単発tick程度は実際に進行しDOMへ反映されることが判明し、cycle12-v2/v3の「AIP経由でのstate.over実証は不可能」という想定を覆した。両ペルソナの評価はコアゲームプレイ部分（`src/core/game.ts`無変更）はcycle12-v1のセッション結果を維持し、タッチ層への最終評価としてP01=A2（見えないコストの解消・リスタート詰みの回避）・P02=A9（一貫性）の観点で肯定的に評価。判定はFIX完了・本命ゲーム採用を維持。残る未解決項目（実機の指ドラッグの触感）はサイクル12の4回全てを通じて構造的制約により未検証のまま持ち越し。次サイクル13への提案として、cycle11-v2の2段階計画の後段にあたる`npx cap add android`（Androidプラットフォーム雛形生成のみ、実機ビルド・ストア申請はスコープ外）への着手を明記した。spec.mdに「サイクル12・4回目」節を追記し、package.jsonのversionを0.10.0へ、games/README.mdの状態列を更新（サイクル完了・アーカイブ扱いへ）、routine-state.mdをサイクル13・run1（BUILD+REVIEW、`npx cap add android`）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
