@@ -32,12 +32,25 @@
   （レイテンシ・誤タップ率）はユーザー不在の自動実行という構造的制約により引き続き未検証
   （次回以降も同じ制約に直面する可能性が高い。ユーザーが対話的にセッションを開いている場合の
   み解消できる）
-- 次に行う回: **3回目（FIX only）。reviews/008-flagship-frontierhold-cycle12-v2.mdの指摘事項
-  （いずれも軽微、実装バグではなく確認未了の項目）に対応すること。#3（実機の指ドラッグの触感）は
-  上記の通り構造的制約のため対応不可、その旨を記録するに留めてよい。他に軽微な改善点が
-  見当たらなければ、`npm run build`/`npm run simulate`が引き続き通ることのみ確認し、
-  「今回変更なし」の旨をspec.mdに記載してPRを作成してよい（3回目FIX onlyの規約通りレビューは
-  書かない）。もし新たな軽微な改善点が見つかった場合はそれを優先して対応すること**
+- サイクル12・3回目（FIX only）では、cycle12-v2のバグ・問題リスト#3（実機の指ドラッグの触感）は
+  引き続き構造的制約（ユーザー不在の自動実行ではBrowser paneが不可視でscreenshot/computerツールの
+  実入力が機能しない）により対応不可と記録した。それ以外は`src/render/touchInput.ts`のコード
+  レビューで新規の軽微バグを1件発見・修正: `TouchInput.update()`が横向き重なり警告オーバーレイ
+  （`rotateOverlay`）の表示可否を`state.over`（ゲームオーバー中か）を考慮せず毎tick判定していた
+  ため、狭い横向き画面でゲームオーバーになった場合「タップでリスタート」がDOM順で手前に描画される
+  重なり警告オーバーレイに阻まれて反応しなくなる詰みが起こり得た。`!state.over && this.
+  dpadOverlapsButtons()`に修正し、ゲームオーバー時はリスタート操作を優先するようにした。重なり
+  検出自体は狭い横向きビューポート（812×375）でのDOM実測（`rotateDisplay`が`flex`）で動作を
+  再確認したが、`state.over`側のゲーティングは`__AIP__.getState()`がライブ参照ではなくコピーを
+  返す実装のためAIP経由でゲームオーバーを人為的に発生させてのDOM実証はできず、コードレビューでの
+  正当性確認にとどめた（単純な論理積の追加のため妥当と判断）。`src/core/game.ts`は無変更、
+  `npm run build`/`npm run simulate`とも成功し17戦略×5シードの全指標がcycle12-v2と完全一致
+  （コアロジック無傷）。3回目FIX onlyの規約通りレビューは書かず、spec.mdに追記した
+- 次に行う回: **4回目（FINAL REVIEW）。games/008-flagship-frontierhold/reviews/
+  008-flagship-frontierhold-cycle12-final.mdを作成し、サイクル12全体（タッチ入力レイヤーの
+  新規実装・レスポンシブ化と重なり警告・リスタート競合の解消）を総括すること。実機の指ドラッグの
+  触感確認はユーザー不在の自動実行という構造的制約により、サイクル12を通じて未解決のまま残った
+  旨を明記し、次サイクル（サイクル13）の方向性を提案すること**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -115,6 +128,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-07-24 | 11 | 4（FINAL REVIEW） | サイクル11総括レビュー（reviews/008-flagship-frontierhold-cycle11-final.md）を作成。`npm run build`正常終了を確認したうえで20シード（1〜20）×17戦略のヘッドレス再検証を行い、cycle11-v1の全数値（drill-all-inのavgMaxDepth105.5・死亡率55%を含む）が完全に再現することを確認し、サイクル11の3回を通じて`src/core/game.ts`・`headless/simulate.ts`のボット決定ロジックが無変更であることを裏付けた。定性評価として`headless/simulate.ts`のBot・Strategyを一時的にexportし（検証後`git checkout`で復元、最終的に無変更）、`headless/record-actions.ts`（検証用一時ファイル、検証後削除済み）でP01(seed301, mining-first-adaptive)・P02(seed302, balanced-adaptive)の6000tick行動列を記録、Browser paneの`npm run dev`上で`window.__AIP__.run()`により再生したところ、finalHp/maxDepth/score/bridgesBuilt/milestonesReached/outpostsBuiltの全指標がヘッドレスと完全一致し、さらにcycle10-final時点（Capacitor依存追加前のv0.8.1）の記録値（P01:140/91/443、P02:180/133/656）とも完全一致することを確認した。これにより、cycle11・2回目（index.htmlのtitle修正）・3回目（Capacitor devDependency追加＋capacitor.config.ts生成）というビルド構成に影響しうる変更が実際のゲームプレイ・ビルド成果物のいずれにも一切影響していないことを実測で裏付けた（検証用一時ファイル・`public/`配下のJSONはすべて削除済み、`git status`クリーン確認済み、コンソールエラー0件）。判定はFIX完了・本命ゲーム採用を維持。両ペルソナの最終問い（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はいずれもcycle10-finalのYesを維持したと判定し、002〜008で確立した10の共通パターンに変更なしと結論した。次サイクル12への提案として、cycle11-v2で定義済みの最小スコープ（1回目:`src/render/`へのタッチ入力レイヤー実装、2回目:タッチUX修正、3回目:残課題修正＋余裕があれば`npx cap add android`検討、4回目:総括＋ネイティブビルドの人手引き継ぎ文書化）が依然として有効であることを再確認し、そのまま次サイクルへ適用することを明記した。`src/core/game.ts`・`headless/simulate.ts`・`src/render/`とも無変更のためpackage.jsonのversionは0.8.4のまま据え置き。spec.mdに「サイクル11・4回目」節を追記し、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run1（BUILD+REVIEW、タッチ入力レイヤー実装）へ進めた | (本PR) |
 | 2026-07-24 | 12 | 1（BUILD+REVIEW） | cycle11-v2・cycle11-finalで定義済みの最小スコープに従い`src/render/touchInput.ts`を新規実装。既存`Input`と同じ`Action`型を返す`TouchInput`クラスとして、仮想D-pad（画面左下・左28%×下45%・デッドゾーン画面幅3%）・アクションボタン5つ（攻撃/範囲攻撃/緊急離脱/支保工設置/前線基地建設・各48px以上・間隔8px）・ショップの2カラムタップUI・ゲームオーバー時のリスタートオーバーレイをキャンバス上のDOMオーバーレイとして実装した（`src/core/game.ts`は想定通り無変更）。`src/main.ts`で`TouchInput`と`Input`を毎tick両方pollし、タッチ側が`wait`でなければタッチ優先・`wait`ならキーボードへフォールバックする方式で並存させた。Browser pane（モバイル解像度375×812）で実DOM要素へ`PointerEvent`を直接発火する検証を行い、(1)D-pad保持による継続move（x:8→15）、(2)pointerup即座の停止、(3)ボタン単発発火とクールダウン正常減衰（attackCd 3→0）、(4)マルチタッチの独立性（D-pad保持中に別指でボタンtapしてもy:0→2の移動が継続）、(5)前線基地ボタンの活性/非活性の視覚状態切替、(6)ショップUIのphase連動表示切替、(7)ショップタップ購入（money15減・capacity+5）の7項目すべてが期待通り動作し、キーボード版と同一の`Action`変換であることを確認した。Browser paneが非表示状態だと`setInterval`駆動のリアルタイムループがスロットリングで停止する制約を発見したため、両ペルソナ(P01 seed301・P02 seed302)の6000tickセッションは`__AIP__.takeControl()`+`step()`の同期呼び出しで実施し、いずれも死亡なく完走（P01: maxDepth42/drillLv3/score318、P02: maxDepth40/finalHp178/180/score211）。`npm run build`・`npm run simulate`とも正常終了、`src/core/game.ts`・`headless/simulate.ts`は無変更のため既存の全バランス検証に影響なし。reviews/008-flagship-frontierhold-cycle12-v1.md作成、判定FIX（実機・可視ブラウザでの見た目/触感の最終確認が残課題）。package.jsonのversionを0.9.0へ、spec.mdに「サイクル12・1回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run2（FIX+REVIEW、実機/可視ブラウザでの見た目確認）へ進めた | (本PR) |
 | 2026-07-24 | 12 | 2（FIX+REVIEW） | cycle12-v1の残課題（実機・可視ブラウザでの見た目確認）に対応するため`screenshot`取得を再試行したが、ユーザー不在の自動実行のためBrowser paneが表示されず今回も失敗。加えて`computer`ツールの`ref`指定クリックがエラーなく実行成功と表示されるにもかかわらず実際にはDOMへイベントが届かない（グローバルpointerdown/click/pointerupリスナーのカウントが0のまま、かつ購入可能な状態での2回のクリックでも所持金・maxCapacityが不変）ことをリスナーカウントと状態変化の両面から実測確認し、cycle12-v1が想定していたより広い環境制約（`screenshot`だけでなく`computer`ツールの入力送信自体が非表示pane下では機能しない）であると判明した。代替手段としてDOM実測（`getBoundingClientRect`）を採用し、4種のビューポート（モバイル縦375×812・タブレット768×1024・スマホ横向き相当812×375・デスクトップ1280×800）でcanvas・D-pad・ボタン群の描画位置を比較した結果、2件の実害あるバグを発見・修正した。(1) `index.html`のcanvasが固定384×600px表示で画面幅375px以下の端末ではD-pad/ボタンの一部がはみ出しうる（修正前実測: canvas右端380.3pxが画面幅381pxに対し左端-5pxでクリップ）問題を、`max-width: calc(100vw - 16px)`/`max-height: calc(100vh - 40px)`＋`width:auto`/`height:auto`のレスポンシブCSSで解消（内部解像度`canvas.width/height`は不変、`TouchInput`のオーバーレイはcanvasを包む`wrap`要素基準の配置のため自動追従）。(2) 上記の縮小により極端な横向き画面ではD-pad（wrap幅28%）とアクションボタン（固定160px幅）が算術的に重なる（812×375実測でD-pad右端376.4px・ボタン群左端338.2pxが38px分重複）ことを発見し、`dpadOverlapsButtons()`で毎tick重なりを検出して警告オーバーレイ（「画面が狭すぎて操作ボタンが重なっています。端末を縦向きにするか、画面を広げてください。」）を表示するよう`src/render/touchInput.ts`に追加、4種のビューポート全てで意図通りの表示/非表示（横向き狭小時のみflex、他はnone）を確認した。この検証過程でspec.mdの見出し誤記（「ランドスケープ固定」は実際のcanvas縦横比384×600（縦長）・D-pad「画面左下」等の記述と矛盾）も発見し「ポートレート固定」へ訂正、「横向きは正式サポートしない」旨をスコープ外として明記した。`src/core/game.ts`は無変更。`npm run build`・`npm run simulate`とも正常終了し、17戦略×5シードの全指標がcycle12-v1と完全一致（コアロジック無傷）を確認。修正版のショップ購入をsynthetic PointerEvent（javascript_toolでの直接dispatch、cycle12-v1と同じ手法）で再検証し、money25→10・maxCapacity20→25で正常動作することを確認した。両ペルソナの再評価はコアゲームプレイ部分（`src/core/game.ts`無変更のため）はcycle12-v1から差分なしとし、タッチ層の新規変更点についてP01視点（レスポンシブ化はA2「見えないコストの解消」に資する）・P02視点（重なり警告はA9「ちゃんとしてる一貫性」・B6「操作性」に資する）で評価した。reviews/008-flagship-frontierhold-cycle12-v2.md作成、判定FIX。package.jsonのversionを0.9.1へ、spec.mdに「サイクル12・2回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run3（FIX only）へ進めた。残課題（実機の指ドラッグの触感）はユーザー不在の自動実行という構造的制約により対応不可であることを明記した | (本PR) |
+| 2026-08-11 | 12 | 3（FIX only） | cycle12-v2のバグ・問題リスト#3（実機の指ドラッグの触感）は構造的制約（ユーザー不在の自動実行ではBrowser paneが不可視でscreenshot/computerツールの実入力が機能しない）により今回も対応不可と再確認。それ以外は`src/render/touchInput.ts`のコードレビューで新規の軽微バグを1件発見・修正: `TouchInput.update()`が横向き重なり警告オーバーレイ（`rotateOverlay`）の表示可否を`state.over`を考慮せず毎tick判定していたため、DOM順で`restartOverlay`より後に描画される`rotateOverlay`が常に手前に来て、狭い横向き画面でゲームオーバーになった場合「タップでリスタート」が重なり警告に阻まれて反応しなくなる詰みが起こり得た。`!state.over && this.dpadOverlapsButtons()`に修正し、ゲームオーバー時はリスタート操作を優先するようにした。重なり検出自体は狭い横向きビューポート（812×375）でのDOM実測（`rotateDisplay`が`flex`になること）で動作を再確認したが、`state.over`側のゲーティングは`__AIP__.getState()`がライブ参照ではなくコピーを返す実装のためAIP経由でゲームオーバーを人為的に発生させてのDOM実証はできず、コードレビューでの正当性確認にとどめた（単純な論理積の追加のため妥当と判断）。`src/core/game.ts`は無変更、`npm run build`・`npm run simulate`とも正常終了し17戦略×5シードの全指標がcycle12-v2と完全一致（コアロジック無傷）を確認。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspec.mdの「サイクル12・3回目」節に記載。package.jsonのversionを0.9.2へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 

@@ -82,7 +82,9 @@ export class TouchInput {
     if (state.phase === 'shop') this.updateShopCards(state.shop);
 
     this.restartOverlay.style.display = state.over ? 'flex' : 'none';
-    this.rotateOverlay.style.display = this.dpadOverlapsButtons() ? 'flex' : 'none';
+    // ゲームオーバー後はD-pad/ボタンの重なりはもう無関係なので、
+    // リスタート操作をrotateOverlayが覆って塞がないよう優先させる。
+    this.rotateOverlay.style.display = !state.over && this.dpadOverlapsButtons() ? 'flex' : 'none';
   }
 
   /**
