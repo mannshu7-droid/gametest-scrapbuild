@@ -979,3 +979,26 @@ cycle12-v2のバグ・問題リスト#3（実機の指ドラッグの触感）�
 レビューで正当性を確認した。`src/core/game.ts`は無変更、`npm run build`・`npm run simulate`とも
 成功し17戦略×5シードの全指標がcycle12-v2と完全一致（コアロジック無傷）することを確認した。
 3回目FIX onlyの規約通りレビューは書かない。
+
+## サイクル12・4回目（FINAL REVIEW）: リスタート優先ゲーティングの実DOM実証と総括
+
+cycle12・3回目がコードレビューのみで正当性確認としていた「ゲームオーバー時は重なり警告より
+リスタート操作を優先する」ゲーティング（`!state.over && this.dpadOverlapsButtons()`）を、
+`__AIP__.takeControl()`→`step()`で意図的に燃料切れ死亡させ→`__AIP__.release()`で
+`main.ts`の実際の`setInterval`ループへ制御を返し→`canvas.parentElement.children`を
+直接読んでDOM実測する、という手順で初めて実証した。横向きの狭いビューポート（812×375）で
+`state.over=true`の時、`restartOverlay`が`display:flex`（最前面・タップ可能）、
+`rotateOverlay`が`display:none`（正しく非表示）であることを確認し、`restartOverlay`への
+synthetic `pointerdown`発火で実際にリスタート（`over`が`true`→`false`）することも確認した。
+
+この検証を通じて、`__AIP__.release()`後は`setInterval`ループが（少なくとも単発tickの
+反映という範囲では）非表示のBrowser paneセッションでも実際に進行することが新たに判明し、
+「AIPはstate.overのDOM実証に使えない」というcycle12・3回目時点の想定を覆した。
+`src/core/game.ts`は無変更、`npm run build`・`npm run simulate`とも成功し17戦略×5シードの
+全指標がcycle12-v2/v3と完全一致（コアロジック無傷）。
+
+サイクル12全体を通じて未解決のまま残ったのは実機の指ドラッグの触感（レイテンシ・誤タップ率）
+のみで、これはユーザー不在の自動実行という構造的制約による。総括の詳細は
+reviews/008-flagship-frontierhold-cycle12-final.mdを参照。次サイクル13は、タッチ入力レイヤーが
+完了・実証済みになったことを受け、Capacitor移植の後段（`npx cap add android`によるプラット
+フォーム雛形生成）に着手することを提案する。
