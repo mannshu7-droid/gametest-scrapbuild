@@ -1002,3 +1002,47 @@ synthetic `pointerdown`発火で実際にリスタート（`over`が`true`→`fa
 reviews/008-flagship-frontierhold-cycle12-final.mdを参照。次サイクル13は、タッチ入力レイヤーが
 完了・実証済みになったことを受け、Capacitor移植の後段（`npx cap add android`によるプラット
 フォーム雛形生成）に着手することを提案する。
+
+## サイクル13・1回目（BUILD+REVIEW）: `npx cap add android`によるプラットフォーム雛形生成
+
+cycle11-v2が定義した2段階計画（タッチ入力レイヤー追加→ネイティブビルド）の後段に着手した。
+本回のスコープはAndroidプラットフォームフォルダの雛形生成のみで、実機・Gradleビルドの実行や
+ストア申請はcycle11-v2で明記した通り引き続きこの自動実行環境（Node/npm限定、Android SDK等の
+重量級ツールチェーン不在）ではスコープ外のまま。
+
+### 実施内容
+
+1. `npm install @capacitor/android --save-dev`で`@capacitor/android`パッケージを追加した
+   （`@capacitor/core`・`@capacitor/cli`はcycle11・3回目で既に追加済み）。
+2. `npm run build`で`dist/`を生成（`capacitor.config.ts`の`webDir: 'dist'`と整合することを
+   事前に確認）。
+3. `npx cap add android`を実行し、`android/`配下にGradleプロジェクト一式（`app/`、
+   `gradlew`/`gradlew.bat`、`build.gradle`、`settings.gradle`、`gradle/wrapper/`等、
+   66ファイル・456KB）を生成した。コマンド自体はAndroid SDKを要求せず、この環境で
+   エラーなく完了した。
+4. `npx cap sync android`を実行し、`dist/`の成果物が`android/app/src/main/assets/public`へ
+   コピーされること、`capacitor.config.json`が`android/app/src/main/assets`に生成されること
+   をエラーなく確認した（`webDir`設定と`dist/`の整合を裏付ける）。
+5. Capacitor CLIが生成した`android/.gitignore`・`android/app/.gitignore`はビルド成果物
+   （`build/`、`*.apk`、`local.properties`等）を除外する標準テンプレートで、`gradle-wrapper.jar`
+   等のバイナリを含む最小限の雛形一式（456KB）のみをリポジトリにコミットする方針とした
+   （Capacitorの標準的な運用に従い、雛形は追跡対象・ビルド成果物のみ除外）。
+
+### 確認
+
+`npm run build`・`npm run simulate`とも成功。本回の変更は`package.json`/`package-lock.json`
+（devDependency追加）と新規`android/`フォルダのみで、`src/core/game.ts`・`src/render/`・
+`headless/simulate.ts`はいずれも無変更のため、既存の全戦略×全シードのバランス検証（サイクル1〜12の
+全レビュー）は今回の変更の影響を一切受けない。
+
+### 明示的にスコープ外（人手作業への引き継ぎ事項）
+
+- `android/`フォルダが実際にGradleでビルド可能か（依存解決・コンパイル成功）は、この環境に
+  Android SDK/JDKが無いため検証不能。人手でAndroid Studio（または`sdkmanager`+コマンドライン
+  Gradle）がインストールされた環境で`cd android && ./gradlew assembleDebug`相当を実行して
+  確認する必要がある
+- 実機/エミュレータでの起動確認、アプリアイコン・スプラッシュ画像の差し替え、
+  `AndroidManifest.xml`のパーミッション調整、ストア申請（Google Play Console）は
+  cycle11-v2の時点から一貫してスコープ外のまま
+
+詳細はreviews/008-flagship-frontierhold-cycle13-v1.mdを参照。
