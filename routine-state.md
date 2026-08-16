@@ -4,6 +4,21 @@
 
 ## 現在位置
 
+- サイクル: 14
+- 要素: 本命ゲーム本体（`src/core/game.ts`側）の磨き上げへ回帰。サイクル13（4回）でCapacitor
+  移植の後段（Androidプラットフォーム雛形生成・静的設定チェック・画面向き固定・実機ビルド手順書
+  整備）が完了し（cycle13-final参照）、cycle13-v2 Learningsが「静的チェック・ドキュメント整備
+  という方向でのさらなる前進は限界に近い」と指摘した通り、Capacitor関連の作業は一区切りとした。
+  新規ゲーム番号は切らず、games/008-flagship-frontierholdをそのまま対象にする
+- サイクル14・1回目（BUILD+REVIEW相当）では、cycle13-finalのLearningsが提案した2つの着眼点
+  （(1) drill-all-in系のみ死亡リスクを伴う非対称性の再検証、(2) atk/hp/atkspeed/muffler系
+  all-inのavgScoreが359.8〜397.6の狭いレンジに収束している点の掘り下げ）のいずれかから着手する
+  こと
+- 次に行う回: **1回目（BUILD+REVIEW）**
+- 対象ゲーム番号: 008-flagship-frontierhold（継続）
+
+## 過去のサイクル13（完了・アーカイブ）
+
 - サイクル: 13
 - 要素: Capacitor移植の後段（`npx cap add android`によるネイティブプラットフォーム雛形生成）。
   サイクル12（4回）でタッチ入力レイヤーの実装・検証が完了し（cycle12-final参照）、
@@ -15,7 +30,7 @@
   （Android SDK等不在）でエラーなく生成できることを確認した。`npx cap sync android`も
   エラーなく完了し、`npm run build`が生成する`dist/`と`capacitor.config.ts`の`webDir`設定
   との整合を裏付けた。致命・重大なバグは0件
-- サイクル13・2回目（FIX+REVIEW相当、本PR）では、cycle13-v1のLearningsが提案した2方向を実施した。
+- サイクル13・2回目（FIX+REVIEW相当）では、cycle13-v1のLearningsが提案した2方向を実施した。
   (a) 静的な設定ファイルの妥当性チェックで、`AndroidManifest.xml`のパーミッション（`INTERNET`のみ、
   Capacitor既定テンプレート）・`applicationId`/アプリ名の整合は問題なしと確認したが、
   `android/app/build.gradle`の`versionName`（既定値`"1.0"`）が`package.json`の`version`
@@ -26,80 +41,21 @@
   （前提ツール、`npm run build`→`npx cap sync android`→`./gradlew assembleDebug`のコマンド列、
   実機の指ドラッグの触感確認を含む確認チェックリスト）をspec.mdに追記した。
   `src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため既存の
-  全バランス検証（サイクル1〜13）に影響なし。cycle13-v2レビューのLearningsは、静的チェック・
-  ドキュメント整備という方向でのさらなる前進は限界に近いとし、サイクル14以降は本命ゲーム本体
-  （`src/core/game.ts`側）の磨き上げへ回帰することを提案している
-- サイクル13・3回目（FIX only、本PR）は、cycle13-v2 Learningsの指示通りspec.md／過去2回の
-  レビュー・生成済みAndroid設定ファイルのコードレビューを実施した。設計意図（spec.mdの
-  「ポートレート固定」節、サイクル12で追加した横向き重なり警告オーバーレイの前提）と実際の
-  `android/app/src/main/AndroidManifest.xml`を突き合わせたところ、`npx cap add android`が
-  生成した既定の`MainActivity`に`android:screenOrientation`指定が無く、`configChanges`で
-  回転時のActivity再生成のみ抑制されていた（＝実機を横向きに持てば実際に横長へ回転してしまい、
-  横向き警告オーバーレイに常時頼る状態になり得る）という、ネイティブ設定とspec.mdの設計意図の
-  乖離を発見・修正した。`android:screenOrientation="portrait"`を追加してネイティブレベルで
-  縦固定にし、横向き警告オーバーレイはタブレット分割ウィンドウ等の稀なケース向けの保険として
-  残した。`npm run build`・`npm run simulate`とも成功、20戦略×5シードの代表値
-  （hp-all-in avgScore=389.6 avgMaxDepth=60.0 avgUpgradesBought=2.4 deaths=0/5）はcycle13-v1/v2と
-  完全一致（`src/core/game.ts`等は無変更）。3回目FIX onlyの規約通りレビューMDは作成せず、
-  spec.mdに追記した。他に軽微な改善点は見つからなかった
-- 次に行う回: **4回目（FINAL REVIEW）。games/008-flagship-frontierholdについて、
-  reviews/008-flagship-frontierhold-cycle13-final.mdを作成し、サイクル13全体（Androidプラット
-  フォーム雛形生成・静的設定チェック・実機ビルド手順書整備・画面向き固定漏れの修正）を総括する
-  こと。cycle13-v2 Learningsが提案した通り、Capacitor関連の静的チェック・ドキュメント整備は
-  この自動実行環境（Android SDK/JDK不在）では限界に近いことを踏まえ、routine-state.mdを
-  サイクル14（本命ゲーム本体`src/core/game.ts`側の磨き上げへ回帰、新規ゲーム番号は切らず
-  games/008-flagship-frontierholdを継続対象）へ進めること**
-- 対象ゲーム番号: 008-flagship-frontierhold（継続）
-
-## 過去のサイクル12（完了・アーカイブ）
-
-- サイクル: 12
-- 要素: 本命ゲームの磨き上げ継続（新規ゲーム番号は切らず、games/008-flagship-frontierholdを
-  そのまま対象にする）。サイクル12・2回目（FIX+REVIEW、reviews/008-flagship-frontierhold-
-  cycle12-v2.md参照）では、cycle12-v1の残課題（実機・可視ブラウザでの見た目確認）に対応するため
-  `screenshot`取得を再度試みたが、本自動ルーチンはユーザー不在で実行されるためBrowser paneが
-  表示されず今回も失敗した。加えて`computer`ツールの`ref`指定クリックも、エラーは返らないが
-  実際にはDOMへイベントが届かない（グローバルpointerdown/click/pointerupリスナーのカウントが
-  実行後も0のまま、かつ購入可能な状態でのクリックでも所持金・maxCapacityが変化しないことで
-  実測確認）ことを新たに発見した。この制約はユーザー不在の自動実行では構造的に回避不可能と
-  判断し、代わりにDOM実測（`getBoundingClientRect`でのジオメトリ解析）を「見た目」検証の
-  代替手段として採用した。この手法で2件の実害あるバグを発見・修正: (1) `index.html`のcanvasが
-  固定384×600px表示で画面幅375px以下の端末ではD-pad/ボタンの一部がはみ出しうる問題を、
-  `max-width`/`max-height`＋`width:auto`/`height:auto`によるアスペクト比維持のレスポンシブ
-  CSSで解消（内部解像度は不変）。(2) 上記の縮小により極端な横向き画面（スマホの横持ち等）では
-  D-padとアクションボタンが算術的に重なることを発見し、重なりを毎tick検出して警告する
-  オーバーレイを`src/render/touchInput.ts`に追加。あわせてspec.mdの見出し誤記
-  （「ランドスケープ固定」は実際のcanvas縦横比（384×600、縦長）と矛盾しており「ポートレート固定」
-  が正しい）も訂正し、「横向きは正式サポートしない」旨をスコープ外として明記した。
-  `src/core/game.ts`は無変更。npm run build / npm run simulateとも成功、17戦略×5シードの
-  全指標がcycle12-v1と完全一致（コアロジック無傷）を確認。修正版のショップ購入をsynthetic
-  PointerEvent（javascript_toolでの直接dispatch）で再検証し、money25→10・maxCapacity20→25で
-  正常動作を確認。両ペルソナの再評価はコアゲームプレイ部分は無変更のため差分なし、タッチ層の
-  新規変更点（レスポンシブ化・重なり警告）についてP01=A2「見えないコストの解消」・
-  P02=A9「ちゃんとしてる一貫性」の観点で肯定的に評価した。判定はFIX。games/README.mdの状態列を
-  更新し、package.jsonのversionを0.9.1へ更新した。残課題: 実機の指ドラッグの触感
-  （レイテンシ・誤タップ率）はユーザー不在の自動実行という構造的制約により引き続き未検証
-  （次回以降も同じ制約に直面する可能性が高い。ユーザーが対話的にセッションを開いている場合の
-  み解消できる）
-- サイクル12・3回目（FIX only）では、cycle12-v2のバグ・問題リスト#3（実機の指ドラッグの触感）は
-  引き続き構造的制約（ユーザー不在の自動実行ではBrowser paneが不可視でscreenshot/computerツールの
-  実入力が機能しない）により対応不可と記録した。それ以外は`src/render/touchInput.ts`のコード
-  レビューで新規の軽微バグを1件発見・修正: `TouchInput.update()`が横向き重なり警告オーバーレイ
-  （`rotateOverlay`）の表示可否を`state.over`（ゲームオーバー中か）を考慮せず毎tick判定していた
-  ため、狭い横向き画面でゲームオーバーになった場合「タップでリスタート」がDOM順で手前に描画される
-  重なり警告オーバーレイに阻まれて反応しなくなる詰みが起こり得た。`!state.over && this.
-  dpadOverlapsButtons()`に修正し、ゲームオーバー時はリスタート操作を優先するようにした。重なり
-  検出自体は狭い横向きビューポート（812×375）でのDOM実測（`rotateDisplay`が`flex`）で動作を
-  再確認したが、`state.over`側のゲーティングは`__AIP__.getState()`がライブ参照ではなくコピーを
-  返す実装のためAIP経由でゲームオーバーを人為的に発生させてのDOM実証はできず、コードレビューでの
-  正当性確認にとどめた（単純な論理積の追加のため妥当と判断）。`src/core/game.ts`は無変更、
-  `npm run build`/`npm run simulate`とも成功し17戦略×5シードの全指標がcycle12-v2と完全一致
-  （コアロジック無傷）。3回目FIX onlyの規約通りレビューは書かず、spec.mdに追記した
-- 次に行う回: **4回目（FINAL REVIEW）。games/008-flagship-frontierhold/reviews/
-  008-flagship-frontierhold-cycle12-final.mdを作成し、サイクル12全体（タッチ入力レイヤーの
-  新規実装・レスポンシブ化と重なり警告・リスタート競合の解消）を総括すること。実機の指ドラッグの
-  触感確認はユーザー不在の自動実行という構造的制約により、サイクル12を通じて未解決のまま残った
-  旨を明記し、次サイクル（サイクル13）の方向性を提案すること**
+  全バランス検証（サイクル1〜13）に影響なし
+- サイクル13・3回目（FIX only）は、コードレビューにより`AndroidManifest.xml`に
+  `android:screenOrientation`指定が無くspec.mdの「ポートレート固定」設計意図に反して実機で
+  横向きに回転しうる問題を発見・修正した（`portrait`を追加）。`src/core/game.ts`は無変更、
+  `npm run build`・`npm run simulate`とも成功し既存のバランス検証と完全一致
+- サイクル13・4回目（FINAL REVIEW、reviews/008-flagship-frontierhold-cycle13-final.md）では、
+  8戦略×5シードのヘッドレス再検証で全バランス数値がcycle12-final以降完全に再現されることを
+  確認し、サイクル13の3つの修正（`@capacitor/android`追加・`versionName`同期・
+  `screenOrientation="portrait"`追加）がいずれも現在のコードベースに正しく反映されていることを
+  実測確認した。新たにアプリアイコン・スプラッシュがCapacitor既定プレースホルダーのままである
+  軽微な残課題（ゲームシステム検証のスコープ外の制作物差し替え）を発見。判定はFIX完了・本命
+  ゲーム採用を維持。Capacitor関連の静的チェック方向はほぼ尽きたと判断し、サイクル14は本命ゲーム
+  本体（`src/core/game.ts`）の磨き上げへ回帰することを提案。具体的には(1) drill-all-in系のみ
+  死亡リスクを伴う非対称性（cycle11-v1で定量化）の再検証、(2) atk/hp/atkspeed/muffler系all-inの
+  avgScoreが狭いレンジに収束している点の掘り下げ、の2つを次サイクルの着眼点として提示した
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 実行履歴
@@ -182,6 +138,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-12 | 13 | 1（BUILD+REVIEW） | cycle11-v2の2段階計画の後段（Capacitor移植のネイティブビルド基盤）に着手。`npm install @capacitor/android --save-dev`で不足していた`@capacitor/android`パッケージ（cycle11・3回目は`@capacitor/core`・`@capacitor/cli`のみ追加済みで不足していた）を追加後、`npx cap add android`を実行しAndroidプラットフォーム雛形（`android/`配下66ファイル・456KB、Gradleプロジェクト一式）をこの自動実行環境（Android SDK/JDK不在）でエラーなく生成できることを確認した。続けて`npx cap sync android`を実行し、`npm run build`が生成する`dist/`の内容が`android/app/src/main/assets/public`へ正しくコピーされ`capacitor.config.json`が生成されることを確認し、`capacitor.config.ts`の`webDir: 'dist'`設定との整合を裏付けた。生成された`android/.gitignore`・`android/app/.gitignore`はCapacitor CLI既定の標準テンプレート（ビルド成果物`build/`・`*.apk`等のみ除外、雛形コード自体は追跡対象）で、`capacitor.config.ts`の`appId`が`android/app/build.gradle`の`applicationId`へ正しく反映されていることも確認した。`src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため、`npm run simulate`の全指標（5戦略×5シード）は既存のcycle12時点の数値と完全一致（コアロジック無傷）。生成されたAndroidプロジェクトが実際にGradleでビルド可能かはこの環境にAndroid SDK/JDKが無いため検証不能であり、人手作業（Android Studio環境での`./gradlew assembleDebug`相当の実行）への引き継ぎ事項として明記した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle13-v1.md作成、判定FIX（実ビルド確認のみ人手へ引き継ぎ、致命・重大なバグは0件）。package.jsonのversionを0.11.0へ、spec.mdに「サイクル13・1回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル13・run2（FIX+REVIEW相当、静的設定チェック＋人手向けビルド手順書整備）へ進めた | (本PR) |
 | 2026-08-16 | 13 | 2（FIX+REVIEW相当） | cycle13-v1のLearningsが提案した2方向を実施。(a)静的な設定ファイルの妥当性チェックで、`AndroidManifest.xml`のパーミッション（`INTERNET`のみ、Capacitor既定テンプレートで不要な権限なし）・`applicationId`/アプリ名と`capacitor.config.ts`との整合（一致）を確認したうえで、`android/app/build.gradle`の`versionName`（既定値`"1.0"`）が`package.json`の`version`（`"0.11.0"`）と無関係のまま放置されていた不一致を発見し、`versionName`を`"0.11.0"`へ修正した（Capacitorは`package.json`のversionを`build.gradle`へ自動同期しない仕様のため、`npx cap add android`直後は常にこの不一致が生じる。今後`package.json`のバージョンを上げる際は`versionName`も手動で追従させる運用ルールをspec.mdに明記）。(b)人手が実機ビルド・動作確認するための手順書（前提ツール、`npm run build`→`npx cap sync android`→`./gradlew assembleDebug`のコマンド列、実機の指ドラッグの触感確認を含む確認チェックリスト）をspec.mdに追記した。`src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため、`npm run build`・`npm run simulate`とも正常終了し全指標がcycle13-v1と完全一致（コアロジック無傷）を確認。reviews/008-flagship-frontierhold-cycle13-v2.md作成、判定FIX（軽微なversionName不一致1件を発見・修正、致命・重大なバグは0件）。cycle13-v2 Learningsは、静的チェック・ドキュメント整備という方向でのさらなる前進は限界に近く、サイクル14以降は本命ゲーム本体の磨き上げへ回帰することを提案。games/README.mdの状態列を更新し、routine-state.mdをサイクル13・run3（FIX only）へ進めた | (本PR) |
 | 2026-08-17 | 13 | 3（FIX only） | cycle13-v2 Learningsの指示に従い、spec.md／過去2回のレビュー・生成済みAndroid設定ファイルのコードレビューを実施。設計意図（spec.mdの「ポートレート固定」節、サイクル12で追加した横向き重なり警告オーバーレイの前提）と実際の`android/app/src/main/AndroidManifest.xml`を突き合わせ、`npx cap add android`が生成した既定の`MainActivity`に`android:screenOrientation`指定が無く`configChanges`で回転時のActivity再生成のみ抑制されていた（実機を横向きに持つと実際に横長へ回転してしまい横向き警告オーバーレイに常時頼る状態になり得る）という、ネイティブ設定とspec.mdの設計意図の乖離を発見・修正した。`android:screenOrientation="portrait"`を追加してネイティブレベルで縦固定にし、横向き警告オーバーレイはタブレット分割ウィンドウ等の稀なケース向けの保険として残した。`src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため、`npm run build`・`npm run simulate`とも正常終了し20戦略×5シードの代表値（hp-all-in avgScore=389.6 avgMaxDepth=60.0 avgUpgradesBought=2.4 deaths=0/5）がcycle13-v1/v2と完全一致（コアロジック無傷）を確認。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「サイクル13・3回目」節を追記。games/README.mdの状態列を更新し、routine-state.mdをサイクル13・run4（FINAL REVIEW）へ進めた | (本PR) |
+| 2026-08-17 | 13 | 4（FINAL REVIEW） | サイクル13総括レビュー（reviews/008-flagship-frontierhold-cycle13-final.md）を作成。`npm run build`・`npm run simulate`とも正常終了し8戦略×5シードの全指標がcycle12-final・cycle13-v1〜v2と完全一致（コアロジック無傷）を確認。サイクル13の3つの修正（`@capacitor/android`追加・`versionName`同期・`android:screenOrientation="portrait"`追加）がいずれも現在のコードベースに正しく反映されていることを実測確認（AndroidManifest.xml・build.gradle・strings.xmlの5項目チェック）。新たにアプリアイコン・スプラッシュ画像がCapacitor CLI既定のプレースホルダーのままである軽微な残課題を発見したが、ゲームシステム検証というルーチンの目的からは外れる制作物差し替えであり対応不要と判断。判定はFIX完了・本命ゲーム採用を維持。両ペルソナの最終評価（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はいずれもYesを維持。次サイクル14への提案として、cycle13-v2 Learningsの通りCapacitor関連の静的チェック方向はほぼ尽きたと判断し、本命ゲーム本体（`src/core/game.ts`）の磨き上げへ回帰することを明記し、着眼点として(1) drill-all-in系のみ死亡リスクを伴う非対称性の再検証、(2) atk/hp/atkspeed/muffler系all-inのavgScoreが狭いレンジに収束している点の掘り下げ、の2点を提示した。games/README.mdの状態列を更新（サイクル完了・アーカイブ扱いへ）、routine-state.mdをサイクル14・run1（BUILD+REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
