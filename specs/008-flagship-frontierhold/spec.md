@@ -1132,3 +1132,37 @@ hp-all-in avgScore=389.6 avgMaxDepth=60.0 avgUpgradesBought=2.4 deaths=0/5）は
 完全に一致することを確認した。
 
 詳細はreviews/008-flagship-frontierhold-cycle13-v2.mdを参照。
+
+## サイクル13・3回目（FIX only）: AndroidManifestの画面向き固定漏れを修正
+
+cycle13-v2のLearnings（Capacitor関連の静的チェック・ドキュメント整備は限界に近い）を踏まえ、
+新規の作業ではなくspec.md／過去2回のレビューのコードレビューを実施した。
+
+### 発見・修正した内容
+
+本ゲームは「画面レイアウト・操作の具体化（ポートレート固定、iPad/Android共通）」節（上記）で
+縦持ちを前提に設計しており、横向きは正式サポート外（D-pad/ボタン重なりを検出したら警告表示する
+のみ）と明記している。しかし`npx cap add android`が生成した既定の`AndroidManifest.xml`は
+`MainActivity`に`android:screenOrientation`を指定しておらず、`configChanges`で回転時の
+Activity再生成のみを抑制する設定になっていた。これは「回転してもクラッシュ・状態消失しない」
+ことは保証するが、「そもそも横向きにならない」ことは保証しない。実機で端末を横向きに持つと
+OSが実際に横長へ回転してしまい、cycle12で追加した重なり警告オーバーレイに常時頼る状態になる
+（本来は警告オーバーレイはデスクトップブラウザでのウィンドウリサイズ等、ネイティブの向き固定が
+効かない状況のための保険であるべきで、実機の通常操作でトリガーされるべきではない）。
+
+`android/app/src/main/AndroidManifest.xml`の`<activity>`タグへ`android:screenOrientation="portrait"`
+を追加し、設計意図どおりネイティブレベルで縦向きに固定した（`configChanges`の`orientation`は
+そのまま維持。ポートレート固定下でもタブレットの分割ウィンドウ/フリーフォーム等、OSが
+Activityの向きロックを無視できるケースが皆無ではないため、cycle12の重なり警告オーバーレイは
+保険として残す）。
+
+### 確認
+
+`npm run build`・`npm run simulate`とも成功。変更は`AndroidManifest.xml`の1属性追加のみで
+`src/core/game.ts`・`src/render/`・`headless/simulate.ts`は無変更のため、20戦略×5シードの
+代表値（例: hp-all-in avgScore=389.6 avgMaxDepth=60.0 avgUpgradesBought=2.4 deaths=0/5）は
+cycle13-v1/v2と完全に一致することを確認した。実際のGradleビルド可否・実機での向き固定の
+挙動確認自体は、この自動実行環境にAndroid SDK/JDKが無いため引き続き検証不能（cycle13-v1から
+一貫した制約）で、人手による実機ビルド手順書（上記(b)）に従った確認に引き継ぐ。
+
+規約通り3回目（FIX only）のためレビューMDは作成しない。他に軽微な改善点は見つからなかった。
