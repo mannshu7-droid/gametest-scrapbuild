@@ -10,25 +10,33 @@
   cycle11-v2が定義した2段階計画（タッチ入力レイヤー追加→ネイティブビルド）の前段が完了した
   ため、後段に着手した。新規ゲーム番号は切らず、games/008-flagship-frontierholdをそのまま
   対象にする
-- サイクル13・1回目（BUILD+REVIEW、本PR）では、`@capacitor/android`を追加し
+- サイクル13・1回目（BUILD+REVIEW）では、`@capacitor/android`を追加し
   `npx cap add android`でAndroidプラットフォーム雛形（66ファイル・456KB）をこの自動実行環境
   （Android SDK等不在）でエラーなく生成できることを確認した。`npx cap sync android`も
   エラーなく完了し、`npm run build`が生成する`dist/`と`capacitor.config.ts`の`webDir`設定
-  との整合を裏付けた。`src/core/game.ts`・`headless/simulate.ts`・`src/render/`はいずれも
-  無変更のため既存の全バランス検証（サイクル1〜12）に影響なし。致命・重大なバグは0件、
-  致命度を要する修正対象が存在しないため、次回（2回目）は通常の「FIX」ではなく
-  cycle13-v1レビューのLearningsが提案した2方向（(a)静的な設定妥当性チェックの拡充、
-  (b)人手による実機ビルド手順書のspec.mdへの整備）を実施すること
-- 次に行う回: **2回目（FIX+REVIEW相当）。(a) `android/app/src/main/AndroidManifest.xml`の
-  パーミッションが最小限か（Capacitor既定生成のままで不要な権限が付与されていないか）、
-  `android/app/build.gradle`の`applicationId`/`versionCode`/`versionName`が
-  `capacitor.config.ts`の`appId`・`package.json`の`version`と整合しているか、といった
-  静的な設定ファイルの妥当性を確認する。(b) その確認結果を踏まえ、人間が実際にAndroid Studio
-  環境で`android/`をビルド・実機/エミュレータで動作確認するための手順書（前提ツール、
-  `./gradlew assembleDebug`相当のコマンド、確認すべき項目のチェックリスト）を
-  spec.mdに追記する。ゲームロジック・タッチUIの修正対象は今回存在しないため、
-  reviews/008-flagship-frontierhold-cycle13-v2.mdには(a)(b)の実施内容と、
-  実ビルド確認が引き続き人手作業として残る旨を明記すること**
+  との整合を裏付けた。致命・重大なバグは0件
+- サイクル13・2回目（FIX+REVIEW相当、本PR）では、cycle13-v1のLearningsが提案した2方向を実施した。
+  (a) 静的な設定ファイルの妥当性チェックで、`AndroidManifest.xml`のパーミッション（`INTERNET`のみ、
+  Capacitor既定テンプレート）・`applicationId`/アプリ名の整合は問題なしと確認したが、
+  `android/app/build.gradle`の`versionName`（既定値`"1.0"`）が`package.json`の`version`
+  （`"0.11.0"`）と無関係のまま放置されていた不一致を発見・修正した（Capacitorは`package.json`の
+  versionを`build.gradle`へ自動同期しない仕様のため、`npx cap add android`直後は常にこの
+  不一致が生じる。今後`package.json`のバージョンを上げる際は`versionName`も手動で追従させる
+  運用ルールをspec.mdに明記した）。(b) 人手が実機ビルド・動作確認するための手順書
+  （前提ツール、`npm run build`→`npx cap sync android`→`./gradlew assembleDebug`のコマンド列、
+  実機の指ドラッグの触感確認を含む確認チェックリスト）をspec.mdに追記した。
+  `src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため既存の
+  全バランス検証（サイクル1〜13）に影響なし。cycle13-v2レビューのLearningsは、静的チェック・
+  ドキュメント整備という方向でのさらなる前進は限界に近いとし、サイクル14以降は本命ゲーム本体
+  （`src/core/game.ts`側）の磨き上げへ回帰することを提案している
+- 次に行う回: **3回目（FIX only）。cycle13-v2で新規の致命・重大な問題は見つからなかったため、
+  修正対象は基本的に存在しない。cycle13-v2 Learningsの提案（Capacitor関連の静的チェック・
+  ドキュメント整備は限界に近く、サイクル14以降は本命ゲーム本体の磨き上げへ回帰すべき）を踏まえ、
+  本回はspec.md/レビューのコードレビューを行い、軽微な改善点があれば対応する（3回目FIX onlyの
+  規約通りレビューは書かず、対応内容があればspec.mdに追記しPR本文に記載する）。次回4回目
+  （FINAL REVIEW）でサイクル13全体（Androidプラットフォーム雛形生成・静的設定チェック・
+  実機ビルド手順書整備）を総括し、routine-state.mdをサイクル14（本命ゲーム本体の磨き上げ、
+  新規ゲーム番号は切らずgames/008-flagship-frontierholdを継続対象）へ進めること**
 - 対象ゲーム番号: 008-flagship-frontierhold（継続）
 
 ## 過去のサイクル12（完了・アーカイブ）
@@ -160,6 +168,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-11 | 12 | 3（FIX only） | cycle12-v2のバグ・問題リスト#3（実機の指ドラッグの触感）は構造的制約（ユーザー不在の自動実行ではBrowser paneが不可視でscreenshot/computerツールの実入力が機能しない）により今回も対応不可と再確認。それ以外は`src/render/touchInput.ts`のコードレビューで新規の軽微バグを1件発見・修正: `TouchInput.update()`が横向き重なり警告オーバーレイ（`rotateOverlay`）の表示可否を`state.over`を考慮せず毎tick判定していたため、DOM順で`restartOverlay`より後に描画される`rotateOverlay`が常に手前に来て、狭い横向き画面でゲームオーバーになった場合「タップでリスタート」が重なり警告に阻まれて反応しなくなる詰みが起こり得た。`!state.over && this.dpadOverlapsButtons()`に修正し、ゲームオーバー時はリスタート操作を優先するようにした。重なり検出自体は狭い横向きビューポート（812×375）でのDOM実測（`rotateDisplay`が`flex`になること）で動作を再確認したが、`state.over`側のゲーティングは`__AIP__.getState()`がライブ参照ではなくコピーを返す実装のためAIP経由でゲームオーバーを人為的に発生させてのDOM実証はできず、コードレビューでの正当性確認にとどめた（単純な論理積の追加のため妥当と判断）。`src/core/game.ts`は無変更、`npm run build`・`npm run simulate`とも正常終了し17戦略×5シードの全指標がcycle12-v2と完全一致（コアロジック無傷）を確認。レビューは書かず（3回目FIX onlyの規約通り）、判断根拠をspec.mdの「サイクル12・3回目」節に記載。package.jsonのversionを0.9.2へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル12・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-08-12 | 12 | 4（FINAL REVIEW） | サイクル12総括レビュー（reviews/008-flagship-frontierhold-cycle12-final.md）を作成。`npm run build`・`npm run simulate`とも正常終了し17戦略×5シードの全指標がcycle12-v1〜v3と完全一致（コアロジック無傷）を確認。cycle12・3回目がコードレビューのみで正当性確認としていた「ゲームオーバー時のリスタート優先ゲーティング」を、`__AIP__.takeControl()`→`step()`で意図的に燃料切れ死亡させ（109tickでhp=0・over=true）→`__AIP__.release()`でmain.tsの実際の`setInterval`ループへ制御を返し→`canvas.parentElement.children`を直接読む、という手順で初めてDOM実証した。横向きの狭いビューポート（812×375）でstate.over=true時、restartOverlayがdisplay:flex（最前面・タップ可能）・rotateOverlayがdisplay:none（正しく非表示）であることを確認し、restartOverlayへのsynthetic pointerdownで実際にリスタート（over: true→false）することも確認した。副産物として`__AIP__.release()`後は非表示のBrowser paneセッションでも`setInterval`ループが単発tick程度は実際に進行しDOMへ反映されることが判明し、cycle12-v2/v3の「AIP経由でのstate.over実証は不可能」という想定を覆した。両ペルソナの評価はコアゲームプレイ部分（`src/core/game.ts`無変更）はcycle12-v1のセッション結果を維持し、タッチ層への最終評価としてP01=A2（見えないコストの解消・リスタート詰みの回避）・P02=A9（一貫性）の観点で肯定的に評価。判定はFIX完了・本命ゲーム採用を維持。残る未解決項目（実機の指ドラッグの触感）はサイクル12の4回全てを通じて構造的制約により未検証のまま持ち越し。次サイクル13への提案として、cycle11-v2の2段階計画の後段にあたる`npx cap add android`（Androidプラットフォーム雛形生成のみ、実機ビルド・ストア申請はスコープ外）への着手を明記した。spec.mdに「サイクル12・4回目」節を追記し、package.jsonのversionを0.10.0へ、games/README.mdの状態列を更新（サイクル完了・アーカイブ扱いへ）、routine-state.mdをサイクル13・run1（BUILD+REVIEW、`npx cap add android`）へ進めた | (本PR) |
 | 2026-08-12 | 13 | 1（BUILD+REVIEW） | cycle11-v2の2段階計画の後段（Capacitor移植のネイティブビルド基盤）に着手。`npm install @capacitor/android --save-dev`で不足していた`@capacitor/android`パッケージ（cycle11・3回目は`@capacitor/core`・`@capacitor/cli`のみ追加済みで不足していた）を追加後、`npx cap add android`を実行しAndroidプラットフォーム雛形（`android/`配下66ファイル・456KB、Gradleプロジェクト一式）をこの自動実行環境（Android SDK/JDK不在）でエラーなく生成できることを確認した。続けて`npx cap sync android`を実行し、`npm run build`が生成する`dist/`の内容が`android/app/src/main/assets/public`へ正しくコピーされ`capacitor.config.json`が生成されることを確認し、`capacitor.config.ts`の`webDir: 'dist'`設定との整合を裏付けた。生成された`android/.gitignore`・`android/app/.gitignore`はCapacitor CLI既定の標準テンプレート（ビルド成果物`build/`・`*.apk`等のみ除外、雛形コード自体は追跡対象）で、`capacitor.config.ts`の`appId`が`android/app/build.gradle`の`applicationId`へ正しく反映されていることも確認した。`src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため、`npm run simulate`の全指標（5戦略×5シード）は既存のcycle12時点の数値と完全一致（コアロジック無傷）。生成されたAndroidプロジェクトが実際にGradleでビルド可能かはこの環境にAndroid SDK/JDKが無いため検証不能であり、人手作業（Android Studio環境での`./gradlew assembleDebug`相当の実行）への引き継ぎ事項として明記した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle13-v1.md作成、判定FIX（実ビルド確認のみ人手へ引き継ぎ、致命・重大なバグは0件）。package.jsonのversionを0.11.0へ、spec.mdに「サイクル13・1回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル13・run2（FIX+REVIEW相当、静的設定チェック＋人手向けビルド手順書整備）へ進めた | (本PR) |
+| 2026-08-16 | 13 | 2（FIX+REVIEW相当） | cycle13-v1のLearningsが提案した2方向を実施。(a)静的な設定ファイルの妥当性チェックで、`AndroidManifest.xml`のパーミッション（`INTERNET`のみ、Capacitor既定テンプレートで不要な権限なし）・`applicationId`/アプリ名と`capacitor.config.ts`との整合（一致）を確認したうえで、`android/app/build.gradle`の`versionName`（既定値`"1.0"`）が`package.json`の`version`（`"0.11.0"`）と無関係のまま放置されていた不一致を発見し、`versionName`を`"0.11.0"`へ修正した（Capacitorは`package.json`のversionを`build.gradle`へ自動同期しない仕様のため、`npx cap add android`直後は常にこの不一致が生じる。今後`package.json`のバージョンを上げる際は`versionName`も手動で追従させる運用ルールをspec.mdに明記）。(b)人手が実機ビルド・動作確認するための手順書（前提ツール、`npm run build`→`npx cap sync android`→`./gradlew assembleDebug`のコマンド列、実機の指ドラッグの触感確認を含む確認チェックリスト）をspec.mdに追記した。`src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため、`npm run build`・`npm run simulate`とも正常終了し全指標がcycle13-v1と完全一致（コアロジック無傷）を確認。reviews/008-flagship-frontierhold-cycle13-v2.md作成、判定FIX（軽微なversionName不一致1件を発見・修正、致命・重大なバグは0件）。cycle13-v2 Learningsは、静的チェック・ドキュメント整備という方向でのさらなる前進は限界に近く、サイクル14以降は本命ゲーム本体の磨き上げへ回帰することを提案。games/README.mdの状態列を更新し、routine-state.mdをサイクル13・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
