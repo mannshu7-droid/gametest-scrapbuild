@@ -1046,3 +1046,89 @@ cycle11-v2が定義した2段階計画（タッチ入力レイヤー追加→ネ
   cycle11-v2の時点から一貫してスコープ外のまま
 
 詳細はreviews/008-flagship-frontierhold-cycle13-v1.mdを参照。
+
+## サイクル13・2回目（FIX+REVIEW相当）: Android設定ファイルの静的妥当性チェックと実機ビルド手順書
+
+cycle13-v1のLearningsが提案した2方向のうち、実際のGradleビルドがこの環境（Android SDK/JDK不在）
+では検証不能なままである以上、代わりにできる範囲として(a)生成された設定ファイルの静的妥当性確認、
+(b)人手が実機ビルドを行うための手順書整備、の両方を実施した。`src/core/game.ts`・`src/render/`・
+`headless/simulate.ts`はいずれも無変更。
+
+### (a) 静的な設定ファイルの妥当性チェック
+
+| # | 確認項目 | 結果 |
+|---|---|---|
+| 1 | `android/app/src/main/AndroidManifest.xml`のパーミッションが最小限か | `<uses-permission android:name="android.permission.INTERNET" />`の1件のみで、Capacitor CLIが`npx cap add android`で生成する既定のテンプレートのまま。カメラ・位置情報・ストレージ等、本ゲーム（ローカルCanvas描画＋タッチ入力のみで外部通信・端末機能を一切使わない）が必要としない権限は付与されていないことを確認した |
+| 2 | `applicationId`（`android/app/build.gradle`）と`capacitor.config.ts`の`appId`の整合 | 両方とも`com.gametestscrapbuild.frontierhold008`で一致（`android/app/src/main/java/`配下のパッケージ構成、`AndroidManifest.xml`の`${applicationId}`参照、`strings.xml`の`package_name`/`custom_url_scheme`も同値で一貫） |
+| 3 | アプリ名（`strings.xml`の`app_name`）と`capacitor.config.ts`の`appName`の整合 | 両方とも`Frontierhold`で一致 |
+| 4 | `versionCode`/`versionName`（`android/app/build.gradle`）と`package.json`の`version`の整合 | **不一致を発見**: `npx cap add android`が生成した既定値は`versionCode 1`・`versionName "1.0"`で、`package.json`の`"version": "0.11.0"`と無関係だった（Capacitorは`package.json`のversionを`build.gradle`へ自動反映しない仕様のため）。`versionName`を`package.json`と一致する`"0.11.0"`へ修正した。`versionCode`（Play Store向けの内部整数値、Gradleビルド可否やゲーム動作には影響しない）はAndroidプラットフォーム初回登録として`1`のまま維持した |
+
+不一致（#4）以外の3項目は問題なし。修正した`versionName`はGradleビルド自体の可否には影響しない
+表示用メタデータのため、`npm run build`・`npm run simulate`（表参照）には影響しない。
+
+**運用上の注意点（次回以降への申し送り）**: Capacitorは`package.json`のバージョンを
+`android/app/build.gradle`へ自動同期しない。今後`package.json`の`version`を更新するサイクルでは、
+`android/app/build.gradle`の`versionName`（および必要に応じて`versionCode`のインクリメント）も
+手動で追従させる必要がある。
+
+### (b) 実機ビルド手順書（人手作業）
+
+Android Studio環境が無いこの自動実行環境では引き続き実行できないため、人手が実際にビルド・
+動作確認する際の手順として以下をチェックリスト形式で整備した。
+
+**前提ツール**:
+
+- [ ] JDK 17（Android Gradle Pluginの要求バージョン。`java -version`で確認）
+- [ ] Android Studio（Gradle同梱）または Android SDK Command-line Tools単体
+- [ ] Android SDK Platform 36相当（`android/variables.gradle`の`compileSdkVersion`/`targetSdkVersion`と一致させる。`sdkmanager --list`で確認）
+- [ ] `ANDROID_HOME`/`ANDROID_SDK_ROOT`環境変数がSDKの場所を指していること
+
+**ビルド手順**:
+
+```bash
+# 1. Webビルドを生成（android/へコピーする元データ）
+cd games/008-flagship-frontierhold
+npm install
+npm run build
+
+# 2. dist/の内容をネイティブプロジェクトへ同期
+npx cap sync android
+
+# 3. デバッグビルドを実行（Android Studio不要、コマンドラインのみ）
+cd android
+./gradlew assembleDebug        # Windowsは gradlew.bat assembleDebug
+
+# 4. 生成されたAPKの場所
+# android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+エミュレータ/実機での起動確認は、Android Studioで`android/`フォルダを開き「Run」する方法か、
+上記APKを`adb install`する方法のいずれでもよい。
+
+**確認すべき項目チェックリスト**:
+
+- [ ] `./gradlew assembleDebug`（またはAndroid Studioの Build）がエラーなく完了する
+- [ ] エミュレータ/実機でアプリが起動し、タイトル・キャンバスが表示される（`app_name`="Frontierhold"）
+- [ ] `src/render/touchInput.ts`が実装する仮想D-pad・アクションボタン5つ・ショップタップUIが
+      画面下部に表示され、実際の指タップ・ドラッグで反応する（サイクル12まではDOM実測でのみ
+      検証済みで、実機の指ドラッグの触感は本項目で初めて確認できる）
+- [ ] 画面回転（縦向き固定を想定しているため、回転させても崩れないか）
+- [ ] 端末バックボタンでアプリが異常終了しないか（Capacitor既定の`MainActivity`の挙動）
+- [ ] 長時間プレイ（数千tick相当）でのフレームレート・発熱・メモリの体感（Canvas 2D描画の
+      パフォーマンスはこの環境のヘッドレスシミュレーションでは検証できない領域）
+- [ ] アプリアイコン・スプラッシュ画像が既定のCapacitorプレースホルダーのままである旨を確認
+      （差し替えはスコープ外だが、プレースホルダーのまま申請しないよう次工程への申し送りとして
+      明示しておく）
+
+上記チェックリストの実行そのものは、Android Studio環境を持つ人間の手作業として引き続き
+スコープ外（cycle11-v2以来の一貫した方針）。本回はその手作業を迷わず実行できるようにする
+「手順の明文化」までを担った。
+
+### 確認
+
+`npm run build`・`npm run simulate`とも成功。`versionName`の変更はWebビルド成果物
+（`dist/`）・ゲームロジックのいずれにも影響しないため、20戦略×5シードの代表値（例:
+hp-all-in avgScore=389.6 avgMaxDepth=60.0 avgUpgradesBought=2.4 deaths=0/5）はcycle13-v1と
+完全に一致することを確認した。
+
+詳細はreviews/008-flagship-frontierhold-cycle13-v2.mdを参照。
