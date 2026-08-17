@@ -372,8 +372,17 @@ class Bot {
   private tryBuy(s: GameState, stagnant: boolean): Action | null {
     const bridgeReserve = this.strategy === 'bridge-reliant' ? BRIDGE_RELIANT_RESERVE : 0;
     const reserve = Math.max(bridgeReserve, this.wallReserve) + (this.buildsOutposts ? this.outpostReserve : 0);
+    // サイクル14新規（cycle13-final提案#2「atk/hp/atkspeed/muffler系all-inのavgScore収束」の調査で発見）:
+    // この早期skill購入の特例はsingle-stat all-in導入(サイクル11)より前から存在し、当時はdrillの
+    // 早期購入特例だけがsingle-stat除外の対象になった。skill側は除外し忘れており、結果として
+    // drill-all-in以外の全single-stat all-in戦略（atk-all-in/hp-all-in等）も「対象カテゴリ以外は
+    // 一切買わない」という前提に反してskill Lv1を密かに購入していた（例: capacity-all-inの
+    // avgSkillUses=12.3・fuel-all-inの6.2など、優先度リストに'skill'が一切無い戦略でskillが
+    // 使われていた）。single-stat all-in戦略はこの特例の対象外にし、単一カテゴリ隔離実験の
+    // 前提を正しく守る（skill-all-in自身は元々priorityForの先頭がskillのため無関係）
     const skillItem = s.shop.find((it) => it.id === 'skill');
     if (
+      !singleStatOf(this.strategy) &&
       skillItem &&
       skillItem.level === 0 &&
       skillItem.nextCost !== null &&
