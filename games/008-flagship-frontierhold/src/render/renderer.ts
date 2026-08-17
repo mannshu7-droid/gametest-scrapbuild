@@ -134,6 +134,12 @@ export class Renderer {
       8,
       hudY + 90,
     );
+    if (s.riskEscalationBanner > 0) {
+      // サイクル14・2回目新規: 危険度が再悪化した際、小さな色変化だけでは見逃されやすいという分析
+      // （cycle14-v2レビュー参照）への対応。該当行の背景を短時間ハイライトするだけで、バランス非接続
+      ctx.fillStyle = 'rgba(241,196,15,0.35)';
+      ctx.fillRect(0, hudY + 96, VIEW_W * TILE_PX, 18);
+    }
     const riskColor = { safe: '#7dffb0', caution: '#f1c40f', danger: '#e74c3c' }[s.player.combatRiskLevel];
     const riskLabel = { safe: '安全', caution: '注意', danger: '危険' }[s.player.combatRiskLevel];
     ctx.fillStyle = riskColor;

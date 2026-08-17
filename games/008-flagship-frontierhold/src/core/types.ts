@@ -98,6 +98,10 @@ export interface GameState {
   bottomReachedBanner: number;
   /** combatRiskLevelが初めてsafe以外になった際の強調バナーの残り表示tick数（0なら非表示。サイクル8新規） */
   firstRiskWarningBanner: number;
+  /** combatRiskLevelが（2回目以降も含め）悪化するたびに点灯するHUDハイライトの残り表示tick数（0なら非表示。
+   * サイクル14・2回目新規: 初回バナーの後、危険域へ再突入する際は小さな色変化しか手がかりが無く見逃しやすい
+   * という分析（cycle14-v2レビュー参照）への対応。バランス数値・AIの購買ロジックには一切接続しない演出のみの追加 */
+  riskEscalationBanner: number;
   player: {
     x: number;
     y: number;

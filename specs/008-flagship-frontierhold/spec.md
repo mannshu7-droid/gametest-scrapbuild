@@ -1259,3 +1259,76 @@ balancedは5/20(25%)、3種のadaptive戦略（危険度ヒントに反応して
 修正し、cycle13-finalの2つの着眼点はいずれも「game.tsの修正は不要」という結論に至った:
 着眼点(2)はサンプリング誤差、着眼点(1)は意図通りのトレードオフ（かつ従来の測定より強い形で
 確認された）。詳細はreviews/008-flagship-frontierhold-cycle14-v1.mdを参照。
+
+## サイクル14・2回目（FIX+REVIEW相当）: 危険度ヒント(caution)の再突入見逃しへのHUD改善
+
+cycle14-v1のLearningsが提示した2方向（(a) balanced-adaptiveの危険度ヒント反応設計を人間
+プレイヤーがどれだけ模倣できているかの確認、(b) 6サイクル安定を踏まえた次フェーズ検討）のうち
+(a)を深掘りした。v1同様`src/core/game.ts`に修正が必要な具体的バグは事前には見つかっていな
+かったため、まずヘッドレス診断で人間プレイヤーの見落としリスクを定量化し、有意なリスクが
+確認できた場合のみ`game.ts`側にHUD改善（バランス非接続の演出のみ）を加える方針で進めた。
+
+### ヘッドレス診断: 「cautionだけを見逃す」変種との比較
+
+`headless/simulate.ts`のBot（診断終了後に削除済み、コミットには含まれない）に一時的な
+`-dangeronly`変種を追加した。既存の`-adaptive`戦略はcombatRiskLevelが'caution'/'danger'の
+いずれでもhpをショップ優先度の先頭へ繰り上げるが、`-dangeronly`は'danger'（HUD上は赤・
+recommendedHpの70%未満）でのみ繰り上げ、'caution'（HUD上は黄色いテキスト1行の色変化のみで、
+初回を除き特筆した強調演出が無い）では通常優先度のまま反応しない、という「salientな赤だけに
+反応し、地味な黄色は見逃す」人間プレイヤーを模した設定にした。20シード（1〜20）比較:
+
+| 戦略 | avgScore | avgMaxDepth | deaths |
+|---|---|---|---|
+| mining-first-adaptive（caution+danger両方に反応） | 661.9 | 129.8 | 3/20(15%) |
+| mining-first-adaptive-dangeronly（dangerのみ反応） | 676.7 | 135.1 | 3/20(15%) |
+| balanced-adaptive（caution+danger両方に反応） | **780.9** | 141.2 | **0/20(0%)** |
+| balanced-adaptive-dangeronly（dangerのみ反応） | 656.5 | 127.5 | 3/20(15%) |
+
+mining-firstでは両者に有意差が無かった一方、balancedでは'caution'への早期反応を見逃すだけで
+死亡率が0%→15%、avgScoreが780.9→656.5（-16%）まで悪化した。これはcycle8・2回目のコメント
+（'caution'での繰り上げを外すとP01 seed301の中核救済シナリオが再び死亡に戻る）が示していた
+「'caution'は実害が出る前の早期投資として不可欠」という設計意図を、別の角度（人間の見落とし
+リスク）から再確認するものであり、現行のHUD表示（小さな色変化のテキスト1行、強調は初回のみ）
+に、危険度が悪化するたびに人間プレイヤーが気づける保証が無いという具体的なリスクを裏付けた。
+
+### 対応: HUDに「危険度再悪化」ハイライトを追加（バランス非接続）
+
+`src/core/game.ts`に、combatRiskLevelが（初回以降も含め）悪化するたび短時間ハイライトを
+再点灯する`riskEscalationBanner`を追加した。既存の`firstRiskWarningBanner`（cycle8新規、
+初めて非safeになった瞬間だけの全画面バナー）とは独立した仕組みで、初回の瞬間は
+`firstRiskWarningIssued`フラグにより二重発火しないようガードしている。`src/render/renderer.ts`
+では全画面バナーではなく、HUDの危険度表示行（「この深さの目安HP…[注意/危険]」）の背景を
+90tickだけ淡い黄色でハイライトする控えめな演出にとどめ、危険度が頻繁に上下する状況（band境界
+付近での小刻みな往復、007final以来の既知パターン）でも過度に煩わしくならないようにした。
+`GameState`に`riskEscalationBanner: number`を追加。バランス数値・AIの購買/帰還ロジックには
+一切接続していない（`headless/simulate.ts`のBotはこのフィールドを参照しない）。
+
+### 検証
+
+- `npm run build`（tsc --noEmit + vite build）: 正常終了
+- `npm run simulate`（20シード×17戦略、maxTicks20000）: 全指標がcycle14-v1と完全一致（回帰なし。
+  `riskEscalationBanner`はBotの意思決定に接続していないため理論的にも影響しないが、実測でも
+  裏付けた）
+- 検証用一時スクリプト（`headless/debug-riskbanner.ts`、コミット前に削除済み）で、実証済みの
+  mining-first-adaptive戦略ボット（7シード: 1〜5, 301, 302）を走らせ、`riskEscalationBanner`が
+  「初回は発火しない（firstRiskWarningBannerに任せる）→2回目以降のcaution/danger再突入では
+  毎回正しく発火する」ことをtrace出力で確認した（例: seed1で計3回、seed2で計16回発火、うち
+  caution再突入とdanger初到達の両方を正しく検知）
+- ブラウザプレビューは本セッション（自動実行環境）では起動できない制約があり、上記ヘッドレス
+  検証で代替した
+
+### 判定
+
+**FIX相当（検証ボットのバイアスではなく、実際のHUD設計の見落としリスクを診断で定量化し、
+バランス非接続の演出改善で対応）**。理由:
+
+- cycle14-v1のLearnings(a)（危険度ヒントへの人間プレイヤーの反応可能性）を、ヘッドレスで
+  「dangerのみ反応」という人間の見落としを模した変種と比較することで検証可能な形にし、
+  balanced戦略で死亡率0%→15%・avgScore-16%という有意なリスクを確認した
+- `src/core/game.ts`への修正はバランス数値・AI購買ロジックに一切接続しない演出のみ
+  （`riskEscalationBanner`）にとどめ、20シード×17戦略の全指標がcycle14-v1と完全一致すること
+  を実測で確認した（回帰なし）
+- mining-firstでは同じ見落としでも有意差が出なかった。危険度ヒントの見落としリスクは
+  ショップ優先度（drill偏重かバランス型か）によって現れ方が異なることも新たな知見として得た
+
+詳細はreviews/008-flagship-frontierhold-cycle14-v2.mdを参照。
