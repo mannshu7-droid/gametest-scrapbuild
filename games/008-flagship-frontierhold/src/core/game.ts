@@ -98,6 +98,13 @@ const BOTTOM_REACHED_BANNER_TICKS = 150;
 // 「情報を目立たせるだけ」の追加であり、既存の常時HUD表示（008 v3）が新規プレイヤーに
 // 見落とされやすいという課題への対応
 const FIRST_RISK_WARNING_BANNER_TICKS = 200;
+// ---- サイクル14・2回目新規: 008finalの積み残し課題「危険度ヒントに人間プレイヤーがどれだけ反応できるか」の
+// 検証（cycle14-v2レビュー参照）で、'caution'（HUDの小さな色変化のみ）への早期反応を見逃すとbalanced戦略で
+// 死亡率0%→15%・avgScore-16%という有意な悪化が20シード比較で確認された。危険域(caution/danger)へ
+// 「初回以降も」再突入するたびにHUDの該当行を短時間ハイライトし、静かな色変化だけに頼らないようにする。
+// FIRST_RISK_WARNING_BANNER（初回のみの全画面バナー）より短く控えめにし、頻発時の煩わしさを抑える。
+// バランス数値・AIの購買ロジックには一切接続しない演出のみの追加
+const RISK_ESCALATION_BANNER_TICKS = 90;
 
 const DIGGABLE: TileId[] = [TILE.DIRT, TILE.ROCK, TILE.ORE_COPPER, TILE.ORE_IRON, TILE.ORE_GOLD];
 
@@ -327,6 +334,8 @@ export class Game {
   private bottomReachedBannerTicks = 0;
   private firstRiskWarningIssued = false;
   private firstRiskWarningBannerTicks = 0;
+  private lastRiskLevel: 'safe' | 'caution' | 'danger' = 'safe';
+  private riskEscalationBannerTicks = 0;
   private outposts: OutpostState[] = [];
   /** 直前に確立した基地（地上 or 最も新しい前線基地）の深さ。地上は0 */
   private lastBaseY = 0;
@@ -560,6 +569,7 @@ export class Game {
     this.tick++;
     if (this.bottomReachedBannerTicks > 0) this.bottomReachedBannerTicks--;
     if (this.firstRiskWarningBannerTicks > 0) this.firstRiskWarningBannerTicks--;
+    if (this.riskEscalationBannerTicks > 0) this.riskEscalationBannerTicks--;
 
     if (this.player.y === 0 || this.tileAt(this.player.x, this.player.y) === TILE.OUTPOST) {
       if (this.tick % LABOR_INCOME_INTERVAL === 0) this.player.money += LABOR_INCOME_AMOUNT;
@@ -610,6 +620,7 @@ export class Game {
     this.metrics.maxDepth = Math.max(this.metrics.maxDepth, this.player.y);
     this.checkMilestone();
     this.checkBottomReached();
+    this.checkRiskEscalation();
     this.checkFirstRiskWarning();
     this.recomputeScore();
   }
@@ -647,6 +658,19 @@ export class Game {
     if (this.combatRiskLevel() === 'safe') return;
     this.firstRiskWarningIssued = true;
     this.firstRiskWarningBannerTicks = FIRST_RISK_WARNING_BANNER_TICKS;
+  }
+
+  /** サイクル14・2回目新規: 初回バナー（checkFirstRiskWarning）の後も、combatRiskLevelがsafe→caution/danger・
+   * caution→dangerのように悪化するたびにHUDハイライトを再点灯する（バランス非接続）。初回の瞬間だけは
+   * checkFirstRiskWarningの全画面バナーに任せ、二重表示を避けるためfirstRiskWarningIssuedが立つ前は発火しない
+   * （呼び出し順はcheckFirstRiskWarningより前のため、このtick内ではまだ古い値を見る） */
+  private checkRiskEscalation(): void {
+    const rank = { safe: 0, caution: 1, danger: 2 } as const;
+    const level = this.combatRiskLevel();
+    if (this.firstRiskWarningIssued && rank[level] > rank[this.lastRiskLevel]) {
+      this.riskEscalationBannerTicks = RISK_ESCALATION_BANNER_TICKS;
+    }
+    this.lastRiskLevel = level;
   }
 
   /** @returns dug=このtickに掘削したか, moved=既に掘った床/支保工へ実際に移動したか（採掘音の増減判定に使う） */
@@ -1091,6 +1115,7 @@ export class Game {
       over: this._over,
       bottomReachedBanner: this.bottomReachedBannerTicks,
       firstRiskWarningBanner: this.firstRiskWarningBannerTicks,
+      riskEscalationBanner: this.riskEscalationBannerTicks,
       player: {
         x: this.player.x,
         y: this.player.y,
