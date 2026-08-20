@@ -1,0 +1,15 @@
+スプライト素材クレジット
+
+出典: Kenney (https://kenney.nl) — "Tiny Dungeon" アセットパック
+ライセンス: Creative Commons Zero (CC0) — https://creativecommons.org/publicdomain/zero/1.0/
+（商用・改変・再配布とも許諾不要。クレジット表記は任意だが感謝を込めて明記する）
+
+使用ファイル（元パックのtile_XXXX.pngをリネーム、加工なし）:
+- player.png       ← tile_0096.png（プレイヤーキャラクター）
+- enemy_crawler.png ← tile_0108.png（敵: crawler）
+- enemy_brute.png   ← tile_0109.png（敵: brute）
+- tile_dirt.png     ← tile_0000.png（土タイル）
+- tile_rock.png     ← tile_0036.png（岩タイル。鉱石3種の背景としても共用）
+- tile_floor.png    ← tile_0048.png（掘削済み床タイル）
+- tile_prop.png     ← tile_0077.png（支保工タイル）
+- tile_outpost.png  ← tile_0090.png（前線基地タイル）
