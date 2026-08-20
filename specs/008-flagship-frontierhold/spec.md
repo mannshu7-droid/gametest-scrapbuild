@@ -1375,3 +1375,59 @@ mining-firstでは両者に有意差が無かった一方、balancedでは'cauti
   （seed1、tick60時点）をPythonで`renderer.ts`と同じ合成ロジックを再現してオフラインレンダリング
   し、タイル・鉱脈ドット・プレイヤー・敵の描画結果を視覚確認した（検証用スクリプトはこの
   リポジトリ外の一時ファイルで、コミットには含まれない）
+
+## サイクル14・3回目（FIX only、`-dangeronly`診断戦略の恒久化＋iOS移植の実行可否調査）
+
+cycle14-v2のLearningsが提示した2方向（(a)iOS移植/新規ゲームプロトタイプの検討、
+(b)「危険シグナルの見落としリスクはビルド依存」という知見を踏まえたさらなるHUD/検証改善）
+のうち、まず(a)の実行可否を確認し、次に(b)を深掘りした。`src/core/game.ts`（本命ゲーム本体）に
+変更が必要な具体的バグは見つからなかったため、検証ボット側の恒久改善で前進を作った
+（3回目FIX onlyの規約通りレビューは書かない）。
+
+### (a) iOS移植の実行可否調査
+
+`npx cap add ios`はCocoaPods経由のiOS向けネイティブプロジェクト生成にmacOS/Xcodeを前提とする
+Capacitor公式の制約があり、本自動実行環境はWindows（`platform: win32`）であるため実行不可と
+判断した（cycle13でのAndroidプラットフォーム追加はAndroid SDKやJDKなしでも雛形生成自体は
+Windows/Linuxで可能だったが、iOSはXcodeプロジェクト形式そのものがmacOS依存のため同列には
+扱えない）。iOS移植は人手でmacOS環境を用意して実行する必要がある旨をここに記録し、自動ルーチンの
+対象からは一旦外す。
+
+### (b) `-dangeronly`診断戦略の恒久化
+
+cycle14-v2は「'caution'(HUD黄)の地味な色変化を見落とし'danger'(赤)にのみ反応する人間プレイヤー」
+を模した`-dangeronly`変種を`headless/simulate.ts`に一時追加し、balanced-adaptiveで死亡率
+0%→15%・avgScore-16%という有意な見落としリスクを確認した後、検証用コードを削除していた。
+Learningsが「今後もブラウザ検証が使えない状況でのUI改善判断に応用できる」と評価した手法だった
+ため、使い捨てにせず`mining-first-adaptive-dangeronly`・`combat-first-adaptive-dangeronly`・
+`balanced-adaptive-dangeronly`の3種として`npm run simulate`の標準戦略セット（17→20戦略）へ
+恒久的に組み込んだ。`priorityFor()`に`isDangerOnly()`判定を追加し、dangeronly変種は
+riskLevel==='danger'のときのみhp優先繰り上げが発動する（通常の`-adaptive`は'caution'/'danger'
+いずれでも発動）。
+
+### 検証結果（20シード×20戦略のヘッドレス比較、cycle14-v2→サイクル14・3回目）
+
+既存17戦略の全指標（avgScore・avgMaxDepth・deaths等）はcycle14-v2と完全に一致（回帰なし）。
+新規3戦略の結果:
+
+| 戦略 | avgScore | avgMaxDepth | deaths |
+|---|---|---|---|
+| mining-first-adaptive-dangeronly | 676.7 | 135.1 | 3/20(15%) |
+| combat-first-adaptive-dangeronly（新規、cycle14-v2は未測定） | 471.9 | 89.8 | 0/20(0%) |
+| balanced-adaptive-dangeronly | 656.5 | 127.5 | 3/20(15%) |
+
+mining-first・balancedはcycle14-v2の一時スクリプトが出した数値と完全に一致し、恒久化による
+実装の等価性を裏付けた。新たに測定したcombat-first-adaptive-dangeronlyは通常の
+combat-first-adaptive（avgScore478.8・deaths0/20）とほぼ同一（471.9・0/20）であり、
+mining-firstと同様「'caution'の見落としがあっても有意な悪化がない」ことを確認した。これにより
+「危険シグナルの見落としリスクはビルド依存で、atk/hpを優先度リストの上位に元々置くビルド
+（combat-first・mining-first）では影響が小さく、drill等を優先しhpが後回しになりやすいビルド
+（balanced）でのみ顕著」というcycle14-v2の知見が3戦略中2戦略で無風・1戦略（balanced）でのみ
+有意という形でさらに裏付けられた。
+
+### 判定
+
+**FIX only（コアバランスへの変更なし。検証ボットの恒久改善のみ）**。`npm run build` /
+`npm run simulate`とも正常終了。package.jsonのversionを0.14.0へ。
+
+詳細な作業ログはPR本文を参照（3回目FIX onlyの規約によりreviews/への新規ファイルは作成しない）。
