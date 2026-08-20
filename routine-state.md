@@ -4,13 +4,41 @@
 
 ## 現在位置
 
+- サイクル: 15
+- 要素: **新規ゲームプロトタイプ（新規番号 `009-*`）に着手**。cycle14-final
+  （reviews/008-flagship-frontierhold-cycle14-final.md）が、iOS移植の構造的な実行不可（cycle14-v3）
+  と、`src/core/game.ts`のコアバランスがサイクル9・2回目以降6サイクル（9〜14）連続で無変更のまま
+  安定していること（＝この方向でのさらなる微修正は投資対効果が逓減）を根拠に、
+  008-flagship-frontierholdへの継続的な微調整サイクルを一旦区切り、新しいゲームプロトタイプへ
+  着手することを提案した。games/008-flagship-frontierhold自体は「本命ゲーム採用」のステータスを
+  維持したまま、新規サイクルは独立した検証として進める
+- cycle14-finalが提示した2つの候補方向（round1でどちらを選ぶか、または両立可能なら組み合わせて
+  判断すること）:
+  1. **008の11の共通パターンの移植性検証**: 008は「縦シャフト採掘」という固定の空間構造の上に
+     全パターンを積み上げてきた。同じパターン群（安全マージン公開・常設ショップ・脱出手段・
+     危険度ヒント等）を全く異なる空間構造（例: 横スクロール・オープンな平面マップ）に適用しても
+     同様に機能するかを検証すれば、「008固有の解」なのか「ジャンルを超えて有効な設計原則」なのか
+     を切り分けられる
+  2. **単一要素での再挑戦**: サイクル1〜3（戦闘002・採掘003・建築004）はいずれも008の11パターン
+     確立前の実装であり、当時のレビューが指摘した積み残し（002の「強化選択の分岐が結果に大差を
+     生まない」、004の「carefulが早期クリアし資金の使い道が余る」等）に、008で確立したパターンを
+     逆輸入して再挑戦すれば、パターンの汎用性と各要素単体の設計改善を同時に検証できる
+- 008で確立した11の共通パターン（常設・複数カテゴリショップ／安全マージンの数値公開／固定範囲の
+  保護装置／詰みからの脱出手段／常時使用可能な緊急離脱／建築を第三の選択肢にする／目標を生む
+  建築／危険度UIヒント／区切り・報酬演出／危険度ヒントを状況適応的に使う／危険度再悪化のたびの
+  HUDハイライト）はいずれも新規ゲームでも土台として活用してよい（ゼロから再発明する必要はない）
+- 次に行う回: **1回目（BUILD+REVIEW）**
+- 対象ゲーム番号: 未定（round1でcycle14-finalの2候補から選び`009-<要素>-<名前>`を新規に切る）
+
+## 過去のサイクル14（完了・アーカイブ）
+
 - サイクル: 14
 - 要素: 本命ゲーム本体（`src/core/game.ts`側）の磨き上げへ回帰。サイクル13（4回）でCapacitor
   移植の後段（Androidプラットフォーム雛形生成・静的設定チェック・画面向き固定・実機ビルド手順書
   整備）が完了し（cycle13-final参照）、cycle13-v2 Learningsが「静的チェック・ドキュメント整備
   という方向でのさらなる前進は限界に近い」と指摘した通り、Capacitor関連の作業は一区切りとした。
-  新規ゲーム番号は切らず、games/008-flagship-frontierholdをそのまま対象にする
-- サイクル14・1回目（BUILD+REVIEW相当、完了）は、cycle13-finalのLearningsが提案した2つの着眼点
+  新規ゲーム番号は切らず、games/008-flagship-frontierholdをそのまま対象にした
+- サイクル14・1回目（BUILD+REVIEW相当）は、cycle13-finalのLearningsが提案した2つの着眼点
   （(1) drill-all-in系のみ死亡リスクを伴う非対称性の再検証、(2) atk/hp/atkspeed/muffler系
   all-inのavgScoreが359.8〜397.6の狭いレンジに収束している点の掘り下げ）の両方に着手した。
   調査の過程で`headless/simulate.ts`のsingle-stat all-in診断戦略に「skill Lv1早期購入の特例が
@@ -18,8 +46,8 @@
   未発見）を発見・修正した。結論: 着眼点(2)は5シードのサンプリング誤差（20シードでは
   353.6〜766.2と再現せず）、着眼点(1)はskillリーク修正後さらに明確化した意図通りのトレードオフ
   （死亡率55%→80%、mining-first50%・balanced25%・adaptive0〜15%という勾配で裏付け）。
-  `src/core/game.ts`（ゲーム本体）は無変更。詳細はreviews/008-flagship-frontierhold-cycle14-v1.md参照
-- サイクル14・2回目（FIX+REVIEW、完了）は、cycle14-v1のLearningsが提示した方向性のうち
+  `src/core/game.ts`（ゲーム本体）は無変更
+- サイクル14・2回目（FIX+REVIEW）は、cycle14-v1のLearningsが提示した方向性のうち
   「balanced-adaptiveの危険度ヒント反応設計を人間プレイヤーがどれだけ模倣できているか」を
   深掘りした。`headless/simulate.ts`に一時的な`-dangeronly`診断戦略（'caution'の色変化は
   見逃し'danger'にだけ反応する人間を模す、検証後削除済み）を追加し20シード比較したところ、
@@ -27,69 +55,27 @@
   （mining-firstでは有意差なし）。この結果を受け`src/core/game.ts`に`riskEscalationBanner`
   （危険度が初回以降も悪化するたびHUD該当行を90tickハイライトする、バランス非接続の演出）を
   追加し、`src/core/types.ts`・`src/render/renderer.ts`も対応した。20シード×17戦略の
-  ヘッドレス回帰確認で全指標がcycle14-v1と完全一致（回帰なし）。ブラウザプレビューは本環境の
-  制約で起動できないため、`Bot`クラスを一時exportした検証スクリプト（検証後削除済み）で
-  バナー発火ロジック自体をtraceし、二重発火なし・再悪化のたび正しく発火することを確認した。
-  詳細はreviews/008-flagship-frontierhold-cycle14-v2.md参照
-- サイクル14・3回目（FIX only、完了）は、cycle14-v2のLearningsが提示した2方向のうち、まず
+  ヘッドレス回帰確認で全指標がcycle14-v1と完全一致（回帰なし）
+- サイクル14・3回目（FIX only）は、cycle14-v2のLearningsが提示した2方向のうち、まず
   (a)iOS移植の実行可否を調査した。`npx cap add ios`はCocoaPods経由のiOSネイティブプロジェクト
   生成にmacOS/Xcodeを前提とするCapacitor公式の制約があり、本自動実行環境はWindows
   （`platform: win32`）のため実行不可と判断し、spec.mdに記録した（人手でmacOS環境を用意して
-  実行する必要がある旨を明記。自動ルーチンの対象から一旦外す）。続けて(b)「危険シグナルの
+  実行する必要がある旨を明記。自動ルーチンの対象から一旦外した）。続けて(b)「危険シグナルの
   見落としリスクはビルド依存」の深掘りとして、cycle14-v2で一時スクリプトとして使い捨てていた
-  `-dangeronly`診断戦略（'caution'の色変化を見落とし'danger'にのみ反応する人間プレイヤーを
-  模す）を`headless/simulate.ts`の標準戦略セットへ恒久化した（17→20戦略、
-  mining-first/combat-first/balancedの3種）。20シード×20戦略のヘッドレス比較で既存17戦略は
-  cycle14-v2と完全一致（回帰なし）、恒久化した3戦略のうちmining-first・balancedは一時
-  スクリプト時の数値と完全一致（実装の等価性を確認）、新規測定したcombat-first-adaptive-
-  dangeronlyは通常のcombat-first-adaptiveとほぼ同一（avgScore471.9 vs 478.8、deaths0/20 vs
-  0/20）で見落としの影響が小さいことを確認し、「見落としリスクはbalanced系ビルドに偏る」という
-  cycle14-v2の知見をさらに裏付けた。`src/core/game.ts`（ゲーム本体）は無変更。npm run build /
-  npm run simulateとも正常終了。package.jsonのversionを0.14.0へ。レビューは書かず（3回目FIX
-  onlyの規約通り）、詳細な作業ログはPR本文に記載
-- 次に行う回: **4回目（FINAL REVIEW）**
-- 対象ゲーム番号: 008-flagship-frontierhold（継続）
-
-## 過去のサイクル13（完了・アーカイブ）
-
-- サイクル: 13
-- 要素: Capacitor移植の後段（`npx cap add android`によるネイティブプラットフォーム雛形生成）。
-  サイクル12（4回）でタッチ入力レイヤーの実装・検証が完了し（cycle12-final参照）、
-  cycle11-v2が定義した2段階計画（タッチ入力レイヤー追加→ネイティブビルド）の前段が完了した
-  ため、後段に着手した。新規ゲーム番号は切らず、games/008-flagship-frontierholdをそのまま
-  対象にする
-- サイクル13・1回目（BUILD+REVIEW）では、`@capacitor/android`を追加し
-  `npx cap add android`でAndroidプラットフォーム雛形（66ファイル・456KB）をこの自動実行環境
-  （Android SDK等不在）でエラーなく生成できることを確認した。`npx cap sync android`も
-  エラーなく完了し、`npm run build`が生成する`dist/`と`capacitor.config.ts`の`webDir`設定
-  との整合を裏付けた。致命・重大なバグは0件
-- サイクル13・2回目（FIX+REVIEW相当）では、cycle13-v1のLearningsが提案した2方向を実施した。
-  (a) 静的な設定ファイルの妥当性チェックで、`AndroidManifest.xml`のパーミッション（`INTERNET`のみ、
-  Capacitor既定テンプレート）・`applicationId`/アプリ名の整合は問題なしと確認したが、
-  `android/app/build.gradle`の`versionName`（既定値`"1.0"`）が`package.json`の`version`
-  （`"0.11.0"`）と無関係のまま放置されていた不一致を発見・修正した（Capacitorは`package.json`の
-  versionを`build.gradle`へ自動同期しない仕様のため、`npx cap add android`直後は常にこの
-  不一致が生じる。今後`package.json`のバージョンを上げる際は`versionName`も手動で追従させる
-  運用ルールをspec.mdに明記した）。(b) 人手が実機ビルド・動作確認するための手順書
-  （前提ツール、`npm run build`→`npx cap sync android`→`./gradlew assembleDebug`のコマンド列、
-  実機の指ドラッグの触感確認を含む確認チェックリスト）をspec.mdに追記した。
-  `src/core/game.ts`・`src/render/`・`headless/simulate.ts`はいずれも無変更のため既存の
-  全バランス検証（サイクル1〜13）に影響なし
-- サイクル13・3回目（FIX only）は、コードレビューにより`AndroidManifest.xml`に
-  `android:screenOrientation`指定が無くspec.mdの「ポートレート固定」設計意図に反して実機で
-  横向きに回転しうる問題を発見・修正した（`portrait`を追加）。`src/core/game.ts`は無変更、
-  `npm run build`・`npm run simulate`とも成功し既存のバランス検証と完全一致
-- サイクル13・4回目（FINAL REVIEW、reviews/008-flagship-frontierhold-cycle13-final.md）では、
-  8戦略×5シードのヘッドレス再検証で全バランス数値がcycle12-final以降完全に再現されることを
-  確認し、サイクル13の3つの修正（`@capacitor/android`追加・`versionName`同期・
-  `screenOrientation="portrait"`追加）がいずれも現在のコードベースに正しく反映されていることを
-  実測確認した。新たにアプリアイコン・スプラッシュがCapacitor既定プレースホルダーのままである
-  軽微な残課題（ゲームシステム検証のスコープ外の制作物差し替え）を発見。判定はFIX完了・本命
-  ゲーム採用を維持。Capacitor関連の静的チェック方向はほぼ尽きたと判断し、サイクル14は本命ゲーム
-  本体（`src/core/game.ts`）の磨き上げへ回帰することを提案。具体的には(1) drill-all-in系のみ
-  死亡リスクを伴う非対称性（cycle11-v1で定量化）の再検証、(2) atk/hp/atkspeed/muffler系all-inの
-  avgScoreが狭いレンジに収束している点の掘り下げ、の2つを次サイクルの着眼点として提示した
-- 対象ゲーム番号: 008-flagship-frontierhold（継続）
+  `-dangeronly`診断戦略を`headless/simulate.ts`の標準戦略セットへ恒久化した（17→20戦略）。
+  20シード×20戦略のヘッドレス比較で既存17戦略はcycle14-v2と完全一致（回帰なし）、新規測定した
+  combat-first-adaptive-dangeronlyは通常のcombat-first-adaptiveとほぼ同一（見落としの影響が
+  小さい）ことを確認。`src/core/game.ts`（ゲーム本体）は無変更。package.jsonのversionを0.14.0へ
+- サイクル14・4回目（FINAL REVIEW、reviews/008-flagship-frontierhold-cycle14-final.md）では、
+  20シード×20戦略のヘッドレス再検証でサイクル14の3つの修正（skill隔離バグ修正・
+  `riskEscalationBanner`・`-dangeronly`恒久化）がすべて正しく反映され、互いに矛盾なく共存して
+  いることを実測確認した（cycle14-v2・v3の記録値と完全一致、回帰なし）。判定はFIX完了・本命
+  ゲーム採用を維持。「危険度再悪化のたびのHUDハイライト」を11番目の共通パターンとして正式採用。
+  一方で、`src/core/game.ts`のコアバランスがサイクル9・2回目以降6サイクル連続で無変更という
+  事実と、iOS移植が構造的に実行不可と判明したことを踏まえ、008への継続的な微調整サイクルは
+  一旦区切りとし、次サイクル15は新しいゲームプロトタイプ（新規番号`009-*`）に着手することを
+  提案。候補は(1)008の11パターンの異なる空間構造への移植性検証、(2)002/003/004の単一要素への
+  パターン逆輸入再挑戦、の2つ。routine-state.mdをサイクル15・run1へ進めた
 
 ## 実行履歴
 
@@ -175,6 +161,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-17 | 14 | 1（BUILD+REVIEW相当） | cycle13-finalの2つの着眼点（drill-all-in系の死亡リスク非対称性・atk/hp/atkspeed/muffler系all-inのavgScore収束）の両方に着手。20シード(1〜20)の再検証で、cycle11導入のsingle-stat all-in診断戦略に「skill Lv1早期購入の特例(005由来)がsingle-stat all-inを除外しておらず単一カテゴリ隔離が不完全」というバグ（cycle11〜13で3サイクル未発見）を発見し、`headless/simulate.ts`の`Bot.tryBuy()`に`!singleStatOf(this.strategy)`ガードを追加して修正した。既存8戦略（mining-first等）は無変更で全指標が完全一致（回帰なし）。修正後、drill-all-inの死亡率は55%(11/20)→80%(16/20)へさらに明確化し「意図通りのトレードオフ」と再確認（mining-first50%・balanced25%・adaptive0〜15%という勾配で裏付け）、avgScoreの狭いレンジ(359.8〜397.6)はcycle13-finalの8戦略×5シードという小サンプルの誤差と判明（20シードではatk-all-in353.6〜fuel-all-in766.2と再現せず）。`src/core/game.ts`（本命ゲーム本体）は無変更のため両ペルソナのコアゲームプレイ評価はcycle13-final以前を維持、ブラウザAIP再検証も不要と判断（Node専用の検証ボットのみの修正のため）。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle14-v1.md作成、判定FIX（検証ボットのバイアス修正が完了、ゲーム本体への追加修正は不要）。spec.mdに「サイクル14・1回目」節を追記、games/README.mdの状態列を更新し、routine-state.mdをサイクル14・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-08-17 | 14 | 2（FIX+REVIEW） | cycle14-v1のLearningsが提示した「balanced-adaptiveの危険度ヒント反応設計を人間プレイヤーがどれだけ模倣できているか」を深掘り。`headless/simulate.ts`に一時的な`-dangeronly`診断戦略（'caution'の色変化のみの信号は見逃し'danger'にだけ反応する人間を模す、検証後削除済みでコミットに含まれない）を追加し20シード(1〜20)比較したところ、balanced-adaptiveで死亡率0%→15%・avgScore780.9→656.5(-16%)という有意な見落としリスクを確認した一方、mining-first-adaptiveでは有意差が出なかった（ショップ優先度によって見落としの実害が異なるという新知見）。この結果を受け`src/core/game.ts`に`riskEscalationBanner`（combatRiskLevelが初回以降も悪化するたびHUD該当行を90tickだけ淡くハイライトする、バランス数値・AI購買ロジックには一切接続しない演出のみの追加）を実装し、`src/core/types.ts`（GameStateへのフィールド追加）・`src/render/renderer.ts`（HUD行の背景ハイライト描画）も対応した。20シード×17戦略のヘッドレス回帰確認で全指標がcycle14-v1と完全に一致（回帰なし）。ブラウザプレビューは本自動実行環境の制約で起動できないため、`headless/simulate.ts`の`Bot`クラスを一時exportした検証スクリプト（`headless/debug-riskbanner.ts`、検証後削除済み）で実証済みのmining-first-adaptive戦略を7シード(1〜5,301,302)走らせ、`riskEscalationBanner`が初回は二重発火せず・以降の危険度再悪化（caution再突入・danger到達とも）で毎回正しく発火することをtrace出力で確認した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle14-v2.md作成、判定FIX。spec.mdに「サイクル14・2回目」節を追記、package.jsonのversionを0.12.0へ、routine-state.mdをサイクル14・run3（FIX only）へ進めた | (本PR) |
 | 2026-08-20 | 14 | 3（FIX only） | cycle14-v2のLearningsが提示した2方向を実施。(a)iOS移植（`npx cap add ios`）の実行可否を調査し、CocoaPods経由のiOSネイティブプロジェクト生成がmacOS/Xcodeを前提とするCapacitor公式の制約により本自動実行環境（Windows）では実行不可と判断、spec.mdに記録した。(b)cycle14-v2で一時スクリプトとして使い捨てていた`-dangeronly`診断戦略（'caution'の色変化を見落とし'danger'にのみ反応する人間プレイヤーを模す）を`headless/simulate.ts`の標準戦略セットへ恒久化した（`mining-first-adaptive-dangeronly`・`combat-first-adaptive-dangeronly`・`balanced-adaptive-dangeronly`の3種を追加、17→20戦略）。`priorityFor()`に`isDangerOnly()`判定を追加しdangeronly変種はriskLevel==='danger'のときのみhp優先繰り上げが発動するようにした。20シード(1〜20)×20戦略のヘッドレス比較で既存17戦略はcycle14-v2と完全一致（回帰なし）、恒久化した3戦略のうちmining-first・balancedは一時スクリプト時の数値（avgScore676.7/135.1/3-20、656.5/127.5/3-20）と完全一致し実装の等価性を確認、新規測定したcombat-first-adaptive-dangeronlyは通常のcombat-first-adaptive（avgScore478.8・deaths0/20）とほぼ同一（471.9・0/20）で見落としの影響が小さく、「見落としリスクはbalanced系ビルドに偏る」というcycle14-v2の知見をさらに裏付けた。`src/core/game.ts`（本命ゲーム本体）は無変更。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「サイクル14・3回目」節を追記。package.jsonのversionを0.14.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル14・run4（FINAL REVIEW）へ進めた | (本PR) |
+| 2026-08-20 | 14 | 4（FINAL REVIEW） | サイクル14総括レビュー（reviews/008-flagship-frontierhold-cycle14-final.md）を作成。20シード(1〜20)×20戦略のヘッドレス再検証で、サイクル14の3つの修正（skill隔離バグ修正・`riskEscalationBanner`・`-dangeronly`恒久化）がすべて正しく反映され互いに矛盾なく共存していることを実測確認（cycle14-v2・spec.md「サイクル14・3回目」節の記録値と完全一致、回帰なし。balanced-adaptive avgScore780.9・deaths0/20、drill-all-in avgScore769.1・deaths16/20など）。`preview_start`を試行しスケジュールタスク（無人実行）ではブラウザプレビューを起動できないことを再確認、ブラウザAIPは実施できずヘッドレス検証で代替した。判定はFIX完了・本命ゲーム採用を維持。両ペルソナの最終評価（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はいずれもYesを維持。「危険度再悪化のたびのHUDハイライト」を11番目の共通パターンとして正式採用。一方で`src/core/game.ts`のコアバランスがサイクル9・2回目以降6サイクル（9〜14）連続で無変更という事実と、iOS移植が構造的に実行不可と判明したことを踏まえ、008への継続的な微調整サイクルは一旦区切りとし、次サイクル15は新しいゲームプロトタイプ（新規番号`009-*`）に着手することを提案した。候補は(1)008の11パターンの異なる空間構造への移植性検証、(2)002/003/004の単一要素へのパターン逆輸入再挑戦、の2つで、games/008自体は「本命ゲーム採用」ステータスを維持したまま新規サイクルは独立して進める。games/README.mdの状態列を更新（サイクル14完了・アーカイブ扱いへ）、routine-state.mdをサイクル15・run1（BUILD+REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
