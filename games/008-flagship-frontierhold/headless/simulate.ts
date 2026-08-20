@@ -183,13 +183,31 @@ type BaseStrategy =
 // サイクル8新規（008final提案#1）: combatRiskLevelを読んで動的に優先度・帰還判断を調整する「適応型」戦略。
 // 固定優先度戦略のバリアント名に`-adaptive`を付けて表現する（例: mining-first-adaptive）
 type AdaptiveStrategy = 'mining-first-adaptive' | 'combat-first-adaptive' | 'balanced-adaptive';
-type Strategy = BaseStrategy | AdaptiveStrategy;
+// サイクル14・3回目新規（cycle14-v2の一時検証スクリプト`-dangeronly`を恒久化）: HUD上の危険度表示は
+// 'caution'(黄)と'danger'(赤)の2段階だが、実際にプレイヤーの目を強く引く全画面バナーは最初の
+// 非safe遷移でしか出ない。cycle14-v2は「'caution'の地味な色変化だけを見落とし'danger'にしか
+// 反応しない人間プレイヤー」を模した`-dangeronly`変種を一時スクリプトとしてheadless/simulate.tsに
+// 追加しbalanced戦略で死亡率0%→15%・avgScore-16%という有意な見落としリスクを確認したが、検証後に
+// 削除していた。cycle14-v2のLearningsが「今後もブラウザ検証が使えない状況でのUI改善判断に応用
+// できる」と評価した手法のため、使い捨てず`npm run simulate`の標準戦略セットへ恒久的に組み込み、
+// 今後のサイクルでも回帰確認だけで「見落としリスクがビルド依存でどう変化したか」を追跡できるようにする
+type DangerOnlyAdaptiveStrategy =
+  | 'mining-first-adaptive-dangeronly'
+  | 'combat-first-adaptive-dangeronly'
+  | 'balanced-adaptive-dangeronly';
+type Strategy = BaseStrategy | AdaptiveStrategy | DangerOnlyAdaptiveStrategy;
 
 function isAdaptive(strategy: Strategy): boolean {
-  return strategy.endsWith('-adaptive');
+  return strategy.includes('-adaptive');
+}
+function isDangerOnly(strategy: Strategy): boolean {
+  return strategy.endsWith('-dangeronly');
 }
 function baseOf(strategy: Strategy): BaseStrategy {
-  return (isAdaptive(strategy) ? strategy.slice(0, -'-adaptive'.length) : strategy) as BaseStrategy;
+  let s: string = strategy;
+  if (s.endsWith('-dangeronly')) s = s.slice(0, -'-dangeronly'.length);
+  if (s.endsWith('-adaptive')) s = s.slice(0, -'-adaptive'.length);
+  return s as BaseStrategy;
 }
 
 const MINING_FIRST: UpgradeId[] = ['drill', 'capacity', 'fuel', 'engineering', 'atk', 'hp', 'skill', 'atkspeed', 'muffler'];
@@ -264,7 +282,10 @@ function priorityFor(
   stagnant: boolean,
 ): UpgradeId[] {
   const base = basePriorityFor(baseOf(strategy));
-  if (!isAdaptive(strategy) || riskLevel === 'safe' || stagnant) return base;
+  if (!isAdaptive(strategy) || stagnant) return base;
+  // dangeronly変種は'danger'(赤)にのみ反応し、'caution'(黄)の地味な色変化は通常戦略と同じく無視する
+  const triggersOn = isDangerOnly(strategy) ? riskLevel === 'danger' : riskLevel !== 'safe';
+  if (!triggersOn) return base;
   const boosted: UpgradeId[] = ['hp'];
   const rest = base.filter((id) => !boosted.includes(id));
   return [...boosted, ...rest];
@@ -748,6 +769,9 @@ for (const strategy of [
   'mining-first-adaptive',
   'combat-first-adaptive',
   'balanced-adaptive',
+  'mining-first-adaptive-dangeronly',
+  'combat-first-adaptive-dangeronly',
+  'balanced-adaptive-dangeronly',
   'drill-all-in',
   'capacity-all-in',
   'fuel-all-in',
