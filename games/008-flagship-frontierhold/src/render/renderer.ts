@@ -1,11 +1,13 @@
 import { W, H, OUTPOST_MIN_GAP, BOTTOM_REACHED_BONUS } from '../core/game';
 import { TILE, type GameState } from '../core/types';
+import { getSprite, type SpriteName } from './sprites';
 
 const TILE_PX = 24;
 const VIEW_W = W;
 const VIEW_H = 18;
 const HUD_PX = 168;
 
+// スプライト読み込み前・失敗時のフォールバック単色（サイクル15新規: スプライト描画導入前の色を維持）
 const TILE_COLOR: Record<number, string> = {
   [TILE.FLOOR]: '#1b1b1b',
   [TILE.DIRT]: '#6b4a2f',
@@ -22,6 +24,31 @@ const ENEMY_COLOR: Record<string, string> = {
   brute: '#c0392b',
 };
 
+// タイル→スプライト名。鉱石3種(ORE_COPPER/IRON/GOLD)は共通の岩スプライトを土台にし、
+// 上にコード描画の鉱脈ドット（ORE_DOT_COLOR）を重ねることで種類を区別する（画像はKenney.nl
+// "Tiny Dungeon"のスプライトをそのまま使い、鉱脈の色分けだけをコード側の演出として追加する方針）
+const TILE_SPRITE: Partial<Record<number, SpriteName>> = {
+  [TILE.FLOOR]: 'tile_floor',
+  [TILE.DIRT]: 'tile_dirt',
+  [TILE.ROCK]: 'tile_rock',
+  [TILE.ORE_COPPER]: 'tile_rock',
+  [TILE.ORE_IRON]: 'tile_rock',
+  [TILE.ORE_GOLD]: 'tile_rock',
+  [TILE.PROP]: 'tile_prop',
+  [TILE.OUTPOST]: 'tile_outpost',
+};
+
+const ORE_DOT_COLOR: Partial<Record<number, string>> = {
+  [TILE.ORE_COPPER]: '#c8763a',
+  [TILE.ORE_IRON]: '#cfe0ea',
+  [TILE.ORE_GOLD]: '#ffd94a',
+};
+
+const ENEMY_SPRITE: Record<string, SpriteName> = {
+  crawler: 'enemy_crawler',
+  brute: 'enemy_brute',
+};
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
 
@@ -29,6 +56,27 @@ export class Renderer {
     canvas.width = VIEW_W * TILE_PX;
     canvas.height = VIEW_H * TILE_PX + HUD_PX;
     this.ctx = canvas.getContext('2d')!;
+    this.ctx.imageSmoothingEnabled = false; // ドット絵素材を拡大表示してもぼやけないようにする
+  }
+
+  /** 鉱石タイルの岩スプライトの上に、種類ごとの色で小さな鉱脈ドットをコード描画する */
+  private drawOreDots(x: number, rowY: number, color: string): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = color;
+    const cx = x * TILE_PX;
+    const cy = rowY * TILE_PX;
+    const r = TILE_PX * 0.09;
+    const offsets: [number, number][] = [
+      [0.3, 0.32],
+      [0.68, 0.28],
+      [0.42, 0.62],
+      [0.72, 0.68],
+    ];
+    for (const [ox, oy] of offsets) {
+      ctx.beginPath();
+      ctx.arc(cx + TILE_PX * ox, cy + TILE_PX * oy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   draw(s: GameState): void {
@@ -39,23 +87,15 @@ export class Renderer {
       const y = camTop + row;
       for (let x = 0; x < VIEW_W; x++) {
         const t = s.map.tiles[y * VIEW_W + x];
-        ctx.fillStyle = TILE_COLOR[t] ?? '#000';
-        ctx.fillRect(x * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX);
-        if (t === TILE.PROP) {
-          ctx.strokeStyle = '#3a2410';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(x * TILE_PX + 2, row * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+        const sprite = TILE_SPRITE[t] ? getSprite(TILE_SPRITE[t]!) : null;
+        if (sprite) {
+          ctx.drawImage(sprite, x * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX);
+        } else {
+          ctx.fillStyle = TILE_COLOR[t] ?? '#000';
+          ctx.fillRect(x * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX);
         }
-        if (t === TILE.OUTPOST) {
-          ctx.fillStyle = '#eafff2';
-          ctx.beginPath();
-          ctx.moveTo(x * TILE_PX + TILE_PX / 2, row * TILE_PX + 3);
-          ctx.lineTo(x * TILE_PX + TILE_PX - 4, row * TILE_PX + TILE_PX / 2);
-          ctx.lineTo(x * TILE_PX + TILE_PX / 2, row * TILE_PX + TILE_PX - 3);
-          ctx.lineTo(x * TILE_PX + 4, row * TILE_PX + TILE_PX / 2);
-          ctx.closePath();
-          ctx.fill();
-        }
+        const oreColor = ORE_DOT_COLOR[t];
+        if (oreColor) this.drawOreDots(x, row, oreColor);
       }
     }
 
@@ -87,8 +127,13 @@ export class Renderer {
     for (const e of s.enemies) {
       const row = e.y - camTop;
       if (row < 0 || row >= VIEW_H) continue;
-      ctx.fillStyle = ENEMY_COLOR[e.type] ?? '#999';
-      ctx.fillRect(e.x * TILE_PX + 2, row * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+      const sprite = getSprite(ENEMY_SPRITE[e.type] ?? 'enemy_crawler');
+      if (sprite) {
+        ctx.drawImage(sprite, e.x * TILE_PX + 2, row * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+      } else {
+        ctx.fillStyle = ENEMY_COLOR[e.type] ?? '#999';
+        ctx.fillRect(e.x * TILE_PX + 2, row * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+      }
       const ratio = Math.max(0, e.hp / e.maxHp);
       ctx.fillStyle = '#000';
       ctx.fillRect(e.x * TILE_PX, row * TILE_PX - 4, TILE_PX, 3);
@@ -96,10 +141,20 @@ export class Renderer {
       ctx.fillRect(e.x * TILE_PX, row * TILE_PX - 4, TILE_PX * ratio, 3);
     }
 
-    // プレイヤー（dash中は水色、移動回避が乗っている間は金色）
+    // プレイヤー（dash中は水色、移動回避が乗っている間は金色のグローをスプライトの下に描画）
     const prow = s.player.y - camTop;
-    ctx.fillStyle = s.player.dashActive > 0 ? '#3498db' : s.player.moveEvasion > 0 ? '#f1c40f' : '#f5f5f5';
-    ctx.fillRect(s.player.x * TILE_PX + 2, prow * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+    const playerGlow = s.player.dashActive > 0 ? 'rgba(52,152,219,0.6)' : s.player.moveEvasion > 0 ? 'rgba(241,196,15,0.6)' : null;
+    if (playerGlow) {
+      ctx.fillStyle = playerGlow;
+      ctx.fillRect(s.player.x * TILE_PX, prow * TILE_PX, TILE_PX, TILE_PX);
+    }
+    const playerSprite = getSprite('player');
+    if (playerSprite) {
+      ctx.drawImage(playerSprite, s.player.x * TILE_PX + 2, prow * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+    } else {
+      ctx.fillStyle = '#f5f5f5';
+      ctx.fillRect(s.player.x * TILE_PX + 2, prow * TILE_PX + 2, TILE_PX - 4, TILE_PX - 4);
+    }
 
     // HUD
     const hudY = VIEW_H * TILE_PX;
