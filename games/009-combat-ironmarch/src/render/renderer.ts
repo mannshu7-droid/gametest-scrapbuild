@@ -105,6 +105,8 @@ export class Renderer {
       ctx.fillText(`safe -> predicted risk: ${s.routePreview.safe}`, 10, viewH / 2 + 4);
       ctx.fillStyle = RISK_COLOR[s.routePreview.risky];
       ctx.fillText(`risky -> predicted risk: ${s.routePreview.risky}`, 10, viewH / 2 + 24);
+      ctx.fillStyle = '#3498db';
+      ctx.fillText(`EV recommends: ${s.routePreview.recommended}`, 10, viewH / 2 + 44);
     }
 
     if (s.over) {

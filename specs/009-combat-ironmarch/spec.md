@@ -166,6 +166,23 @@ v1レビューで検出された重大バグ2件・中バグ1件に対応した�
    引き続き稀で、balanced-adaptiveとbalanced-riskyの判断が一致し続ける点は完全には解消できず
    v2レビューに残課題として記載
 
+### v3 FIX内容（reviews/009-combat-ironmarch-v2.md 残課題#4への対応）
+
+v2レビューが「根本対応には生存可否だけでなくEV（どちらが得か）を直接計算して見せる設計変更が
+必要」と指摘した点に対応した（3回目はFIX onlyのためレビューは書かず、詳細はPR本文に記載）。
+
+1. **routePreviewにEVベースのrecommendedを追加**: `routePreview.recommended`（'safe'|'risky'）を
+   新設し、各ルートの期待報酬（撃破報酬期待値の総和＋区切りボーナス）からHP不足マージン
+   （1-maxHp/推奨HP）に比例するリスクコストを差し引いたEVを比較して算出する。従来の
+   `safe`/`risky`（生存可否のみを見た'safe'/'caution'/'danger'の3段階）はHUD表示用にそのまま残した
+2. **adaptive戦略をrecommended採用に切り替え**: `headless/simulate.ts`のadaptiveボットが
+   `routePreview.risky`の3段階閾値ではなく`routePreview.recommended`を直接使うよう変更。
+   20シード比較でbalanced-adaptiveがbalanced-risky（avgScore1916.5・avgRisky9.0/avgSafe0.0）から
+   avgScore1819.3・avgRisky7.7/avgSafe1.3へ乖離し、'danger'まで到達しなくても
+   一部の局面で安全ルートを選ぶようになったことを確認した（勝率・死亡数に変化なし、20/20勝利・
+   0/20死亡を維持）。これによりv2で解消しきれなかった「balanced-adaptiveが常にbalanced-riskyと
+   同一判断になる」問題は解消した
+
 ## AI評価の観点
 
 - ルート選択（安全/危険）がビルド（atk特化/defense特化/mobility特化/balanced）によって

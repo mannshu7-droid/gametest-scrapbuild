@@ -41,6 +41,15 @@ const RISK_ESCALATION_BANNER_TICKS = 90;
 const WAYSTATION_ARRIVAL_BONUS = 10;
 const RISKY_SEGMENT_CLEAR_BONUS = 25;
 
+// --- ルート選択のEV（期待値）ヒント（v2バグ#4対策）。
+// v2までのcombatRiskLevel/routePreviewは「生存可否」（maxHpが推奨値の何%か）だけを見ており、
+// バランス投資型ビルドは成長ペースが推奨値の上昇にほぼ追随するため'danger'まで振れることが
+// なく、adaptive戦略が常にrisky-always戦略と同一判断になってしまっていた（reviews/009-…-v2.md）。
+// 生存可否のリスクコストを「HP不足マージン（1-maxHp/推奨HP）に比例するペナルティ」として
+// 期待報酬（撃破報酬・区切りボーナスの期待値）と直接比較し、'caution'域の途中からでも
+// 危険ルートが割に合わなくなる場面を作る
+const ROUTE_EV_RISK_COST_SCALE = 280;
+
 // --- ショップ価格・効果 ---
 function offenseCost(level: number): number {
   return 12 + 6 * level;
@@ -91,6 +100,38 @@ function recommendedHpForSegment(band: number, danger: RouteDanger): number {
   // adaptive戦略がrisky-always戦略と実質同一判断になっていた（バグ#4）。
   // 危険ルートの要求水準を引き上げ、ビルドの強さによってヒントが実際に分かれるようにする
   return danger === 'risky' ? Math.round(base * 1.35) : base;
+}
+
+function enemyValueFor(type: EnemyType, danger: RouteDanger): number {
+  const base = ENEMY_DEFS[type].value;
+  // 1.5→1.8: 危険ルートの撃破報酬をさらに引き上げ、前進速度の犠牲を相殺する（バグ#3）
+  return Math.round(base * (danger === 'risky' ? 1.8 : 1));
+}
+
+/** スポーン確率で重み付けした撃破報酬の期待値（1体あたり） */
+function avgEnemyValue(danger: RouteDanger): number {
+  return SPAWN_WEIGHTS.reduce((acc, [type, w]) => acc + w * enemyValueFor(type, danger), 0);
+}
+
+/** 1セグメント（SEGMENT_INTERVALマス）を踏破する間に得られる期待報酬（撃破報酬期待値の総和＋区切りボーナス） */
+function routeExpectedReward(danger: RouteDanger): number {
+  const interval = danger === 'risky' ? 5 : 7;
+  const chance = danger === 'risky' ? 0.5 : 0.35;
+  const spawnsPerSegment = (SEGMENT_INTERVAL / interval) * chance;
+  const clearBonus = danger === 'risky' ? RISKY_SEGMENT_CLEAR_BONUS : WAYSTATION_ARRIVAL_BONUS;
+  return spawnsPerSegment * avgEnemyValue(danger) + clearBonus;
+}
+
+/** HP不足マージン（推奨HPに対する不足割合）に比例するリスクコスト。'safe'水準以上では0 */
+function routeRiskCost(band: number, danger: RouteDanger, maxHp: number): number {
+  const recommended = recommendedHpForSegment(band, danger);
+  const deficit = Math.max(0, 1 - maxHp / recommended);
+  return deficit * ROUTE_EV_RISK_COST_SCALE;
+}
+
+/** 期待報酬からリスクコストを引いたEV。ルート選択のrecommendedはこの値の高い方を選ぶ */
+function routeExpectedValue(band: number, danger: RouteDanger, maxHp: number): number {
+  return routeExpectedReward(danger) - routeRiskCost(band, danger, maxHp);
 }
 
 function severityOf(level: RiskLevel): number {
@@ -251,13 +292,18 @@ export class Game {
     return riskLevelFor(this.player.maxHp, this.recommendedHp());
   }
 
-  private routePreview(): { safe: RiskLevel; risky: RiskLevel } | null {
+  private routePreview(): { safe: RiskLevel; risky: RiskLevel; recommended: RouteDanger } | null {
     if (!this.awaitingRouteChoice) return null;
     const idx = this.awaitingSegmentIndex();
     const nextBand = Math.min(SEGMENT_COUNT - 1, idx ?? this.currentBand() + 1);
+    const maxHp = this.player.maxHp;
+    const safeEV = routeExpectedValue(nextBand, 'safe', maxHp);
+    const riskyEV = routeExpectedValue(nextBand, 'risky', maxHp);
     return {
-      safe: riskLevelFor(this.player.maxHp, recommendedHpForSegment(nextBand, 'safe')),
-      risky: riskLevelFor(this.player.maxHp, recommendedHpForSegment(nextBand, 'risky')),
+      safe: riskLevelFor(maxHp, recommendedHpForSegment(nextBand, 'safe')),
+      risky: riskLevelFor(maxHp, recommendedHpForSegment(nextBand, 'risky')),
+      // 生存可否だけでなくEV（期待報酬-リスクコスト）で比較した推奨ルート（v2バグ#4対策）
+      recommended: riskyEV >= safeEV ? 'risky' : 'safe',
     };
   }
 
@@ -313,15 +359,9 @@ export class Game {
     });
   }
 
-  private enemyValue(type: EnemyType, danger: RouteDanger): number {
-    const base = ENEMY_DEFS[type].value;
-    // 1.5→1.8: 危険ルートの撃破報酬をさらに引き上げ、前進速度の犠牲を相殺する（バグ#3）
-    return Math.round(base * (danger === 'risky' ? 1.8 : 1));
-  }
-
   private killEnemy(e: Enemy) {
     this.metrics.kills++;
-    const reward = this.enemyValue(e.type, this.currentDanger());
+    const reward = enemyValueFor(e.type, this.currentDanger());
     this.player.money += reward;
     this.metrics.moneyEarned += reward;
   }

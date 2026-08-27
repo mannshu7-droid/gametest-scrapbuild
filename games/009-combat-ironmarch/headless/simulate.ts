@@ -81,8 +81,11 @@ class Bot {
       // cycle14で確立した「caution変化を見逃しdangerにだけ反応する」人間を模した診断戦略
       return s.routePreview.risky === 'danger' ? 'safe' : 'risky';
     }
-    // adaptive: safe/caution/dangerの3段階を素直に見て判断
-    return s.routePreview.risky === 'safe' || s.routePreview.risky === 'caution' ? 'risky' : 'safe';
+    // adaptive: v3でEVベースのrecommendedに切り替え（v2バグ#4対策）。
+    // 従来は生存可否（safe/caution/danger）の3段階だけを見ており、balanced型ビルドは
+    // 成長ペースが推奨HPの上昇にほぼ追随するため'danger'まで振れることがなく、
+    // risky-alwaysと常に同一判断になっていた
+    return s.routePreview.recommended;
   }
 
   decide(s: GameState): Action {
