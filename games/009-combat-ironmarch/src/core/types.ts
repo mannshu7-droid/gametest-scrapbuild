@@ -89,8 +89,15 @@ export interface GameState {
   segments: (RouteDanger | null)[];
   /** ウェイステーション滞在中かつ次セグメントが未選択で、chooseRouteアクション待ちならtrue */
   awaitingRouteChoice: boolean;
-  /** awaitingRouteChoice中のみ有効。両ルートを選んだ場合の予測危険度 */
-  routePreview: { safe: RiskLevel; risky: RiskLevel } | null;
+  /**
+   * awaitingRouteChoice中のみ有効。両ルートを選んだ場合の予測危険度と、
+   * EV（期待報酬-HP不足マージンに基づくリスクコスト）で比較したrecommended。
+   * safe/riskyは生存可否のみを見た値のためbalanced型ビルドではほぼ常に'safe'に留まるが、
+   * recommendedは報酬とリスクコストを直接比較するため、'caution'域の途中からでも
+   * 'safe'を推すことがある（v2バグ#4: 生存可否だけの判定ではadaptiveがrisky-alwaysと
+   * 常に同一判断になっていた問題への対応）
+   */
+  routePreview: { safe: RiskLevel; risky: RiskLevel; recommended: RouteDanger } | null;
   metrics: Metrics;
 }
 

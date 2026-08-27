@@ -33,7 +33,7 @@
   「横に長い5レーン帯状フィールドを前進する」構造（候補1の移植性検証）を採用。008の11パターンの
   うち建築由来2パターン（第三の選択肢／目標を生む建築）は、単一要素規約により「ウェイステーションで
   次セグメントの安全/危険ルートを選ぶ」という代替に置き換えて検証した
-- 次に行う回: **3回目（FIX only）**
+- 次に行う回: **4回目（FINAL REVIEW）**
 - サイクル15・1回目（BUILD+REVIEW、reviews/009-combat-ironmarch-v1.md）で判明した引き継ぎ事項:
   1. 008の11パターンのうち6つ（常設ショップ・安全マージン公開・固定範囲の保護装置・常時使用可能な
      緊急離脱・危険度UIヒント・危険度再悪化のHUDハイライト）は空間構造が変わっても無改造に近い形で
@@ -60,6 +60,18 @@
      同一のcore `Game`クラスを直接step()する決定論的な擬似実プレイ（P01=atk特化+常に危険ルート
      seed301、P02=balanced+適応的ルート選択seed302）で代替し、両者とも勝利という結果を確認した。
      人間の対話セッションで実行される場合はブラウザAIPでの実プレイも試みること
+- サイクル15・3回目（FIX only、レビューなし・詳細はPR本文とspec.md「v3 FIX内容」節参照）で
+  v2バグ#4（危険度ヒントがEVを反映しない）に対応: `routePreview`に`recommended`（EVベースの
+  推奨ルート）フィールドを新設し、期待報酬（撃破報酬期待値の総和＋区切りボーナス）から
+  HP不足マージンに比例するリスクコストを差し引いたEVで比較するようにした。
+  `headless/simulate.ts`のadaptive戦略をこの`recommended`採用に切り替えたところ、20シード比較で
+  balanced-adaptiveがbalanced-risky（avgScore1916.5・avgRisky9.0/avgSafe0.0）から
+  avgScore1819.3・avgRisky7.7/avgSafe1.3へ乖離し（勝率20/20・死亡0/20は維持）、v2まで解消
+  できなかった「balanced-adaptiveが常にbalanced-riskyと同一判断になる」問題を解消したことを
+  確認した。seed301（v1/v2の回帰チェック対象）も1523tickで400マス完走・勝利を維持し
+  デグレなし。既存の`safe`/`risky`（生存可否のみのRiskLevel、HUD表示用）はそのまま残し、
+  `recommended`は追加フィールドとして共存させた。次回（4回目FINAL REVIEW）でこの変更を含めて
+  両ペルソナの総括評価を行うこと
 
 ## 過去のサイクル14（完了・アーカイブ）
 
@@ -195,6 +207,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-20 | 14 | 4（FINAL REVIEW） | サイクル14総括レビュー（reviews/008-flagship-frontierhold-cycle14-final.md）を作成。20シード(1〜20)×20戦略のヘッドレス再検証で、サイクル14の3つの修正（skill隔離バグ修正・`riskEscalationBanner`・`-dangeronly`恒久化）がすべて正しく反映され互いに矛盾なく共存していることを実測確認（cycle14-v2・spec.md「サイクル14・3回目」節の記録値と完全一致、回帰なし。balanced-adaptive avgScore780.9・deaths0/20、drill-all-in avgScore769.1・deaths16/20など）。`preview_start`を試行しスケジュールタスク（無人実行）ではブラウザプレビューを起動できないことを再確認、ブラウザAIPは実施できずヘッドレス検証で代替した。判定はFIX完了・本命ゲーム採用を維持。両ペルソナの最終評価（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はいずれもYesを維持。「危険度再悪化のたびのHUDハイライト」を11番目の共通パターンとして正式採用。一方で`src/core/game.ts`のコアバランスがサイクル9・2回目以降6サイクル（9〜14）連続で無変更という事実と、iOS移植が構造的に実行不可と判明したことを踏まえ、008への継続的な微調整サイクルは一旦区切りとし、次サイクル15は新しいゲームプロトタイプ（新規番号`009-*`）に着手することを提案した。候補は(1)008の11パターンの異なる空間構造への移植性検証、(2)002/003/004の単一要素へのパターン逆輸入再挑戦、の2つで、games/008自体は「本命ゲーム採用」ステータスを維持したまま新規サイクルは独立して進める。games/README.mdの状態列を更新（サイクル14完了・アーカイブ扱いへ）、routine-state.mdをサイクル15・run1（BUILD+REVIEW）へ進めた | (本PR) |
 | 2026-08-27 | 15 | 1（BUILD+REVIEW） | 009-combat-ironmarch（横に長い5レーン帯状フィールドを前進するリアルタイム戦闘、008の11パターンの異なる空間構造への移植性検証と002の積み残し「強化選択の分岐が結果に大差を生まない」への再挑戦を1本化）を新規実装。ウェイステーション到達時に次セグメントの安全/危険ルートを選ぶ仕組みを、建築要素を持ち込めない制約下での「建築を第三の選択肢にする」「目標を生む建築」パターンの代替として設計した。実装中に、ルート選択のセグメントindex計算のoff-by-oneでawaitingRouteChoiceが永久に解除されず全戦略が前進不能になる致命バグを発見・修正し、続けて初期バランス（危険セグメントで10シード×8戦略の全ランが実質前進不能）を、プレイヤー初期atk・攻撃速度の引き上げと危険セグメントの倍率緩和、ボットへの帰還ヒステリシス（005 IronVein由来）追加で調整した。10シード×8戦略のヘッドレス比較で、single-stat all-in戦略間にavgScore352〜899という2.5倍以上の差を確認し002finalの積み残しの解消を実証。ブラウザAIPは無人スケジュール実行のため`preview_start`が拒否され実施できず、`window.__AIP__`と同一のcore `Game`クラスを直接step()する決定論的な擬似実プレイ（P01=atk特化+常に危険ルート、P02=balanced+適応的ルート選択）で代替した。P02相当は1568tickで400マス完走・スコア1934という充実したプレイになった一方、P01相当（atk特化・defense無投資）はウェイステーションの保護半径外まで後退した末に回復手段が尽きる事実上のソフトロックを12000tickトレースで検出。また危険ルートの報酬（+50%）がsafeルートの前進速度優位を相殺できておらず（balanced-safe avgScore1158 vs balanced-risky 426）、危険度ヒントが「生存可否」のみを見て「どちらが得か」を反映しないためbalanced-adaptiveがbalanced-riskyと常に同一判断になる問題も発見した。reviews/009-combat-ironmarch-v1.md作成、判定FIX。008の11パターンのうち6つ（常設ショップ・安全マージン公開・固定範囲の保護装置・常時使用可能な緊急離脱・危険度UIヒント・危険度再悪化のHUDハイライト）は空間構造が変わっても機能し「ジャンルを超えて有効な設計原則」の可能性が高い一方、建築由来2パターンの代替（ルート選択）は「永続的な達成物としての目標」までは再現できないという移植性検証の結論を得た。games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-08-27 | 15 | 2（FIX+REVIEW） | v1指摘の重大バグ2件・中バグ1件に対応。(1)保護範囲外ソフトロック（バグ#2）: `nearestWaystationDistance`にx=0（フィールド左端の出撃地点）を保護基準点として追加し、他ウェイステーションと同じ半径3マスの敵不出現・HP回復を与えて解消。seed301（v1で12000tick停滞・over=false）で単体再検証し、1523tickで400マス完走・勝利に転じたことを直接確認した。(2)危険ルートの魅力不足（バグ#3）: 撃破報酬倍率×1.5→×1.8に加え、ウェイステーション到達ボーナスを危険セグメント踏破後のみ+25（安全時は+10のまま）に分離。20シード比較でbalanced-riskyがbalanced-safeを逆転（avgScore1916.5 vs 1448.9、v1は426 vs 1158で逆だった）。(3)危険度ヒントの感度不足（バグ#4）: 危険セグメントの推奨HP倍率×1.2→×1.35に引き上げ、atk特化ビルドでは実際に'danger'判定が発生するようになったが、balanced戦略は分散投資が要求水準の上昇にほぼ追随するためbalanced-adaptiveがbalanced-riskyと常に同一判断になる問題自体は解消しきれず、部分改善として3回目以降へ持ち越した。ブラウザAIPは本セッションも無人スケジュール実行のため`preview_start`が拒否され、v1と同じくcore `Game`クラス直接step()による擬似実プレイ（P01=seed301 atk特化+常に危険ルート、P02=seed302 balanced+適応的ルート選択）で代替し、両者とも勝利（P01は1523tick・finalHp20/32、P02は1271tick・finalHp45/80）という結果を確認、P01ではband6以降に'danger/danger'（両ルートとも危険）という切迫した局面を複数回生還する緊張感のある展開に転じたことも確認した。npm run build / npm run simulateとも正常終了。reviews/009-combat-ironmarch-v2.md作成、判定FIX。spec.mdに「v2 FIX内容」節とバランス表更新を追記、package.jsonのversionを0.2.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run3（FIX only）へ進めた | (本PR) |
+| 2026-08-28 | 15 | 3（FIX only） | v2バグ#4（combatRiskLevel/routePreviewが生存可否のみを見てEVを反映せず、balanced-adaptiveが常にbalanced-riskyと同一判断になる）に対応。`src/core/game.ts`の`routePreview()`に`recommended`（'safe'\|'risky'）フィールドを新設し、期待報酬（撃破報酬期待値の総和＋区切りボーナス、`routeExpectedReward()`）からHP不足マージン（1-maxHp/推奨HP）に比例するリスクコスト（`routeRiskCost()`、係数`ROUTE_EV_RISK_COST_SCALE=280`）を差し引いたEV（`routeExpectedValue()`）で両ルートを比較する方式に変更した。既存の`safe`/`risky`（生存可否のみのRiskLevel、HUD表示用）はそのまま残し追加フィールドとして共存させ、`src/core/types.ts`・`src/render/renderer.ts`（HUDに`EV recommends: ...`行を追加）も対応した。`headless/simulate.ts`のadaptive戦略を`routePreview.recommended`採用に切り替えたところ、20シード(1〜20)比較でbalanced-adaptiveがbalanced-risky（avgScore1916.5・avgRisky9.0/avgSafe0.0）からavgScore1819.3・avgRisky7.7/avgSafe1.3へ乖離し（勝率20/20・死亡0/20は維持）、'danger'まで到達しなくても一部局面で安全ルートを選ぶようになったことを確認、v2まで解消できなかった「balanced-adaptiveが常にbalanced-riskyと同一判断になる」問題を解消した。seed301（v1/v2の回帰チェック対象、atk-allin-risky）は1523tickで400マス完走・勝利を維持しデグレなし、single-stat all-in戦略群（risky-always固定でrecommendedを参照しない）も20シード比較でv2と完全一致（回帰なし）。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3 FIX内容」節を追記。package.jsonのversionを0.3.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
