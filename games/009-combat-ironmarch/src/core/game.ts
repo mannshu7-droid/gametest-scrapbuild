@@ -37,6 +37,10 @@ const PASSIVE_INCOME_AMOUNT = 3;
 // --- 危険度再悪化のたびのHUDハイライト（008パターン#11） ---
 const RISK_ESCALATION_BANNER_TICKS = 90;
 
+// --- ウェイステーション到達ボーナス（008パターン#9）。危険セグメントを踏破した場合は上乗せ（バグ#3対策） ---
+const WAYSTATION_ARRIVAL_BONUS = 10;
+const RISKY_SEGMENT_CLEAR_BONUS = 25;
+
 // --- ショップ価格・効果 ---
 function offenseCost(level: number): number {
   return 12 + 6 * level;
@@ -83,7 +87,10 @@ function pickEnemyType(rng: Rng): EnemyType {
 
 function recommendedHpForSegment(band: number, danger: RouteDanger): number {
   const base = 22 + band * 4;
-  return danger === 'risky' ? Math.round(base * 1.2) : base;
+  // 1.2→1.35: v1では危険度ヒントがボットの成長曲線上ほぼ常に'safe'のままで、
+  // adaptive戦略がrisky-always戦略と実質同一判断になっていた（バグ#4）。
+  // 危険ルートの要求水準を引き上げ、ビルドの強さによってヒントが実際に分かれるようにする
+  return danger === 'risky' ? Math.round(base * 1.35) : base;
 }
 
 function severityOf(level: RiskLevel): number {
@@ -101,8 +108,15 @@ function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
   return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
 }
 
+/**
+ * 保護範囲（敵不出現・HP回復）の判定に使う基準点との最短距離。
+ * WAYSTATIONS（x=40,80,...400、ルート選択・ショップ滞在の判定に使う）に加え、
+ * x=0（フィールド左端＝出撃地点）も保護対象に含める。v1では x=0 がどの基準点にも
+ * 属さず保護ゼロの空白地帯になっており、defense無投資ビルドが危機的HPで後退した際に
+ * 回復手段が一切ないソフトロックを起こしていた（reviews/009-…-v1.md バグ#2）。
+ */
 function nearestWaystationDistance(x: number): number {
-  let best = Infinity;
+  let best = Math.abs(x - 0);
   for (const wx of WAYSTATIONS) {
     const d = Math.abs(x - wx);
     if (d < best) best = d;
@@ -253,7 +267,8 @@ export class Game {
     if (!this.waystationsReachedSet.has(idx)) {
       this.waystationsReachedSet.add(idx);
       this.metrics.waystationsReached++;
-      this.player.money += 10; // 区切り・報酬演出（008パターン#9）
+      // 区切り・報酬演出（008パターン#9）。直前に踏破したセグメントが危険だった場合は上乗せ
+      this.player.money += this.segments[idx] === 'risky' ? RISKY_SEGMENT_CLEAR_BONUS : WAYSTATION_ARRIVAL_BONUS;
     }
     if (idx === SEGMENT_COUNT - 1) {
       // 最後のウェイステーション = ゴール
@@ -300,7 +315,8 @@ export class Game {
 
   private enemyValue(type: EnemyType, danger: RouteDanger): number {
     const base = ENEMY_DEFS[type].value;
-    return Math.round(base * (danger === 'risky' ? 1.5 : 1));
+    // 1.5→1.8: 危険ルートの撃破報酬をさらに引き上げ、前進速度の犠牲を相殺する（バグ#3）
+    return Math.round(base * (danger === 'risky' ? 1.8 : 1));
   }
 
   private killEnemy(e: Enemy) {
