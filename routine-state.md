@@ -27,8 +27,31 @@
   保護装置／詰みからの脱出手段／常時使用可能な緊急離脱／建築を第三の選択肢にする／目標を生む
   建築／危険度UIヒント／区切り・報酬演出／危険度ヒントを状況適応的に使う／危険度再悪化のたびの
   HUDハイライト）はいずれも新規ゲームでも土台として活用してよい（ゼロから再発明する必要はない）
-- 次に行う回: **1回目（BUILD+REVIEW）**
-- 対象ゲーム番号: 未定（round1でcycle14-finalの2候補から選び`009-<要素>-<名前>`を新規に切る）
+- 対象ゲーム番号: **009-combat-ironmarch**（サイクル15・1回目で決定）。cycle14-finalの2候補は
+  「両立可能なら組み合わせて判断」の指示に従い1本化した: 要素は戦闘（002の積み残し「強化選択の
+  分岐が結果に大差を生まない」への再挑戦）、空間構造は008の縦1マス幅シャフトとは全く異なる
+  「横に長い5レーン帯状フィールドを前進する」構造（候補1の移植性検証）を採用。008の11パターンの
+  うち建築由来2パターン（第三の選択肢／目標を生む建築）は、単一要素規約により「ウェイステーションで
+  次セグメントの安全/危険ルートを選ぶ」という代替に置き換えて検証した
+- 次に行う回: **2回目（FIX+REVIEW）**
+- サイクル15・1回目（BUILD+REVIEW、reviews/009-combat-ironmarch-v1.md）で判明した引き継ぎ事項:
+  1. 008の11パターンのうち6つ（常設ショップ・安全マージン公開・固定範囲の保護装置・常時使用可能な
+     緊急離脱・危険度UIヒント・危険度再悪化のHUDハイライト）は空間構造が変わっても無改造に近い形で
+     機能した。建築由来2パターンの代替（ルート選択）は「悩ましい選択肢を増やす」役割は果たしたが
+     「永続的な達成物としての目標」という性質は再現できていない
+  2. 002finalの積み残しは解消: single-stat all-in比較でatk特化avgScore899・defense特化352・
+     mobility特化670・skill特化783と2.5倍以上の差が出ており、ビルドが結果を左右する構造を確認
+  3. 【最優先・v2で対応】atk特化・defense無投資のビルドが、危機的HP時の後退でウェイステーションの
+     保護半径外（特にフィールド左端x=0付近）まで下がると回復手段が一切なく事実上のソフトロックに
+     陥る重大バグを発見（seed301の12000tickトレースで実測、reviews/009-…-v1.md バグ#2）
+  4. 【重大・v2で対応】危険ルートの報酬（+50%）が、safeルートの前進速度優位を相殺できておらず
+     「危険ルートを選ぶ理由」が弱い（balanced-safe avgScore1158 vs balanced-risky 426、勝率8/10 vs
+     1/10）。combatRiskLevel/routePreviewが「生存可能か」だけを見て「どちらが得か」を反映しない
+     設計のため、balanced-adaptiveがbalanced-riskyと常に同一判断になってしまう問題も併せて対応する
+  5. ブラウザAIP実プレイは本セッションが無人のスケジュール実行のため`preview_start`が拒否され
+     実施不能だった。代わりに`window.__AIP__`と同一のcore `Game`クラスを直接step()する決定論的な
+     擬似実プレイ（P01=atk特化+常に危険ルート、P02=balanced+適応的ルート選択）で代替した。
+     次回以降、人間の対話セッションで実行される場合はブラウザAIPでの実プレイも試みること
 
 ## 過去のサイクル14（完了・アーカイブ）
 
@@ -162,6 +185,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-17 | 14 | 2（FIX+REVIEW） | cycle14-v1のLearningsが提示した「balanced-adaptiveの危険度ヒント反応設計を人間プレイヤーがどれだけ模倣できているか」を深掘り。`headless/simulate.ts`に一時的な`-dangeronly`診断戦略（'caution'の色変化のみの信号は見逃し'danger'にだけ反応する人間を模す、検証後削除済みでコミットに含まれない）を追加し20シード(1〜20)比較したところ、balanced-adaptiveで死亡率0%→15%・avgScore780.9→656.5(-16%)という有意な見落としリスクを確認した一方、mining-first-adaptiveでは有意差が出なかった（ショップ優先度によって見落としの実害が異なるという新知見）。この結果を受け`src/core/game.ts`に`riskEscalationBanner`（combatRiskLevelが初回以降も悪化するたびHUD該当行を90tickだけ淡くハイライトする、バランス数値・AI購買ロジックには一切接続しない演出のみの追加）を実装し、`src/core/types.ts`（GameStateへのフィールド追加）・`src/render/renderer.ts`（HUD行の背景ハイライト描画）も対応した。20シード×17戦略のヘッドレス回帰確認で全指標がcycle14-v1と完全に一致（回帰なし）。ブラウザプレビューは本自動実行環境の制約で起動できないため、`headless/simulate.ts`の`Bot`クラスを一時exportした検証スクリプト（`headless/debug-riskbanner.ts`、検証後削除済み）で実証済みのmining-first-adaptive戦略を7シード(1〜5,301,302)走らせ、`riskEscalationBanner`が初回は二重発火せず・以降の危険度再悪化（caution再突入・danger到達とも）で毎回正しく発火することをtrace出力で確認した。npm run build / npm run simulateとも正常終了。reviews/008-flagship-frontierhold-cycle14-v2.md作成、判定FIX。spec.mdに「サイクル14・2回目」節を追記、package.jsonのversionを0.12.0へ、routine-state.mdをサイクル14・run3（FIX only）へ進めた | (本PR) |
 | 2026-08-20 | 14 | 3（FIX only） | cycle14-v2のLearningsが提示した2方向を実施。(a)iOS移植（`npx cap add ios`）の実行可否を調査し、CocoaPods経由のiOSネイティブプロジェクト生成がmacOS/Xcodeを前提とするCapacitor公式の制約により本自動実行環境（Windows）では実行不可と判断、spec.mdに記録した。(b)cycle14-v2で一時スクリプトとして使い捨てていた`-dangeronly`診断戦略（'caution'の色変化を見落とし'danger'にのみ反応する人間プレイヤーを模す）を`headless/simulate.ts`の標準戦略セットへ恒久化した（`mining-first-adaptive-dangeronly`・`combat-first-adaptive-dangeronly`・`balanced-adaptive-dangeronly`の3種を追加、17→20戦略）。`priorityFor()`に`isDangerOnly()`判定を追加しdangeronly変種はriskLevel==='danger'のときのみhp優先繰り上げが発動するようにした。20シード(1〜20)×20戦略のヘッドレス比較で既存17戦略はcycle14-v2と完全一致（回帰なし）、恒久化した3戦略のうちmining-first・balancedは一時スクリプト時の数値（avgScore676.7/135.1/3-20、656.5/127.5/3-20）と完全一致し実装の等価性を確認、新規測定したcombat-first-adaptive-dangeronlyは通常のcombat-first-adaptive（avgScore478.8・deaths0/20）とほぼ同一（471.9・0/20）で見落としの影響が小さく、「見落としリスクはbalanced系ビルドに偏る」というcycle14-v2の知見をさらに裏付けた。`src/core/game.ts`（本命ゲーム本体）は無変更。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「サイクル14・3回目」節を追記。package.jsonのversionを0.14.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル14・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-08-20 | 14 | 4（FINAL REVIEW） | サイクル14総括レビュー（reviews/008-flagship-frontierhold-cycle14-final.md）を作成。20シード(1〜20)×20戦略のヘッドレス再検証で、サイクル14の3つの修正（skill隔離バグ修正・`riskEscalationBanner`・`-dangeronly`恒久化）がすべて正しく反映され互いに矛盾なく共存していることを実測確認（cycle14-v2・spec.md「サイクル14・3回目」節の記録値と完全一致、回帰なし。balanced-adaptive avgScore780.9・deaths0/20、drill-all-in avgScore769.1・deaths16/20など）。`preview_start`を試行しスケジュールタスク（無人実行）ではブラウザプレビューを起動できないことを再確認、ブラウザAIPは実施できずヘッドレス検証で代替した。判定はFIX完了・本命ゲーム採用を維持。両ペルソナの最終評価（P01「クリア後も自主的に遊びたくなるか」・P02「人に話したくなる自分の物語ができたか」）はいずれもYesを維持。「危険度再悪化のたびのHUDハイライト」を11番目の共通パターンとして正式採用。一方で`src/core/game.ts`のコアバランスがサイクル9・2回目以降6サイクル（9〜14）連続で無変更という事実と、iOS移植が構造的に実行不可と判明したことを踏まえ、008への継続的な微調整サイクルは一旦区切りとし、次サイクル15は新しいゲームプロトタイプ（新規番号`009-*`）に着手することを提案した。候補は(1)008の11パターンの異なる空間構造への移植性検証、(2)002/003/004の単一要素へのパターン逆輸入再挑戦、の2つで、games/008自体は「本命ゲーム採用」ステータスを維持したまま新規サイクルは独立して進める。games/README.mdの状態列を更新（サイクル14完了・アーカイブ扱いへ）、routine-state.mdをサイクル15・run1（BUILD+REVIEW）へ進めた | (本PR) |
+| 2026-08-27 | 15 | 1（BUILD+REVIEW） | 009-combat-ironmarch（横に長い5レーン帯状フィールドを前進するリアルタイム戦闘、008の11パターンの異なる空間構造への移植性検証と002の積み残し「強化選択の分岐が結果に大差を生まない」への再挑戦を1本化）を新規実装。ウェイステーション到達時に次セグメントの安全/危険ルートを選ぶ仕組みを、建築要素を持ち込めない制約下での「建築を第三の選択肢にする」「目標を生む建築」パターンの代替として設計した。実装中に、ルート選択のセグメントindex計算のoff-by-oneでawaitingRouteChoiceが永久に解除されず全戦略が前進不能になる致命バグを発見・修正し、続けて初期バランス（危険セグメントで10シード×8戦略の全ランが実質前進不能）を、プレイヤー初期atk・攻撃速度の引き上げと危険セグメントの倍率緩和、ボットへの帰還ヒステリシス（005 IronVein由来）追加で調整した。10シード×8戦略のヘッドレス比較で、single-stat all-in戦略間にavgScore352〜899という2.5倍以上の差を確認し002finalの積み残しの解消を実証。ブラウザAIPは無人スケジュール実行のため`preview_start`が拒否され実施できず、`window.__AIP__`と同一のcore `Game`クラスを直接step()する決定論的な擬似実プレイ（P01=atk特化+常に危険ルート、P02=balanced+適応的ルート選択）で代替した。P02相当は1568tickで400マス完走・スコア1934という充実したプレイになった一方、P01相当（atk特化・defense無投資）はウェイステーションの保護半径外まで後退した末に回復手段が尽きる事実上のソフトロックを12000tickトレースで検出。また危険ルートの報酬（+50%）がsafeルートの前進速度優位を相殺できておらず（balanced-safe avgScore1158 vs balanced-risky 426）、危険度ヒントが「生存可否」のみを見て「どちらが得か」を反映しないためbalanced-adaptiveがbalanced-riskyと常に同一判断になる問題も発見した。reviews/009-combat-ironmarch-v1.md作成、判定FIX。008の11パターンのうち6つ（常設ショップ・安全マージン公開・固定範囲の保護装置・常時使用可能な緊急離脱・危険度UIヒント・危険度再悪化のHUDハイライト）は空間構造が変わっても機能し「ジャンルを超えて有効な設計原則」の可能性が高い一方、建築由来2パターンの代替（ルート選択）は「永続的な達成物としての目標」までは再現できないという移植性検証の結論を得た。games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run2（FIX+REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
