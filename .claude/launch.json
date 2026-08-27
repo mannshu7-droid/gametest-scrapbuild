@@ -48,6 +48,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/008-flagship-frontierhold", "run", "dev", "--", "--port", "5180"],
       "port": 5180
+    },
+    {
+      "name": "ironmarch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/009-combat-ironmarch", "run", "dev", "--", "--port", "5181"],
+      "port": 5181
     }
   ]
 }
