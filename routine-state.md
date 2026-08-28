@@ -25,29 +25,30 @@
   「目標を生む建築」の直接実装、現在地に建設すると恒久的な安全地帯＝ショップ・回復地点になる。
   最寄り拠点からOUTPOST_MIN_GAP=50マス以上離れている必要あり）。採掘は意図的に除外し、経済は
   009同様に戦闘の撃退報酬のみで完結させた
-- 次に行う回: **2回目（FIX+REVIEW）**
-- サイクル16・1回目（BUILD+REVIEW、reviews/010-combat-building-bastion-v1.md）で判明した
-  引き継ぎ事項:
-  1. 【解消済み】BUILD中にヘッドレス検証botの意思決定順序バグ（バリケード建築判定を攻撃より
-     先に置いていたため、前方が自分の建てたバリケードで塞がると毎tick空振りの建築コマンドを
-     出し続けボットの行動が完全停止するsoftlock）を発見・修正。攻撃を最優先にし、既存バリケードが
-     前方にあれば再試行しないガードを追加した
-  2. 【解消済み】勝利時のdistanceReachedが実際の到達座標より1小さいまま確定するcosmeticなバグを
-     修正（maxXReached更新を勝利判定より前に移動）
-  3. **コア仮説は強く実証された**: 前線拠点を積極的に建てるbalanced-outpost-rush戦略が20シード中
-     15勝したのに対し、建築を一切使わないbalanced-no-buildは20シード中0勝（死亡も0、詰まないが
-     絶対に勝てない停滞状態）。009のルート選択という代替では再現できなかった「建築が実際に
-     進行を可能にする」効果が本ゲームで定量的に実証された
-  4. 【v2で判断】ステータス投資のみでほぼ完全に詰む（20シード0勝）のは意図通りの難易度設計か
-     行き過ぎかを次回精査する
-  5. 【v2で判断】バリケード単体（barricade-reactive）は無建築（no-build）よりavgDistance・
-     死亡数とも悪化する逆効果が判明。コスト・効果のバランス調整を検討する
-  6. 【v2で判断】想定セッション時間（仕様書「15〜20分」）に対し、balanced+builder方針の
-     P02は実測約37分と大きく超過。想定時間の見直しかテンポ調整を検討する
-  7. 本セッションもスケジュール実行（無人）のため`preview_start`でのdevサーバ起動は
-     「無人セッションからは起動できない」旨で拒否され、009 v1〜finalと同じくheadlessの
-     `Game`クラス直接step()による擬似実プレイで代替した（`.claude/launch.json`に`bastion`
-     エントリを追加済みなので、人間の対話セッションでは`preview_start`が利用可能）
+- 次に行う回: **3回目（FIX only）**
+- サイクル16・2回目（FIX+REVIEW、reviews/010-combat-building-bastion-v2.md）で対応した事項・
+  新たな引き継ぎ事項:
+  1. 【解消】v1バグ#3（重大、no-buildが20シード中0/20勝利・50000tickでも停滞する「絶対に
+     勝てない壁」）: 拠点圏外・非戦闘中限定のHP版「詰みからの脱出手段」（008パターン#4の拡張、
+     15tickごとに+1、拠点回復2/tickの1/30の速度）を追加。maxTicks=60000まで許容すると
+     no-buildが10/10勝利に転換し（平均48938tick、outpost-rushの約3.8倍）、「壁」から
+     「非効率だが到達可能」に変わった。コア仮説（建築が進行を可能にする）はむしろ定量的に強化された
+  2. 【改善】v1バグ#4（中、バリケード単体がno-buildより悪化する逆効果）: `BARRICADE_BASE_COST`
+     8→5、`BARRICADE_HP`18→26に調整。avgDistance差が-13.5→-4.5に縮小し、破壊率も74%→約33%に
+     低下、no-buildとほぼ拮抗する水準まで改善した
+  3. 【解消】v1バグ#5（軽微、balanced+builder方針のP02が想定15〜20分に対し実測約37分と超過）:
+     `BASE_REGEN_PER_TICK`1→2に倍増。P02の擬似実プレイが約16.2分に短縮され想定範囲内に収まった
+  4. 【新規発見・v3以降で判断】単一カテゴリ隔離の診断ボットdefense-allin（offenseに一切投資
+     しない）が10シード中10シードでmaxTicks=60000でも`over=false`のまま停滞（勝利も死亡もしない）
+     ことが判明。攻撃力が伸びずband上昇に殺傷速度が追いつかなくなることが原因。ただし実運用の
+     balanced系戦略では発生しない診断ボット特有の性質のため、今回は仕様変更を見送りLearningsに
+     記録するに留めた
+  5. v1のP01ペルソナ戦略「offense特化（防御ゼロ）+outpost-rush」は、v2の複数シード再検証で
+     11シード中11シード死亡する事実上の即死ビルドだったと判明（v1のseed301勝利は偶然だった）。
+     v2ではatk偏重2:防御1のハイブリッドビルドに変更して再測定し、両ペルソナとも想定時間内
+     （P01約15.4分・P02約16.2分）で完走を確認した
+  6. 本セッションもスケジュール実行（無人）のため`preview_start`でのdevサーバ起動は試みず、
+     009・010v1と同じくheadlessの`Game`クラス直接step()による擬似実プレイで代替した
 - 009-combat-ironmarchで確立した知見（009-final Learnings参照、010でも踏襲）:
   1. 008の11パターンのうち9パターン（建築由来2パターンを除く）は空間構造が変わっても機能する
      汎用原則。建築由来2パターンは建築要素なしでは代替が効かない
@@ -267,6 +268,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-28 | 15 | 3（FIX only） | v2バグ#4（combatRiskLevel/routePreviewが生存可否のみを見てEVを反映せず、balanced-adaptiveが常にbalanced-riskyと同一判断になる）に対応。`src/core/game.ts`の`routePreview()`に`recommended`（'safe'\|'risky'）フィールドを新設し、期待報酬（撃破報酬期待値の総和＋区切りボーナス、`routeExpectedReward()`）からHP不足マージン（1-maxHp/推奨HP）に比例するリスクコスト（`routeRiskCost()`、係数`ROUTE_EV_RISK_COST_SCALE=280`）を差し引いたEV（`routeExpectedValue()`）で両ルートを比較する方式に変更した。既存の`safe`/`risky`（生存可否のみのRiskLevel、HUD表示用）はそのまま残し追加フィールドとして共存させ、`src/core/types.ts`・`src/render/renderer.ts`（HUDに`EV recommends: ...`行を追加）も対応した。`headless/simulate.ts`のadaptive戦略を`routePreview.recommended`採用に切り替えたところ、20シード(1〜20)比較でbalanced-adaptiveがbalanced-risky（avgScore1916.5・avgRisky9.0/avgSafe0.0）からavgScore1819.3・avgRisky7.7/avgSafe1.3へ乖離し（勝率20/20・死亡0/20は維持）、'danger'まで到達しなくても一部局面で安全ルートを選ぶようになったことを確認、v2まで解消できなかった「balanced-adaptiveが常にbalanced-riskyと同一判断になる」問題を解消した。seed301（v1/v2の回帰チェック対象、atk-allin-risky）は1523tickで400マス完走・勝利を維持しデグレなし、single-stat all-in戦略群（risky-always固定でrecommendedを参照しない）も20シード比較でv2と完全一致（回帰なし）。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3 FIX内容」節を追記。package.jsonのversionを0.3.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-08-28 | 15 | 4（FINAL REVIEW） | 009-combat-ironmarchの総括レビュー（reviews/009-combat-ironmarch-final.md）を作成。20シード×8戦略のヘッドレス再検証でv3の記録値（balanced-adaptive avgScore1819.3・avgRisky7.7/avgSafe1.3等）と完全一致（回帰なし）、seed301単独再検証（1523tick・distanceReached400・won=true）もv2・v3と一致することを確認した。ブラウザAIPは今回も無人スケジュール実行のため`preview_start`が「Dev servers can't be started from unattended sessions」で拒否され、v1・v2と同じくcore `Game`クラス直接step()による擬似実プレイで代替。今回はv3で追加された`routePreview.recommended`の採用状況をtick単位でトレースする一時スクリプト（検証後削除、コミット対象外）を新規作成し、P02（seed302, balanced+適応的ルート選択）が9回のルート選択のうち危険2回・安全7回とEVに応じて分岐する挙動を初めて直接確認した（v1・v2時点の同一seedでは9/9とも危険ルートでrisky-alwaysと完全一致していた）。サイクル15の2つの狙い（008の11パターンの移植性検証、002finalの積み残し解消）はいずれも達成と判定: 008の11パターンのうち建築由来2パターンを除く9パターンは空間構造非依存の汎用原則であることが確定した一方、建築由来2パターン（第三の選択肢／目標を生む建築）はルート選択という代替では「永続的な達成物としての目標」を再現できない建築固有の解と結論づけた。加えて`routePreview.recommended`のEVベース設計を「選択肢のヒントは生存可否でなくEVで示す」12番目の共通パターン候補として提案した。判定はFIX完了・本命ゲーム(008)への直接の変更提案はないが、EVベースのヒント設計は将来008に複数選択肢の局面が追加された際に応用価値があると明記。次サイクルの提案として、009では代替が効かなかった建築由来パターンを本物の建築要素で（採掘なしに）検証する「010-combat-building-<名前>」を提案し、games/README.mdの状態列を更新、routine-state.mdをサイクル16・run1へ進めた | (本PR) |
 | 2026-08-28 | 16 | 1（BUILD+REVIEW） | 010-combat-building-bastion（009の横方向帯状フィールドを踏襲し、009のルート選択を撤廃して本物の建築2種を実装）を新規実装。バリケード（008パターン#6「第三の選択肢」、隣接1マスにhp18の壁を設置し敵の近接移動を塞ぐ消耗品）と前線拠点（008パターン#7「目標を生む建築」、最寄り拠点から50マス以上離れた現在地に建設すると恒久的な安全地帯になる）を追加し、採掘は意図的に除外して経済は戦闘の撃退報酬のみで完結させた。BUILD中にヘッドレス検証botの意思決定順序バグ（バリケード建築判定が攻撃より先にあり、前方が自分のバリケードで塞がると空振り建築を無限に繰り返しボットが完全停止する致命的softlock）と、勝利時のdistanceReachedが1小さいまま確定するcosmeticバグを発見・修正した。20シード×8戦略のヘッドレス比較で、前線拠点を積極的に建てるbalanced-outpost-rush戦略が15/20勝利したのに対し建築を一切使わないbalanced-no-buildは0/20勝利（死亡も0、詰まないが絶対に勝てない停滞）という劇的な差を確認し、「009のルート選択代替では再現できなかった建築が実際に進行を可能にする効果」をコア仮説通り定量実証した。バリケード単体（barricade-reactive）は無建築よりavgDistance・死亡数とも悪化する逆効果も判明。ブラウザAIPは無人スケジュール実行のため`preview_start`が拒否され（`.claude/launch.json`に`bastion`エントリを追加済み）、core `Game`クラス直接step()による擬似実プレイ（P01=seed301 offense特化+outpost-rush、P02=seed302 balanced+builder）で代替し両者とも勝利を確認、P02は実測約37分と仕様書の想定セッション時間（15〜20分）を大きく超過することも発見した。reviews/010-combat-building-bastion-v1.md作成、判定FIX。games/README.mdの索引を更新し、routine-state.mdをサイクル16・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-08-29 | 16 | 2（FIX+REVIEW） | v1バグ#3（重大）・#4（中）・#5（軽微）に対応。(1)バグ#3: balanced-no-buildが20シード中0/20勝利・maxTicks=50000でも大半が停滞していた「絶対に勝てない壁」に対し、拠点圏外・非戦闘中（周囲4マスに敵なし）限定のHP版「詰みからの脱出手段」（008パターン#4の拡張、15tickごとに+1、拠点回復2/tickの1/30の速度、`FIELD_REGEN_INTERVAL`/`FIELD_REGEN_AMOUNT`/`FIELD_REGEN_SAFE_RANGE`を新設）を追加。maxTicks=60000まで許容すると10シード中10シードが勝利に転じ（平均48938tick、outpost-rushの約3.8倍）、「壁」から「著しく非効率だが到達可能」に転換した。(2)バグ#4: `BARRICADE_BASE_COST`8→5、`BARRICADE_HP`18→26に調整し、no-buildとのavgDistance差が-13.5→-4.5に縮小、破壊率も74%→約33%に低下してほぼ拮抗する水準まで改善した。(3)バグ#5: `BASE_REGEN_PER_TICK`1→2に倍増し、balanced+builder方針のセッション時間が約37分→約16.2分に短縮され想定15〜20分の範囲内に収まった。副次的に、v2再検証でv1のP01ペルソナ戦略「offense特化（防御ゼロ）+outpost-rush」が11シード中11シード死亡する事実上の即死ビルドだったと判明（v1のseed301勝利は偶然）し、atk偏重2:防御1のハイブリッドビルドに変更して再測定した（両ペルソナとも想定時間内で完走）。加えて単一カテゴリ隔離の診断ボットdefense-allinが10シード中10シードでmaxTicks=60000でも停滞する新規発見があったが、実運用のbalanced系では発生しない性質のため今回は仕様変更せずLearningsに記録するのみとした。ブラウザAIPは本セッションも無人スケジュール実行のため`preview_start`は試みずcore `Game`クラス直接step()の擬似実プレイで代替。npm run build / npm run simulateとも正常終了。reviews/010-combat-building-bastion-v2.md作成、判定FIX。spec.mdに「v2 FIX内容」節とバランス表更新を追記、package.jsonのversionを0.2.0へ、games/README.mdの索引を更新し、routine-state.mdをサイクル16・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 

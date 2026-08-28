@@ -29,19 +29,25 @@ const DASH_INVULN_TICKS = 3;
 const SKILL_DMG_INIT = 8;
 const SKILL_RADIUS = 2;
 const SKILL_CD_MAX_INIT = 20;
-const BASE_REGEN_PER_TICK = 1;
+const BASE_REGEN_PER_TICK = 2;
 
 // --- 詰みからの脱出手段（008パターン#4）: 拠点で無一文の間、少額の哨戒報酬が入る ---
 const PASSIVE_INCOME_INTERVAL = 20;
 const PASSIVE_INCOME_AMOUNT = 3;
 
+// --- 詰みからの脱出手段（HP版、v2追加）: 拠点圏外・非戦闘中は自然回復がごく僅かに働く。
+// 拠点回復（1/tick）よりずっと遅く、建築の価値を損なわない範囲に留める ---
+const FIELD_REGEN_INTERVAL = 15;
+const FIELD_REGEN_AMOUNT = 1;
+const FIELD_REGEN_SAFE_RANGE = 4;
+
 // --- 危険度再悪化のたびのHUDハイライト（008パターン#11） ---
 const RISK_ESCALATION_BANNER_TICKS = 90;
 
 // --- 建築コスト ---
-const BARRICADE_BASE_COST = 8;
+const BARRICADE_BASE_COST = 5;
 const BARRICADE_BAND_MULT = 0.15;
-const BARRICADE_HP = 18;
+const BARRICADE_HP = 26;
 const OUTPOST_BASE_COST = 60;
 const OUTPOST_BAND_COST_MULT = 0.2;
 
@@ -162,6 +168,7 @@ export class Game {
   private prevSeverity = 0;
   private riskEscalationBannerTicks = 0;
   private passiveIncomeTimer = 0;
+  private fieldRegenTimer = 0;
   private maxXReached = 0;
   private metrics: Metrics = {
     distanceReached: 0,
@@ -532,6 +539,19 @@ export class Game {
         } else {
           this.passiveIncomeTimer = 0;
         }
+        this.fieldRegenTimer = 0;
+      } else if (
+        this.player.hp < this.player.maxHp &&
+        !this.enemies.some((e) => chebyshev(e.x, e.y, this.player.x, this.player.y) <= FIELD_REGEN_SAFE_RANGE)
+      ) {
+        // 詰みからの脱出手段（HP版）: 拠点圏外でも非戦闘中はごく僅かに自然回復する
+        this.fieldRegenTimer++;
+        if (this.fieldRegenTimer >= FIELD_REGEN_INTERVAL) {
+          this.fieldRegenTimer = 0;
+          this.player.hp = Math.min(this.player.maxHp, this.player.hp + FIELD_REGEN_AMOUNT);
+        }
+      } else {
+        this.fieldRegenTimer = 0;
       }
 
       this.updateRiskTracking();
