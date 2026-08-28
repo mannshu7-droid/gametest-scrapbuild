@@ -4,6 +4,34 @@
 
 ## 現在位置
 
+- サイクル: 16
+- 要素: **新規ゲームプロトタイプ（新規番号`010-*`）に着手**。cycle15-final
+  （reviews/009-combat-ironmarch-final.md）が、009（戦闘単体・横帯状フィールド）を通じて
+  「008の11パターンのうち建築由来でない9パターンは空間構造非依存の汎用設計原則、建築由来の
+  2パターン（第三の選択肢／目標を生む建築）はルート選択のような代替では再現できない建築固有の解」
+  と結論づけたことを踏まえ、**本物の建築要素を、009と同じ横方向の開けた空間構造（縦シャフトでは
+  ない）に組み合わせた「戦闘×建築（採掘なし）」の組み合わせ試作**を提案した
+- cycle15-finalの提案: 010-combat-building-<名前>（暫定名）。009では代替（ルート選択）では
+  建築由来パターンの「永続的な達成物としての目標」という性質を再現できなかったため、次は本物の
+  建築を横方向の空間構造に組み合わせて、建築由来パターンが空間構造を超えて移植可能かを検証する。
+  005〜008では採掘の経済ループとセットでしか建築を検証していないため、**採掘なしで建築だけが
+  目標を生めるか**を単独で切り分けられる。代替案として、009で確立したEVベースのヒント設計
+  （`routePreview.recommended`、12番目の共通パターン候補）を新規ゲームに適用し汎用性を検証する案も
+  次点として残す
+- 次に行う回: **1回目（BUILD+REVIEW）**
+- 009-combat-ironmarchで確立した知見（009-final Learnings参照）:
+  1. 008の11パターンのうち9パターン（建築由来2パターンを除く）は空間構造が変わっても機能する
+     汎用原則。建築由来2パターンは建築要素なしでは代替が効かない
+  2. EVベースのヒント（期待報酬-リスクコストで比較）は生存可否のみのヒントより選択肢間の差を
+     確実に反映できる。閾値を上げるだけの対症療法では効果が限定的
+  3. 単一シードのフル実行チェック（maxTicksまで回してover=falseのまま停滞していないか）は
+     wins/deathsの集計だけでは見えないソフトロックを発見する唯一の手段。次サイクル以降も
+     BUILD直後のレビューから標準チェック項目にする
+  4. 評価軸の一部が対象外に偏るペルソナの総合点だけで判定しない（ジャンルとペルソナの相性の
+     問題であり、ゲームの欠陥ではない）
+
+## 過去のサイクル15（完了・アーカイブ）
+
 - サイクル: 15
 - 要素: **新規ゲームプロトタイプ（新規番号 `009-*`）に着手**。cycle14-final
   （reviews/008-flagship-frontierhold-cycle14-final.md）が、iOS移植の構造的な実行不可（cycle14-v3）
@@ -208,6 +236,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-27 | 15 | 1（BUILD+REVIEW） | 009-combat-ironmarch（横に長い5レーン帯状フィールドを前進するリアルタイム戦闘、008の11パターンの異なる空間構造への移植性検証と002の積み残し「強化選択の分岐が結果に大差を生まない」への再挑戦を1本化）を新規実装。ウェイステーション到達時に次セグメントの安全/危険ルートを選ぶ仕組みを、建築要素を持ち込めない制約下での「建築を第三の選択肢にする」「目標を生む建築」パターンの代替として設計した。実装中に、ルート選択のセグメントindex計算のoff-by-oneでawaitingRouteChoiceが永久に解除されず全戦略が前進不能になる致命バグを発見・修正し、続けて初期バランス（危険セグメントで10シード×8戦略の全ランが実質前進不能）を、プレイヤー初期atk・攻撃速度の引き上げと危険セグメントの倍率緩和、ボットへの帰還ヒステリシス（005 IronVein由来）追加で調整した。10シード×8戦略のヘッドレス比較で、single-stat all-in戦略間にavgScore352〜899という2.5倍以上の差を確認し002finalの積み残しの解消を実証。ブラウザAIPは無人スケジュール実行のため`preview_start`が拒否され実施できず、`window.__AIP__`と同一のcore `Game`クラスを直接step()する決定論的な擬似実プレイ（P01=atk特化+常に危険ルート、P02=balanced+適応的ルート選択）で代替した。P02相当は1568tickで400マス完走・スコア1934という充実したプレイになった一方、P01相当（atk特化・defense無投資）はウェイステーションの保護半径外まで後退した末に回復手段が尽きる事実上のソフトロックを12000tickトレースで検出。また危険ルートの報酬（+50%）がsafeルートの前進速度優位を相殺できておらず（balanced-safe avgScore1158 vs balanced-risky 426）、危険度ヒントが「生存可否」のみを見て「どちらが得か」を反映しないためbalanced-adaptiveがbalanced-riskyと常に同一判断になる問題も発見した。reviews/009-combat-ironmarch-v1.md作成、判定FIX。008の11パターンのうち6つ（常設ショップ・安全マージン公開・固定範囲の保護装置・常時使用可能な緊急離脱・危険度UIヒント・危険度再悪化のHUDハイライト）は空間構造が変わっても機能し「ジャンルを超えて有効な設計原則」の可能性が高い一方、建築由来2パターンの代替（ルート選択）は「永続的な達成物としての目標」までは再現できないという移植性検証の結論を得た。games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-08-27 | 15 | 2（FIX+REVIEW） | v1指摘の重大バグ2件・中バグ1件に対応。(1)保護範囲外ソフトロック（バグ#2）: `nearestWaystationDistance`にx=0（フィールド左端の出撃地点）を保護基準点として追加し、他ウェイステーションと同じ半径3マスの敵不出現・HP回復を与えて解消。seed301（v1で12000tick停滞・over=false）で単体再検証し、1523tickで400マス完走・勝利に転じたことを直接確認した。(2)危険ルートの魅力不足（バグ#3）: 撃破報酬倍率×1.5→×1.8に加え、ウェイステーション到達ボーナスを危険セグメント踏破後のみ+25（安全時は+10のまま）に分離。20シード比較でbalanced-riskyがbalanced-safeを逆転（avgScore1916.5 vs 1448.9、v1は426 vs 1158で逆だった）。(3)危険度ヒントの感度不足（バグ#4）: 危険セグメントの推奨HP倍率×1.2→×1.35に引き上げ、atk特化ビルドでは実際に'danger'判定が発生するようになったが、balanced戦略は分散投資が要求水準の上昇にほぼ追随するためbalanced-adaptiveがbalanced-riskyと常に同一判断になる問題自体は解消しきれず、部分改善として3回目以降へ持ち越した。ブラウザAIPは本セッションも無人スケジュール実行のため`preview_start`が拒否され、v1と同じくcore `Game`クラス直接step()による擬似実プレイ（P01=seed301 atk特化+常に危険ルート、P02=seed302 balanced+適応的ルート選択）で代替し、両者とも勝利（P01は1523tick・finalHp20/32、P02は1271tick・finalHp45/80）という結果を確認、P01ではband6以降に'danger/danger'（両ルートとも危険）という切迫した局面を複数回生還する緊張感のある展開に転じたことも確認した。npm run build / npm run simulateとも正常終了。reviews/009-combat-ironmarch-v2.md作成、判定FIX。spec.mdに「v2 FIX内容」節とバランス表更新を追記、package.jsonのversionを0.2.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run3（FIX only）へ進めた | (本PR) |
 | 2026-08-28 | 15 | 3（FIX only） | v2バグ#4（combatRiskLevel/routePreviewが生存可否のみを見てEVを反映せず、balanced-adaptiveが常にbalanced-riskyと同一判断になる）に対応。`src/core/game.ts`の`routePreview()`に`recommended`（'safe'\|'risky'）フィールドを新設し、期待報酬（撃破報酬期待値の総和＋区切りボーナス、`routeExpectedReward()`）からHP不足マージン（1-maxHp/推奨HP）に比例するリスクコスト（`routeRiskCost()`、係数`ROUTE_EV_RISK_COST_SCALE=280`）を差し引いたEV（`routeExpectedValue()`）で両ルートを比較する方式に変更した。既存の`safe`/`risky`（生存可否のみのRiskLevel、HUD表示用）はそのまま残し追加フィールドとして共存させ、`src/core/types.ts`・`src/render/renderer.ts`（HUDに`EV recommends: ...`行を追加）も対応した。`headless/simulate.ts`のadaptive戦略を`routePreview.recommended`採用に切り替えたところ、20シード(1〜20)比較でbalanced-adaptiveがbalanced-risky（avgScore1916.5・avgRisky9.0/avgSafe0.0）からavgScore1819.3・avgRisky7.7/avgSafe1.3へ乖離し（勝率20/20・死亡0/20は維持）、'danger'まで到達しなくても一部局面で安全ルートを選ぶようになったことを確認、v2まで解消できなかった「balanced-adaptiveが常にbalanced-riskyと同一判断になる」問題を解消した。seed301（v1/v2の回帰チェック対象、atk-allin-risky）は1523tickで400マス完走・勝利を維持しデグレなし、single-stat all-in戦略群（risky-always固定でrecommendedを参照しない）も20シード比較でv2と完全一致（回帰なし）。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3 FIX内容」節を追記。package.jsonのversionを0.3.0へ、games/README.mdの状態列を更新し、routine-state.mdをサイクル15・run4（FINAL REVIEW）へ進めた | (本PR) |
+| 2026-08-28 | 15 | 4（FINAL REVIEW） | 009-combat-ironmarchの総括レビュー（reviews/009-combat-ironmarch-final.md）を作成。20シード×8戦略のヘッドレス再検証でv3の記録値（balanced-adaptive avgScore1819.3・avgRisky7.7/avgSafe1.3等）と完全一致（回帰なし）、seed301単独再検証（1523tick・distanceReached400・won=true）もv2・v3と一致することを確認した。ブラウザAIPは今回も無人スケジュール実行のため`preview_start`が「Dev servers can't be started from unattended sessions」で拒否され、v1・v2と同じくcore `Game`クラス直接step()による擬似実プレイで代替。今回はv3で追加された`routePreview.recommended`の採用状況をtick単位でトレースする一時スクリプト（検証後削除、コミット対象外）を新規作成し、P02（seed302, balanced+適応的ルート選択）が9回のルート選択のうち危険2回・安全7回とEVに応じて分岐する挙動を初めて直接確認した（v1・v2時点の同一seedでは9/9とも危険ルートでrisky-alwaysと完全一致していた）。サイクル15の2つの狙い（008の11パターンの移植性検証、002finalの積み残し解消）はいずれも達成と判定: 008の11パターンのうち建築由来2パターンを除く9パターンは空間構造非依存の汎用原則であることが確定した一方、建築由来2パターン（第三の選択肢／目標を生む建築）はルート選択という代替では「永続的な達成物としての目標」を再現できない建築固有の解と結論づけた。加えて`routePreview.recommended`のEVベース設計を「選択肢のヒントは生存可否でなくEVで示す」12番目の共通パターン候補として提案した。判定はFIX完了・本命ゲーム(008)への直接の変更提案はないが、EVベースのヒント設計は将来008に複数選択肢の局面が追加された際に応用価値があると明記。次サイクルの提案として、009では代替が効かなかった建築由来パターンを本物の建築要素で（採掘なしに）検証する「010-combat-building-<名前>」を提案し、games/README.mdの状態列を更新、routine-state.mdをサイクル16・run1へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
