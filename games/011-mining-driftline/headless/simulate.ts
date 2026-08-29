@@ -69,6 +69,10 @@ function canDig(s: GameState, x: number, y: number): boolean {
   return s.player.drillPower >= requiredDrillPower(t as TileId, band);
 }
 
+function isHazard(t: number | null): boolean {
+  return t === TILE.GAS || t === TILE.UNSTABLE;
+}
+
 type Strategy = 'cautious' | 'pusher';
 const DRIFT_CAP = 80; // band0〜1相当（BAND_SIZE=40 x 2）
 
@@ -102,14 +106,23 @@ class Bot {
       if (dir) return { type: 'move', dir };
     }
 
+    // 迂回優先度の高い探索: 5レーンの横幅を活かし、同じ優先順位内では危険タイル(GAS/UNSTABLE)を
+    // 避けられるレーンがあればそちらを優先する（reviews/011-mining-driftline-v1.md 軽微バグ#3
+    // 「5レーンの迂回余地」の検証、v2 中バグ#2「危険度再悪化ハイライトの過剰発火」が探索精度に
+    // 起因するかの検証を兼ねる）。危険タイルしか選べない場合のみそこへ進む
+    let hazardFallback: Dir | null = null;
     for (const dir of mineDirs(s, this.strategy)) {
       const [dx, dy] = DELTA[dir];
       const nx = p.x + dx;
       const ny = p.y + dy;
       const t = tileAt(s, nx, ny);
       if (t === TILE.FLOOR) return { type: 'move', dir };
-      if (canDig(s, nx, ny)) return { type: 'move', dir };
+      if (canDig(s, nx, ny)) {
+        if (!isHazard(t)) return { type: 'move', dir };
+        if (hazardFallback === null) hazardFallback = dir;
+      }
     }
+    if (hazardFallback !== null) return { type: 'move', dir: hazardFallback };
 
     // 全方向掘削不可（ドリル威力不足） → pusherは強化を買いに戻る、cautiousはその場で待つ
     if (this.strategy === 'pusher') {
