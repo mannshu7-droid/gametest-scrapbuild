@@ -33,6 +33,16 @@ const RISK_DANGER_MARGIN = 15;
 const RISK_CAUTION_MULT = 1.8;
 const RISK_BANNER_TICKS = 90;
 
+// --- 詰みからの脱出手段（008パターン#4、010 v2「拠点で無一文の間、少額の収入が入る」を移植）:
+// estFuelToReturnベースの安全マージンは、進むほど帰還コストも同じ速度で増える構造上、初期装備の
+// まま到達できる範囲より先には（境界タイルの掘削進捗を`digProgress`で永続化しても）実質届かない。
+// その範囲内の鉱脈を掘り尽くすと収入が完全に止まり、燃料タンク等を強化する原資も稼げなくなる
+// 恒久停止（reviews/011-mining-driftline-v1.md 致命バグ#1）が起きる。ホーム滞在中、最安の
+// 未購入強化すら買えない資金しかない間だけ、ごく少額の収入が入るようにし、いずれ燃料タンクを
+// 1段階買えるだけの資金は必ず貯まるようにする（燃料タンク+40は境界を一気に押し広げる）
+const STUCK_INCOME_INTERVAL = 25;
+const STUCK_INCOME_AMOUNT = 2;
+
 const DIGGABLE: TileId[] = [TILE.DIRT, TILE.ROCK, TILE.ORE_COPPER, TILE.ORE_IRON, TILE.ORE_GOLD, TILE.GAS, TILE.UNSTABLE];
 
 /** タイルの硬さ階層（0=最も柔らかい）。要求ドリル威力・掘削時間の基礎になる（003と同一） */
@@ -181,6 +191,15 @@ export class Game {
   private lastRiskLevel: RiskLevel = 'safe';
   private currentRiskLevel: RiskLevel = 'safe';
   private banner: RiskEscalationBanner | null = null;
+  /**
+   * 詰みからの脱出手段（v2追加、reviews/011-mining-driftline-v1.md 致命バグ#1対応）:
+   * タイルごとの掘削進捗を永続化する。危険域到達で強制撤退しても、次回同じタイルへ
+   * 戻れば残りtickから再開できる——1トリップで完掘できなくても複数トリップの合計で
+   * 必ず前進する（v1では`digging=null`で進捗を完全破棄していたため、境界タイルの
+   * 手前で永久に足踏みする無限ループが発生していた）
+   */
+  private digProgress = new Map<number, number>();
+  private stuckIncomeTimer = 0;
   private player: PlayerState = {
     x: 0,
     y: SPAWN_Y,
@@ -210,6 +229,7 @@ export class Game {
     fuelEmptyTicks: 0,
     tripsToHome: 0,
     riskEscalations: 0,
+    stuckIncomeEarned: 0,
     score: 0,
   };
 
@@ -333,6 +353,7 @@ export class Game {
     this.tick++;
 
     if (this.phase === 'shop') {
+      this.tickStuckIncome();
       if (action.type === 'buy') {
         this.applyBuy(action.item);
         this.recomputeScore();
@@ -376,6 +397,14 @@ export class Game {
     this.recomputeScore();
   }
 
+  /** 現在の掘削中タイルの残りtickを、中断される前にdigProgressへ退避する */
+  private stashDigging(): void {
+    if (this.player.digging) {
+      const idx = this.player.digging.x * LANES + this.player.digging.y;
+      this.digProgress.set(idx, this.player.digging.remaining);
+    }
+  }
+
   private applyMove(dir: Dir): void {
     const [dx, dy] = DELTA[dir];
     const nx = this.player.x + dx;
@@ -384,6 +413,7 @@ export class Game {
     const t = this.tiles[nx * LANES + ny] as TileId;
 
     if (t === TILE.FLOOR) {
+      this.stashDigging();
       this.player.digging = null;
       this.player.x = nx;
       this.player.y = ny;
@@ -397,12 +427,17 @@ export class Game {
     if (this.drillPower() < req) return; // ドリル威力不足で不発（後出しではなく式から予測可能）
 
     if (!this.player.digging || this.player.digging.x !== nx || this.player.digging.y !== ny) {
+      this.stashDigging();
+      const idx = nx * LANES + ny;
       const total = digTicksFor(t, band, this.drillPower(), this.player.digspeedLevel);
-      this.player.digging = { x: nx, y: ny, remaining: total, total };
+      const saved = this.digProgress.get(idx);
+      const remaining = saved !== undefined ? Math.min(saved, total) : total;
+      this.player.digging = { x: nx, y: ny, remaining, total };
     }
     this.player.fuel = Math.max(0, this.player.fuel - DIG_FUEL_COST);
     this.player.digging.remaining--;
     if (this.player.digging.remaining <= 0) {
+      this.digProgress.delete(nx * LANES + ny);
       this.completeDig(nx, ny, t, band);
       this.player.digging = null;
       this.player.x = nx;
@@ -445,6 +480,7 @@ export class Game {
   private applyTeleport(): void {
     if (!this.teleportUnlocked() || this.player.fuel < TELEPORT_FUEL_COST) return;
     this.player.fuel -= TELEPORT_FUEL_COST;
+    this.stashDigging();
     this.player.digging = null;
     this.player.x = 0;
     this.arriveAtHome();
@@ -478,6 +514,27 @@ export class Game {
         return this.player.hazardresistLevel;
       case 'teleport':
         return this.player.teleportLevel;
+    }
+  }
+
+  /** 詰みからの脱出手段: ホーム滞在中、最安の未購入強化すら買えない間だけ少額の収入を積む */
+  private tickStuckIncome(): void {
+    let minCost: number | null = null;
+    for (const def of SHOP_DEFS) {
+      const level = this.levelOf(def.id);
+      if (level >= def.maxLevel) continue;
+      const cost = Math.round(def.baseCost * Math.pow(def.growth, level));
+      if (minCost === null || cost < minCost) minCost = cost;
+    }
+    if (minCost === null || this.player.money >= minCost) {
+      this.stuckIncomeTimer = 0;
+      return;
+    }
+    this.stuckIncomeTimer++;
+    if (this.stuckIncomeTimer >= STUCK_INCOME_INTERVAL) {
+      this.stuckIncomeTimer = 0;
+      this.player.money += STUCK_INCOME_AMOUNT;
+      this.metrics.stuckIncomeEarned += STUCK_INCOME_AMOUNT;
     }
   }
 

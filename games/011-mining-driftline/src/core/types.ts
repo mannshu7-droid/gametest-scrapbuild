@@ -64,6 +64,8 @@ export interface Metrics {
   fuelEmptyTicks: number;
   tripsToHome: number;
   riskEscalations: number;
+  /** 詰みからの脱出手段（v2追加）で入った少額収入の累計。恒久的に0のままなら経済が自走できている証拠 */
+  stuckIncomeEarned: number;
   score: number;
 }
 
