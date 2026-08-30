@@ -521,6 +521,7 @@ export class Game {
     if (this.rng() >= chance) return;
 
     const candidates: { x: number; y: number }[] = [];
+    const spaced: { x: number; y: number }[] = [];
     for (let dx = 3; dx <= 14; dx++) {
       const x = this.player.x + dx;
       if (x > FIELD_WIDTH) break;
@@ -530,13 +531,19 @@ export class Game {
         // 停滞すると、掘削済みの候補マスが少ないまま同じ位置が繰り返し抽選され、複数の敵が
         // 完全に重なって出現しがちだった。重なった敵は同時に射撃/攻撃してくるため、
         // 停滞するほど戦闘が急激に理不尽化し、さらに停滞が悪化する悪循環を生んでいた
-        if (this.tileAt(x, y) === TILE.FLOOR && !this.enemies.some((e) => e.x === x && e.y === y)) {
-          candidates.push({ x, y });
+        if (this.tileAt(x, y) !== TILE.FLOOR || this.enemies.some((e) => e.x === x && e.y === y)) continue;
+        candidates.push({ x, y });
+        // v3 FIX（残課題#3）: 完全スタックは解消済みだが、隣接マスへの「準スタック」
+        // （複数の敵がほぼ同じ位置に集中し、実質同時攻撃になる）は起こりうる。
+        // 既存の敵から2マス以上離れた候補を優先することで準スタックの発生頻度を下げる
+        if (!this.enemies.some((e) => Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 1)) {
+          spaced.push({ x, y });
         }
       }
     }
-    if (candidates.length === 0) return;
-    const { x: spawnX, y: spawnY } = candidates[randInt(this.rng, candidates.length)];
+    const pool = spaced.length > 0 ? spaced : candidates;
+    if (pool.length === 0) return;
+    const { x: spawnX, y: spawnY } = pool[randInt(this.rng, pool.length)];
     const type = pickEnemyType(this.rng);
     const def = ENEMY_DEFS[type];
     const mul = 1 + band * 0.1;
