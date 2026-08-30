@@ -189,7 +189,8 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
   {
     type: 'build',
     params: { target: 'barricade', dir: 'up|down|left|right' },
-    description: '隣接する既に掘った道(dir)にバリケードを設置。空きマスのみ・所持金消費。敵の移動のみを塞ぐ',
+    description:
+      '隣接する既に掘った道(dir)にバリケードを設置。空きマスのみ・所持金消費。敵の移動を塞ぎ、射線上にあれば遠距離攻撃の身代わりにもなる',
   },
   {
     type: 'build',

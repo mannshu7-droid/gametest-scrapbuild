@@ -113,7 +113,10 @@ export function oreValue(type: TileId, band: number): number {
   return Math.round(base * (1 + band * 0.12));
 }
 function recommendedHpForBand(band: number): number {
-  return 66 + Math.max(0, band) * 12;
+  // v1では66+band*12で、初期maxHp(100)が常に大幅に上回りcombatRiskLevelが機能しなかった。
+  // band0でmaxHp(100)とほぼ等しくなるよう起点を引き上げ、vitality未投資のまま奥へ進むと
+  // caution/dangerへ確実に遷移するようにした（v2 FIX）
+  return 100 + Math.max(0, band) * 20;
 }
 
 function pickTileType(band: number, rng: Rng): TileId {
@@ -402,6 +405,36 @@ export class Game {
     return this.barricades.find((b) => b.x === x && b.y === y);
   }
 
+  /**
+   * 射線上（始点・終点を除く中間マス）にバリケードがあれば、それを返す（v2 FIX）。
+   * v1では「移動」しか塞げなかったため、距離を維持したまま撃ち続けるarcher(range>1)に対しては
+   * バリケードが無意味だった。Bresenhamで射線上の中間マスを辿り、最初に見つかったバリケードを返す
+   */
+  private lineOfSightBarricade(x1: number, y1: number, x2: number, y2: number): Barricade | undefined {
+    let x = x1;
+    let y = y1;
+    const dx = Math.abs(x2 - x1);
+    const dy = Math.abs(y2 - y1);
+    const sx = x1 < x2 ? 1 : -1;
+    const sy = y1 < y2 ? 1 : -1;
+    let err = dx - dy;
+    while (x !== x2 || y !== y2) {
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+      if (x === x2 && y === y2) break;
+      const b = this.barricadeAt(x, y);
+      if (b) return b;
+    }
+    return undefined;
+  }
+
   /** 既に掘った道(FLOOR)だけを通ってホーム(x=0)へ戻るのに必要なマス数をBFSで求める */
   private bfsDistanceToHome(): number {
     if (this.player.x === 0) return 0;
@@ -493,7 +526,13 @@ export class Game {
       if (x > FIELD_WIDTH) break;
       if (this.inBaseRadius(x)) continue;
       for (let y = 0; y < LANE_COUNT; y++) {
-        if (this.tileAt(x, y) === TILE.FLOOR) candidates.push({ x, y });
+        // 既に敵がいるマスは候補から除外する（v2 FIX）。プレイヤーが同じ場所に留まって
+        // 停滞すると、掘削済みの候補マスが少ないまま同じ位置が繰り返し抽選され、複数の敵が
+        // 完全に重なって出現しがちだった。重なった敵は同時に射撃/攻撃してくるため、
+        // 停滞するほど戦闘が急激に理不尽化し、さらに停滞が悪化する悪循環を生んでいた
+        if (this.tileAt(x, y) === TILE.FLOOR && !this.enemies.some((e) => e.x === x && e.y === y)) {
+          candidates.push({ x, y });
+        }
       }
     }
     if (candidates.length === 0) return;
@@ -591,8 +630,20 @@ export class Game {
       }
       const newDist = chebyshev(e.x, e.y, this.player.x, this.player.y);
       if (newDist <= e.range && e.atkCd <= 0) {
-        e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
-        if (this.player.dashInvulnTicks <= 0) this.player.hp -= e.atk;
+        // 射線上にバリケードがあれば、プレイヤーの代わりにそれを攻撃する（v2 FIX）。
+        // archer(range>1)がバリケードで足止めされずに撃ち続けられた進行不能ループの原因を解消
+        const losBlocker = newDist > 1 ? this.lineOfSightBarricade(e.x, e.y, this.player.x, this.player.y) : undefined;
+        if (losBlocker) {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          losBlocker.hp -= e.atk;
+          if (losBlocker.hp <= 0) {
+            this.barricades = this.barricades.filter((b) => b.id !== losBlocker.id);
+            this.metrics.barricadesLost++;
+          }
+        } else {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          if (this.player.dashInvulnTicks <= 0) this.player.hp -= e.atk;
+        }
       }
     }
     this.enemies = this.enemies.filter((e) => e.hp > 0 && e.x >= this.player.x - 15);
