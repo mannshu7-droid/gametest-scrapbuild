@@ -1,7 +1,7 @@
 # 仕様書: 011-mining-driftline（ドリフトライン）
 
 - 作成日: 2026-08-29
-- ステータス: DRAFT
+- ステータス: PLAYABLE（サイクル17完了、総括: [reviews/011-mining-driftline-final.md](../../reviews/011-mining-driftline-final.md)）
 - 元になったレビュー: [reviews/010-combat-building-bastion-final.md](../../reviews/010-combat-building-bastion-final.md)
 
 ## サイクル17の狙い
