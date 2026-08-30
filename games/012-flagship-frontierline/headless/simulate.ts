@@ -86,6 +86,18 @@ function canDig(s: GameState, x: number, y: number): boolean {
 function isHazard(t: number | null): boolean {
   return t === TILE.GAS || t === TILE.UNSTABLE;
 }
+/** dir方向が実際に前進可能か（既にFLOOR、またはドリル威力で掘削可能）。
+ * v2 FIX: 敵を追う移動がこれを確認せず、ドリル威力不足で掘れない壁の前で敵と睨み合ったまま
+ * 何もできずに停滞するケースを検証中に発見（band境界ではband2以降、drillLv0だと全タイル種が
+ * 掘削不可になる）。移動先が前進できない時は「敵を追う」を諦め採掘ロジックへフォールバックする */
+function canAdvance(s: GameState, dir: Dir): boolean {
+  const [dx, dy] = DELTA[dir];
+  const nx = s.player.x + dx;
+  const ny = s.player.y + dy;
+  const t = tileAt(s, nx, ny);
+  if (t === TILE.FLOOR) return true;
+  return canDig(s, nx, ny);
+}
 function inBaseRadius(s: GameState): boolean {
   if (Math.abs(s.player.x - 0) <= s.map.homeRadius) return true;
   for (const ox of s.outposts) if (Math.abs(s.player.x - ox) <= s.map.outpostRadius) return true;
@@ -126,7 +138,11 @@ class Bot {
     if (criticalFuel || criticalHp || cargoFull) {
       if (nearest && nearest.dist <= 1 && !criticalHp) return { type: 'attack' };
       const dir = bfsToHome(s);
-      if (dir) return { type: 'move', dir };
+      if (dir) {
+        // HP危険時はダッシュで一気に距離を稼いで離脱する（無敵時間もあり安全）
+        if (criticalHp && p.dashCd === 0) return { type: 'dash', dir };
+        return { type: 'move', dir };
+      }
       if (p.teleportUnlocked && p.fuel >= 25) return { type: 'teleport' };
     }
 
@@ -141,11 +157,18 @@ class Bot {
       if (nearest.dist <= 1) return { type: 'attack' };
       const engageRange = this.strategy === 'pusher' ? 5 : 2;
       if (nearest.dist <= engageRange) {
-        // 追ってくる敵が中距離なら、割安ならバリケードで足止めしてから戦う
-        if (nearest.dist >= 3 && p.money >= p.buildCosts.barricade * 3) {
-          return { type: 'build', target: 'barricade', dir: stepToward(s, nearest.enemy.x, nearest.enemy.y) };
+        const towardDir = stepToward(s, nearest.enemy.x, nearest.enemy.y);
+        // archer等の遠距離敵が距離を維持して撃ち続けてくる場合、通常移動では追いつけないので
+        // ダッシュで一気に間合いを詰める（v2 FIX: dashを検証botのレパートリーに追加）
+        if (nearest.enemy.range > 1 && nearest.dist >= 2 && nearest.dist <= p.dashRange && p.dashCd === 0) {
+          return { type: 'dash', dir: towardDir };
         }
-        return { type: 'move', dir: stepToward(s, nearest.enemy.x, nearest.enemy.y) };
+        // 追ってくる敵が中距離なら、割安ならバリケードで足止め（射線も塞げるため遠距離敵にも有効）
+        if (nearest.dist >= 3 && p.money >= p.buildCosts.barricade * 3) {
+          return { type: 'build', target: 'barricade', dir: towardDir };
+        }
+        // 追う方向が実際に前進可能な時だけ追う。掘削不可の壁越しなら採掘ロジックへフォールバック
+        if (canAdvance(s, towardDir)) return { type: 'move', dir: towardDir };
       }
     }
 
@@ -164,8 +187,10 @@ class Bot {
     }
     if (hazardFallback !== null) return { type: 'move', dir: hazardFallback };
 
-    // 全方向掘削不可（ドリル威力不足） → pusherは強化を買いに戻る、cautiousはその場で待つ
-    if (this.strategy === 'pusher') {
+    // 全方向掘削不可（ドリル威力不足） → 強化を買いに拠点へ戻る（v2 FIX: 以前はcautiousのみ
+    // その場で待ち続けていたが、band境界のドリル要求ゲートで待機し続けても状況が変わらず
+    // 詰みうるため、cautiousも同様に帰還してdrill等を購入できるようにした）
+    {
       const dir = bfsToHome(s);
       if (dir) return { type: 'move', dir };
     }
