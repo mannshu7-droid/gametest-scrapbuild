@@ -10,7 +10,7 @@
   フィールド・前線拠点システムに昼夜サイクルと拠点HP（ホーム/前線拠点それぞれに独立したHPを付与し、
   夜間レイダーが拠点圏内へ侵入・攻撃できるようにする）を追加した
 - 対象ゲーム番号: **013-flagship-nightwatch**（サイクル19・1回目で決定・実装済み）
-- 次に行う回: **3回目（FIX only）**
+- 次に行う回: **4回目（FINAL REVIEW）**
 - サイクル19・2回目（FIX＋REVIEW、reviews/013-flagship-nightwatch-v2.md）で判明した事項:
   1. v1致命#1・重大#2・重大#3の3件すべてを修正した: (1)夜明けに残存レイダーを撤退させる、
      (2)夜間・拠点内では迎撃をショップ購入より優先する、(3)拠点圏内のバリケード建設を交戦距離の
@@ -22,8 +22,17 @@
      10/10→8/10）依然高いhomeDestroyed率を示し、新規バグ#5「`headless/simulate.ts`のHP危険域
      判定が戦略非依存の固定25%になっている」を発見。v2必須項目には含まれないため次回（3回目）へ
      持ち越した
-  4. 3回目（FIX only）ではバグ#5への対応を最優先候補として検討する。7サイクル連続で未実施の
-     ブラウザAIP実プレイの技術的負債は本サイクルでも解消できていない
+- サイクル19・3回目（FIX only）で対応した事項:
+  1. バグ#5に対応: `headless/simulate.ts`にHP危険域閾値`HP_RETREAT_THRESHOLD`を追加し、
+     cautious=0.30・pusher=0.25（従来値のまま）へ差別化した。ゲーム本体（src/core/game.ts）は無変更
+  2. 10シード比較でcautiousのhomeDestroyed 8/10→7/10・avgBaseDamageTaken 459→425（-7%）の改善を
+     確認したが、**閾値は単調に効かない**ことも判明した（cautiousを0.35/0.40に上げると10/10へ悪化）。
+     根本原因（HP閾値と拠点防衛成功率の非線形な関係）の深追いはせず、実測で最良だった0.30を採用し
+     現象のみLearningsとして記録した
+  3. 追加の11〜20シードでも同傾向（cautious homeDestroyed 7/10、pusher homeDestroyed 2/10・
+     avgBaseDamageTaken 220.7）を確認し、10シードの偶然でないことを確認した
+  4. 4回目（FINAL REVIEW）では、8サイクル連続で未実施のブラウザAIP実プレイの技術的負債の解消を
+     引き続き検討すること、および上記の非単調な閾値挙動を必要なら深掘りすることを推奨する
 
 ## 過去のサイクル18（完了・アーカイブ）
 
@@ -512,6 +521,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-08-31 | 18 | 4（FINAL REVIEW） | 012-flagship-frontierlineの総括レビュー（reviews/012-flagship-frontierline-final.md）を作成。10シードのヘッドレス比較（cautious死亡0/10、pusher死亡4/10だが単一シード60000tickチェックでは生存継続）でv3から回帰がないことを確認。P01/P02の擬似実プレイでは、P01のmaxDistanceが37で頭打ちに見える現象を50tick刻みのx座標トレースで裏取りし、v1のような「壁際で完全に動けない停滞」ではなく「撤退HP閾値15%という極端な設定のもとで深追いと撤退を繰り返した末に自己ベストを更新できなかった」だけであり、隣接敵数の最大観測値も3（v1/v2の完全スタックのような理不尽な集中砲火ではない）と確認した。P02も進行距離225まで到達し停滞なし。v2/v3からの残課題#1（集中砲火リスク）はv3の準スタック対策で大幅緩和されたと再確認して解消と判定、#2（pusherのbarricade効率）は「バリケードで被弾を肩代わりしながら前進する一貫した戦術」でありバグではなく戦略選択の結果と最終判断した。判定はFIX。本命ゲームに採用すべきパターンとして「掘った道が敵の侵攻経路になる空間結合」「バリケードの二重機能（移動＋射線遮断）」「敵スポーンの2段階空間分散（重複除外＋距離優先）」「複数の危険度ヒント同居時は発火頻度の横並び比較が必須」を確定。次サイクルへの提案として、7サイクル連続で未実施のブラウザAIP実プレイの実施と、7 Days to Dieの核である昼夜サイクル/波状の防衛圧力を012の前線拠点システムに追加する新規プロトタイプ（013-*）を挙げた。specs/012のステータスを更新、games/README.mdの索引を更新し、routine-state.mdをサイクル19・run1へ進めた | (本PR) |
 | 2026-08-31 | 19 | 1（BUILD+REVIEW） | cycle18-finalの提案(2)に従い、012の横方向帯状フィールド・前線拠点システムに昼夜サイクル/波状の防衛圧力を追加した013-flagship-nightwatchを新規実装（CLAUDE.mdの「1ゲーム=1要素」原則から意図的に外れる組み合わせ試作）。012をベースに、`phase`(day/night)・`phaseTicksLeft`によるフェーズ遷移、ホーム/前線拠点それぞれに独立したHP（`Base`型）を新規追加し、夜フェーズでは既に掘削済みの全FLOORタイルから拠点まで直進する「レイダー」（`isRaider`フラグ付きEnemy）を一括スポーンさせ拠点圏内へ侵入・拠点HPを削れるようにした（012までの`inBaseRadius`即時無敵を夜間レイダーのみ対象外化）。新規危険度ヒント`raidRiskLevel`も追加。10シード×2戦略のヘッドレスシミュレーションで**cautious/pusherとも生存率0%**、cautiousは全10シードが新規敗北条件「ホーム破壊」で終了という重大な結果を検出し、コード調査で3件のバグに原因を特定した：致命#1「夜間レイダーが昼になっても消滅・撤退せず複数夜にまたがり拠点を削り続ける」（`stepEnemies`の生存フィルタがフェーズ判定を持たない）、重大#2「拠点内ではショップ購入が迎撃より常に優先され隣接脅威があっても迎撃されない」（`Bot.decide()`のショップ優先度ループが先に関数を抜ける）、重大#3「cautious戦略はバリケード建設条件（交戦距離3以上）に交戦距離2の設定では到達できず構造的に一度もバリケードを建てない」（012では拠点が無条件安全だったため問題化しなかった前提が013で崩れた）。P02の擬似実プレイでは1回目の夜でホームHPが400→390まで実際に削れることを確認しコア機構自体は動作していると判定。npm run build / npm run simulateとも正常終了。reviews/013-flagship-nightwatch-v1.md作成、判定FIX（コアループ・昼夜遷移に構造的欠陥はなく、原因を特定できた修正可能なバランス/ロジックバグ）。games/README.mdの索引を更新し、routine-state.mdをサイクル19・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-09-01 | 19 | 2（FIX+REVIEW） | v1致命バグ#1・重大バグ#2・重大バグ#3の3件すべてに対応。#1: `src/core/game.ts`の`step()`で夜→昼フェーズ遷移時に`this.enemies = this.enemies.filter((e) => !e.isRaider)`を追加し、夜明けに残存レイダーを撤退（消滅）させるようにした。#2: `headless/simulate.ts`の`Bot.decide()`の`inBaseRadius`分岐を並べ替え、夜間・脅威が見えている間はショップ購入より先に攻撃/接近/バリケード建設を評価するようにした。#3: 拠点圏内・夜間・脅威dist≧2の場合はバリケード建設を交戦距離設定（`engageRange`）の制約から切り離し、cautious（engageRange=2）でも構造的にバリケードを建てられるようにした。10シード×2戦略の同一比較（v1と同一seed・maxTicks）でcautiousのavgBarricadesBuilt 0.0→3.7（バグ#3解消で初めて非ゼロに）、avgBaseDamageTaken 524.2→459.4（-12%）、homeDestroyed 10/10→8/10と改善。擬似実プレイ（P02, seed302, engageRange=2・撤退HP閾値45%）ではv1でtick4298に死亡していたのに対し、v2では同一seed・同一設定でmaxTicks(20000)いっぱいまで生存し続け（夜11回生存、前線拠点2〜3を維持）、**「複数夜にまたがる累積ダメージによるホーム陥落」というv1の主要懸念が解消したことを直接確認**した。一方でヘッドレスの機械的cautious/pusher戦略は改善しつつも依然高いhomeDestroyed率を示し、原因を新規バグ#5「`headless/simulate.ts`のHP危険域判定が戦略非依存の固定25%になっている（擬似実プレイ用ペルソナはP01=15%・P02=45%と差別化されているのに2戦略ボットは差別化されていない）」と特定し、v2必須項目には含まれないため次回へ持ち越した。npm run build / npm run simulateとも正常終了。reviews/013-flagship-nightwatch-v2.md作成、判定FIX。games/README.mdの索引を更新し、routine-state.mdをサイクル19・run3（FIX only）へ進めた | (本PR) |
+| 2026-09-01 | 19 | 3（FIX only） | v2バグ#5（`headless/simulate.ts`のHP危険域判定が戦略に関わらず固定25%）に対応。`HP_RETREAT_THRESHOLD`（戦略別のHP危険域閾値）を新設し、cautious=0.30・pusher=0.25（従来値のまま）へ差別化した。ゲーム本体（`src/core/game.ts`）は無変更。0.25→0.40まで複数の値を10シード比較で試したところ、cautiousの閾値を上げるほど単調に改善するわけではなく（0.30ではhomeDestroyed 8/10→7/10・avgBaseDamageTaken 459→425(-7%)と改善したが、0.35/0.40はいずれも10/10へ悪化）、実測で最も安定して改善した0.30を採用した。pusherを0.25→0.20へ下げる案も試したが、homeDestroyed 4/10→1/10へ改善する一方でhpDeathsが9/10へ急増しavgKills・avgBaseDamageTaken等の他指標が軒並み悪化する裏目に出たためrevertし、pusherは従来値のまま据え置いた。追加の11〜20シードでも同傾向（cautious homeDestroyed 7/10、pusher homeDestroyed 2/10・avgBaseDamageTaken 220.7、pusherは1シードで初勝利も観測）を確認し10シードの偶然でないことを確認した。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3 FIX内容」節を追記、package.jsonのversionを0.2.1へ、games/README.mdの索引を更新した。閾値と拠点防衛成功率の非線形な関係の根本原因は未解明のままLearningsとして次回（FINAL REVIEW）へ持ち越す。routine-state.mdをサイクル19・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
