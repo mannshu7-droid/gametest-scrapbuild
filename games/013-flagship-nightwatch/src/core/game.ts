@@ -1157,6 +1157,10 @@ export class Game {
         this.phase = 'day';
         this.phaseTicksLeft = DAY_LENGTH;
         this.metrics.nightsSurvived++;
+        // v2 FIX（v1バグ#1）: 夜が明けても倒し損ねたレイダーが消滅せず拠点に張り付き続け、
+        // 複数夜にまたがる累積ダメージでホームが陥落していた。「昼=安全」という設計意図を
+        // 成立させるため、日の出とともに残存レイダーは撤退（消滅）させる
+        this.enemies = this.enemies.filter((e) => !e.isRaider);
       }
     }
     this.regenBasesForDay();
