@@ -148,20 +148,28 @@ class Bot {
     const nearest = nearestEnemy(s);
 
     if (inBaseRadius(s)) {
+      if (s.phase === 'night' && nearest) {
+        // 夜間・拠点内: 侵入したレイダーがいれば、購入より迎撃を優先する（v2 FIX バグ#2）。
+        // v1では拠点内でショップ購入が常に迎撃より優先され、隣接脅威があっても素通りしていた
+        if (nearest.dist <= 1) return { type: 'attack' };
+        if (nearest.dist <= 3) {
+          const dir = stepToward(s, nearest.enemy.x, nearest.enemy.y);
+          if (canAdvance(s, dir)) return { type: 'move', dir };
+        }
+        // v2 FIX バグ#3: cautiousの交戦距離(2)では従来の「dist>=3でバリケード」判定に
+        // 到達できず、cautiousは一度もバリケードを建てられなかった。拠点圏内は交戦距離の
+        // 制約を外し、脅威が見えている限りバリケードで迎撃を補助できるようにする
+        if (nearest.dist >= 2 && s.player.money >= s.player.buildCosts.barricade * 2) {
+          const dir = stepToward(s, nearest.enemy.x, nearest.enemy.y);
+          return { type: 'build', target: 'barricade', dir };
+        }
+      }
       const priority = this.strategy === 'pusher' ? PUSHER_PRIORITY : CAUTIOUS_PRIORITY;
       for (const id of priority) {
         const price = s.player.shopPrices[id];
         if (price !== null && s.player.money >= price) return { type: 'buy', item: id };
       }
-      if (s.phase === 'night') {
-        // 夜間・拠点内: 侵入したレイダーを迎撃する（013固有）
-        if (nearest && nearest.dist <= 1) return { type: 'attack' };
-        if (nearest && nearest.dist <= 3) {
-          const dir = stepToward(s, nearest.enemy.x, nearest.enemy.y);
-          if (canAdvance(s, dir)) return { type: 'move', dir };
-        }
-        return { type: 'wait' };
-      }
+      if (s.phase === 'night') return { type: 'wait' };
       return { type: 'move', dir: 'right' };
     }
 
