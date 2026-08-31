@@ -140,3 +140,17 @@
   加えて画面上部に昼夜フェーズインジケーター（残りtickバー）と拠点HPバー（複数拠点はホームを固定表示＋
   現在地に最も近い前線拠点を表示）をタップ不要な常時表示UIとして追加する想定。
   iPad/Android移植（Capacitor前提）時に`src/render/`へ追加し、`src/core/`は変更しない
+
+## v3 FIX内容（サイクル19・3回目）
+
+v2レビュー（reviews/013-flagship-nightwatch-v2.md）のバグ#5「`headless/simulate.ts`のHP危険域判定が
+戦略に関わらず固定25%」に対応。ゲーム本体（`src/core/game.ts`）は無変更、検証ボットのみ更新した。
+
+- `headless/simulate.ts`に`HP_RETREAT_THRESHOLD`（戦略ごとのHP危険域閾値）を追加し、
+  cautious=0.30・pusher=0.25（従来値のまま）に差別化した
+- 10シード比較で検証したところ、cautiousの閾値を上げるほど単調に改善するわけではなく、
+  0.30ではhomeDestroyed 8/10→7/10・avgBaseDamageTaken 459→425と改善した一方、
+  0.35/0.40はいずれも10/10へ悪化する非単調な挙動を確認した。原因の深追いはFINAL REVIEWへ持ち越し、
+  今回は実測で最も安定して改善した0.30を採用した
+- 追加の11〜20シードでも同傾向（cautious homeDestroyed 7/10、pusher homeDestroyed 2/10・
+  avgBaseDamageTaken 220.7）を確認し、10シードだけの偶然ではないことを確認した

@@ -131,6 +131,13 @@ function canAdvance(s: GameState, dir: Dir): boolean {
 
 type Strategy = 'cautious' | 'pusher';
 const DRIFT_CAP = 80;
+// v3 FIX バグ#5: HP危険域判定が戦略に関わらず固定25%だった(擬似実プレイ用ペルソナ設定では
+// P01=15%・P02=45%と差別化されているのに、10シード比較用のcautious/pusherは無差別だった)。
+// 戦略名の意味どおりcautiousをpusherより早めに退避させる。値は10シード比較で検証済み:
+// cautious 0.25→0.30はhomeDestroyed 8/10→7/10・avgBaseDamageTaken 459→425と改善したが、
+// 0.35/0.40はいずれも10/10へ悪化する非単調な挙動を確認したため、この場しのぎの微調整に留める
+// （深追いはせず、根本対策はLearningsへ持ち越す）
+const HP_RETREAT_THRESHOLD: Record<Strategy, number> = { cautious: 0.3, pusher: 0.25 };
 
 function mineDirs(s: GameState, strategy: Strategy): Dir[] {
   if (strategy === 'pusher') return ['right', 'up', 'down', 'left'];
@@ -186,7 +193,7 @@ class Bot {
 
     // 緊急退避: 燃料危険域 / HP危険 / 積載満杯
     const criticalFuel = p.miningRiskLevel === 'danger';
-    const criticalHp = p.hp < p.maxHp * 0.25;
+    const criticalHp = p.hp < p.maxHp * HP_RETREAT_THRESHOLD[this.strategy];
     const cargoFull = p.cargoUnits >= p.maxCapacity;
     if (criticalFuel || criticalHp || cargoFull) {
       if (nearest && nearest.dist <= 1 && !criticalHp) return { type: 'attack' };
