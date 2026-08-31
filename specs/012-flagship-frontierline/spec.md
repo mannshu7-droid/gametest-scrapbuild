@@ -1,7 +1,7 @@
 # 仕様書: 012-flagship-frontierline
 
 - 作成日: 2026-08-30
-- ステータス: PLAYABLE（v1完了、致命バグ#1は[reviews/012-flagship-frontierline-v1.md](../../reviews/012-flagship-frontierline-v1.md)参照）
+- ステータス: サイクル完了（総括済み）。判定FIX、詳細は[reviews/012-flagship-frontierline-final.md](../../reviews/012-flagship-frontierline-final.md)参照
 - 元になったレビュー: [reviews/011-mining-driftline-final.md](../../reviews/011-mining-driftline-final.md)
 
 ## 逸脱の明記（重要）
