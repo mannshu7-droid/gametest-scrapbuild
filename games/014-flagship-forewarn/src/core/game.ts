@@ -86,6 +86,14 @@ const RAID_MAX_COUNT = 12;
 /** raidRiskLevelのcaution/danger境界（拠点からの距離） */
 const RAID_CAUTION_DIST = 15;
 const RAID_NIGHT_ATK_MULT = 0.08;
+/**
+ * 拠点の自動迎撃（014 v2 FIX、v1バグ#2対応）。拠点圏内のレイダーへ毎tickごく少量のダメージを与える。
+ * 「safe予告＝完全放置してよい」わけではないのに、1体のレイダーに丸一晩張り付かれるとプレイヤー
+ * 不在のまま拠点が一方的に全損しうる問題（Learnings案(b)）への対応。プレイヤー自身の迎撃
+ * （atk18〜、attack毎5tick）に比べ十分弱く「不在でも即詰みにはならない下限」に留め、
+ * 複数拠点の同時被弾時に「どの拠点を見捨てるか」という013由来のコアファン仮説は壊さない
+ */
+const BASE_AUTO_DEFENSE_DMG = 3;
 
 // ---- 拠点ごとの脅威予告(baseForecasts、014新規): 昼のうちに「今夜どの拠点が危ないか」を伝える ----
 // spawnRaidWaveと同じ候補抽出・重み付け・最寄り拠点割り当てロジックを乱数を消費せずに再現し、
@@ -812,6 +820,18 @@ export class Game {
     }
   }
 
+  /** 拠点圏内のレイダーへ毎tick少量のダメージを与える（v2 FIX、上記BASE_AUTO_DEFENSE_DMG参照） */
+  private applyBaseAutoDefense(): void {
+    for (const base of this.allBases()) {
+      for (const e of this.enemies) {
+        if (!e.isRaider || Math.abs(e.x - base.x) > this.radiusFor(base)) continue;
+        e.hp -= BASE_AUTO_DEFENSE_DMG;
+        if (e.hp <= 0) this.killEnemy(e);
+      }
+    }
+    this.enemies = this.enemies.filter((e) => e.hp > 0);
+  }
+
   private killEnemy(e: Enemy): void {
     this.metrics.kills++;
     if (e.isRaider) this.metrics.raidersKilled++;
@@ -1337,6 +1357,7 @@ export class Game {
     if (!this.over) {
       if (this.phase === 'day') this.spawnEnemies();
       this.stepEnemies();
+      this.applyBaseAutoDefense();
       this.updateRiskTracking();
       if (!this.over && this.player.hp <= 0) {
         this.over = true;
