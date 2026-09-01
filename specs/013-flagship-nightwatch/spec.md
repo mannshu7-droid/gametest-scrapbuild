@@ -1,7 +1,7 @@
 # 仕様書: 013-flagship-nightwatch
 
 - 作成日: 2026-08-31
-- ステータス: PLAYABLE（v1レビュー完了、判定FIX: [reviews/013-flagship-nightwatch-v1.md](../../reviews/013-flagship-nightwatch-v1.md)）
+- ステータス: サイクル完了（総括済み、判定FIX: [reviews/013-flagship-nightwatch-final.md](../../reviews/013-flagship-nightwatch-final.md)）
 - 元になったレビュー: [reviews/012-flagship-frontierline-final.md](../../reviews/012-flagship-frontierline-final.md)
 
 ## 逸脱の明記（重要）
