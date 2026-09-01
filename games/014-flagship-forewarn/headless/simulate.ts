@@ -148,23 +148,41 @@ function canAdvance(s: GameState, dir: Dir): boolean {
   return canDig(s, nx, ny);
 }
 
-type Strategy = 'cautious' | 'pusher';
+// p01/p02は擬似実プレイ（personas/p01-yabou.md, p02-aki.md）用のペルソナ再現戦略（014 v3 FIX）。
+// v1/v2レビューではレビュー実施ごとに一時スクリプトへ手で再構築し、レビュー後に削除していたが、
+// v2レビューのLearnings「一時検証スクリプトを削除する運用は再現性の観点でトレードオフがある」
+// （v1のP01(seed301)とv2のP01(seed301)で夜フェーズ到達の有無が食い違った）を受け、恒久的な
+// CLIオプションとしてこのファイルに統合し、以後のレビューは`--strategies p01,p02`で
+// 同一パラメータのボットを毎回確実に再現できるようにした。デフォルトの戦略一覧
+// （cautious/pusher）は10シード比較の既存ベースラインを崩さないよう変更していない
+type Strategy = 'cautious' | 'pusher' | 'p01' | 'p02';
+const ALL_STRATEGIES: Strategy[] = ['cautious', 'pusher', 'p01', 'p02'];
 const DRIFT_CAP = 80;
 // v3 FIX バグ#5: HP危険域判定が戦略に関わらず固定25%だった(擬似実プレイ用ペルソナ設定では
 // P01=15%・P02=45%と差別化されているのに、10シード比較用のcautious/pusherは無差別だった)。
 // 戦略名の意味どおりcautiousをpusherより早めに退避させる。値は10シード比較で検証済み:
 // cautious 0.25→0.30はhomeDestroyed 8/10→7/10・avgBaseDamageTaken 459→425と改善したが、
 // 0.35/0.40はいずれも10/10へ悪化する非単調な挙動を確認したため、この場しのぎの微調整に留める
-// （深追いはせず、根本対策はLearningsへ持ち越す）
-const HP_RETREAT_THRESHOLD: Record<Strategy, number> = { cautious: 0.3, pusher: 0.25 };
+// （深追いはせず、根本対策はLearningsへ持ち越す）。p01/p02はv1/v2レビュー記載の値
+// （P01=交戦距離6・撤退HP閾値15%、P02=交戦距離2・撤退HP閾値45%）をそのまま踏襲する
+const HP_RETREAT_THRESHOLD: Record<Strategy, number> = { cautious: 0.3, pusher: 0.25, p01: 0.15, p02: 0.45 };
+/** 交戦域（隣接超の敵をどこまで追って戦うか）。cautious/pusherは従来のswitch式を維持し、p01/p02はレビュー記載値を使う */
+const ENGAGE_RANGE: Record<Strategy, number> = { cautious: 2, pusher: 5, p01: 6, p02: 2 };
+/** 前線拠点の建設余力（購入コストの何倍の所持金があれば建てるか） */
+const OUTPOST_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.6, pusher: 1.2, p01: 1.2, p02: 1.6 };
 
 function mineDirs(s: GameState, strategy: Strategy): Dir[] {
-  if (strategy === 'pusher') return ['right', 'up', 'down', 'left'];
+  if (strategy === 'pusher' || strategy === 'p01') return ['right', 'up', 'down', 'left'];
   return s.player.x < DRIFT_CAP ? ['right', 'up', 'down', 'left'] : ['up', 'down', 'left'];
 }
 
 const PUSHER_PRIORITY: ShopItemId[] = ['drill', 'fuel', 'offense', 'vitality', 'capacity', 'digspeed', 'mobility', 'hazardresist', 'lantern', 'teleport'];
 const CAUTIOUS_PRIORITY: ShopItemId[] = ['vitality', 'fuel', 'hazardresist', 'capacity', 'offense', 'drill', 'digspeed', 'lantern', 'mobility', 'teleport'];
+/** p01（野望型・積み上げ効率マニア）: 効率投資を好みpusherと同傾向のためPUSHER_PRIORITYを流用 */
+/** p02（あき型）: 慎重寄りでcautiousと同傾向のためCAUTIOUS_PRIORITYを流用 */
+function shopPriorityFor(strategy: Strategy): ShopItemId[] {
+  return strategy === 'pusher' || strategy === 'p01' ? PUSHER_PRIORITY : CAUTIOUS_PRIORITY;
+}
 
 class Bot {
   constructor(private strategy: Strategy) {}
@@ -190,7 +208,7 @@ class Bot {
           return { type: 'build', target: 'barricade', dir };
         }
       }
-      const priority = this.strategy === 'pusher' ? PUSHER_PRIORITY : CAUTIOUS_PRIORITY;
+      const priority = shopPriorityFor(this.strategy);
       for (const id of priority) {
         const price = s.player.shopPrices[id];
         if (price !== null && s.player.money >= price) return { type: 'buy', item: id };
@@ -245,7 +263,7 @@ class Bot {
     }
 
     // 前線拠点の建設（保護範囲を恒久的に広げる、008パターン#7）
-    const outpostBudget = this.strategy === 'pusher' ? 1.2 : 1.6;
+    const outpostBudget = OUTPOST_BUDGET_MULT[this.strategy];
     if (p.canBuildOutpost && p.money >= p.buildCosts.outpost * outpostBudget) {
       return { type: 'build', target: 'outpost' };
     }
@@ -253,7 +271,7 @@ class Bot {
     // 戦闘: 隣接なら応戦、近ければ交戦域(戦略で射程が違う)
     if (nearest) {
       if (nearest.dist <= 1) return { type: 'attack' };
-      const engageRange = this.strategy === 'pusher' ? 5 : 2;
+      const engageRange = ENGAGE_RANGE[this.strategy];
       if (nearest.dist <= engageRange) {
         const towardDir = stepToward(s, nearest.enemy.x, nearest.enemy.y);
         // archer等の遠距離敵が距離を維持して撃ち続けてくる場合、通常移動では追いつけないので
@@ -382,9 +400,15 @@ function argVal(name: string): string | undefined {
 }
 const seeds = (argVal('seeds') ?? '1,2,3,4,5').split(',').map(Number);
 const maxTicks = Number(argVal('maxTicks') ?? 20000);
+// --strategies p01,p02 のように指定すると、擬似実プレイのペルソナ再現ボットを直接
+// ヘッドライン実行できる（デフォルトはこれまで通りcautious/pusherの2種のみ）
+const strategiesArg = argVal('strategies');
+const strategies: Strategy[] = strategiesArg
+  ? (strategiesArg.split(',') as Strategy[]).filter((s) => ALL_STRATEGIES.includes(s))
+  : ['cautious', 'pusher'];
 
-console.log(`# Nightwatch headless simulation (field ${FIELD_WIDTH}x${LANE_COUNT}, maxTicks=${maxTicks})`);
-for (const strategy of ['cautious', 'pusher'] as Strategy[]) {
+console.log(`# Forewarn headless simulation (field ${FIELD_WIDTH}x${LANE_COUNT}, maxTicks=${maxTicks})`);
+for (const strategy of strategies) {
   const results: RunResult[] = [];
   for (const seed of seeds) {
     const r = runOne(seed, strategy, maxTicks);

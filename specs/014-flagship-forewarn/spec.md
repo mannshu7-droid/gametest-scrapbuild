@@ -152,3 +152,28 @@ v1レビュー（reviews/014-flagship-forewarn-v1.md）の重大バグ#2「`fore
 - v1バグ#2の再現手順そのもの（P02設定ボットでseed302/312をmaxTicks延長して実行し、拠点圏内に
   居座るレイダーの挙動と拠点HP推移を追跡）で再検証し、両シードともhomeDestroyedによる敗北が
   解消したことを確認した（詳細はreviews/014-flagship-forewarn-v2.md参照）
+
+## v3 FIX内容（サイクル20・3回目、レビューなし）
+
+v2レビュー（reviews/014-flagship-forewarn-v2.md）のバグ#3（P01ペルソナとコア機構の構造的
+ミスマッチ）は013-finalで判定済みの既知課題のため対応不要と判断した。v2で残った軽微な観察事項は
+ほかに無かったため、Learningsに記載された運用上の課題「一時検証スクリプトを削除する運用は
+再現性の観点でトレードオフがある（v1と同一パラメータのはずのP01(seed301)が、v1では夜フェーズ前
+tick631決着、v2では再構築の行動系列差でtick9347まで延びた）」への対応を軽微な改善として実施した。
+
+- `games/014-flagship-forewarn/headless/simulate.ts`に、擬似実プレイのペルソナ（P01=交戦距離6・
+  撤退HP閾値15%、P02=交戦距離2・撤退HP閾値45%、いずれもv1/v2レビュー記載値）を再現する
+  戦略`p01`/`p02`を恒久的なCLIオプションとして追加した（`--strategies p01,p02`）。ショップ優先度は
+  P01を効率志向のPUSHER_PRIORITY、P02を慎重志向のCAUTIOUS_PRIORITYに割り当てた（レビューに
+  明記されていないため今回新たに採用した仮定）
+  - 既存の`cautious`/`pusher`のデフォルト挙動・数値は変更していない（`--strategies`省略時は
+    従来通りcautious/pusherのみを実行する）ことを10シード比較で確認し、v2レビューの数値
+    （avgScore/avgBaseDamageTaken等）と完全一致することを確認した
+- 効果検証として`--strategies p01,p02 --seeds 301,311,302,312 --maxTicks 30000`を実行したところ、
+  seed302のp02がtick25088・nightsSurvived14・loseReason=playerHp・baseDamageTaken515という
+  v2レビューの表（P02 seed302行）と完全に一致する結果を再現できた。一方seed301のp01は本実装では
+  tick631で決着し、これはv2レビューが報告した再構築後の結果（tick9347）ではなくv1オリジナルの
+  結果（tick631）と一致した——今回の恒久化により、今後は同一パラメータのボットが常に同一の
+  行動系列を再現できるようになったことの直接的な裏付けと言える
+- ゲーム本体（`src/core/game.ts`）は無変更。合わせて`simulate.ts`のコンソール出力見出しが
+  013からのコピー時に残っていた`Nightwatch`表記のままだったのを`Forewarn`へ修正した（軽微）
