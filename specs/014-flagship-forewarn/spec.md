@@ -137,3 +137,18 @@
   加えて、拠点ごとの脅威予告は画面上部の拠点HPバー付近に小さなアイコン（safe/caution/danger）を
   タップ不要な常時表示UIとして追加する想定。iPad/Android移植（Capacitor前提）時に`src/render/`へ
   追加し、`src/core/`は変更しない
+
+## v2 FIX内容（サイクル20・2回目）
+
+v1レビュー（reviews/014-flagship-forewarn-v1.md）の重大バグ#2「`forecastRiskLevel`がsafeの拠点でも、
+1体のレイダーに丸一晩張り付かれると拠点は全損しうる」に対応した。Learningsの対応候補(a)(b)(c)のうち
+(b)「拠点に軽度の自動迎撃を持たせ、プレイヤー不在でも即詰みにはならない下限を作る」を採用した。
+
+- `games/014-flagship-forewarn/src/core/game.ts`に`BASE_AUTO_DEFENSE_DMG`（=3）を追加し、
+  毎tick・全拠点圏内のレイダー全員へ少量ダメージを与える`applyBaseAutoDefense()`を新設した
+  （`stepEnemies()`の直後、`updateRiskTracking()`の直前に呼び出す）
+- プレイヤー自身の迎撃（atk18〜、5tickごとに攻撃可）より十分弱く設定し、複数拠点の同時被弾時に
+  「どの拠点を優先して備えるか」という013由来のコアファン仮説（bug#2のレビューでも言及）は壊さない
+- v1バグ#2の再現手順そのもの（P02設定ボットでseed302/312をmaxTicks延長して実行し、拠点圏内に
+  居座るレイダーの挙動と拠点HP推移を追跡）で再検証し、両シードともhomeDestroyedによる敗北が
+  解消したことを確認した（詳細はreviews/014-flagship-forewarn-v2.md参照）

@@ -10,13 +10,18 @@
   拠点HPシステムに、次の夜の脅威規模を昼のうちに知らせる新規危険度ヒント`baseForecasts`
   （拠点ごとの推定被弾リスク）を追加した
 - 対象ゲーム番号: **014-flagship-forewarn**（サイクル20・1回目で決定・実装済み）
-- 次に行う回: **2回目（FIX＋REVIEW）**
-- サイクル20・1回目（reviews/014-flagship-forewarn-v1.md）で発見した最優先事項:
-  **重大バグ#2「forecastRiskLevel=safeの拠点でも1体のレイダーに丸一晩張り付かれると全損しうる」**
-  （seed302, nights5, tick9700〜10030で再現。ホームが`safe`予告のまま400→-20で陥落）。
-  Learningsに記載した対応候補（(a)期待レイダー数が1以上ならsafeにしない、(b)拠点に軽度の
-  自動迎撃を持たせる、(c)ボットに複数拠点巡回ロジックを追加する）から優先度をつけて着手すること
-- **【最優先・10サイクル連続の技術的負債】ブラウザAIP実プレイが012final〜014v1を含め
+- 次に行う回: **3回目（FIX only）**
+- サイクル20・2回目（reviews/014-flagship-forewarn-v2.md）でv1重大バグ#2
+  「forecastRiskLevel=safeの拠点でも1体のレイダーに丸一晩張り付かれると全損しうる」に対応した。
+  拠点圏内のレイダーへ毎tick少量ダメージを与える**拠点自動迎撃**（`applyBaseAutoDefense`、
+  `BASE_AUTO_DEFENSE_DMG=3`）を新設し、10シード比較でhomeDestroyedを両戦略とも実質ゼロに
+  （cautious 9/10→0/10、pusher 4/10→0/10）、バグ#2の再現手順そのものでも同じ状況からの
+  拠点全損が再発しないことを確認した。3回目（FIX only）では、v2レビューのLearningsに記載した
+  「一時検証スクリプトを削除する運用のトレードオフ（再現性）」への対応要否や、v2で残った
+  軽微な観察事項（該当があれば）を確認し、なければ他の軽微な改善を検討すること。バグ#3
+  （P01ペルソナと夜間コア機構の構造的ミスマッチ）は013-finalで判定済みの既知課題のため
+  対応不要
+- **【最優先・10サイクル連続の技術的負債】ブラウザAIP実プレイが012final〜014v2を含め
   直近10サイクル連続で未実施（無人スケジュール実行のため）。人間の対話セッションでこのリポジトリを
   扱う機会があれば最優先で実施すること**
 
@@ -556,6 +561,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-01 | 19 | 3（FIX only） | v2バグ#5（`headless/simulate.ts`のHP危険域判定が戦略に関わらず固定25%）に対応。`HP_RETREAT_THRESHOLD`（戦略別のHP危険域閾値）を新設し、cautious=0.30・pusher=0.25（従来値のまま）へ差別化した。ゲーム本体（`src/core/game.ts`）は無変更。0.25→0.40まで複数の値を10シード比較で試したところ、cautiousの閾値を上げるほど単調に改善するわけではなく（0.30ではhomeDestroyed 8/10→7/10・avgBaseDamageTaken 459→425(-7%)と改善したが、0.35/0.40はいずれも10/10へ悪化）、実測で最も安定して改善した0.30を採用した。pusherを0.25→0.20へ下げる案も試したが、homeDestroyed 4/10→1/10へ改善する一方でhpDeathsが9/10へ急増しavgKills・avgBaseDamageTaken等の他指標が軒並み悪化する裏目に出たためrevertし、pusherは従来値のまま据え置いた。追加の11〜20シードでも同傾向（cautious homeDestroyed 7/10、pusher homeDestroyed 2/10・avgBaseDamageTaken 220.7、pusherは1シードで初勝利も観測）を確認し10シードの偶然でないことを確認した。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3 FIX内容」節を追記、package.jsonのversionを0.2.1へ、games/README.mdの索引を更新した。閾値と拠点防衛成功率の非線形な関係の根本原因は未解明のままLearningsとして次回（FINAL REVIEW）へ持ち越す。routine-state.mdをサイクル19・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-09-01 | 19 | 4（FINAL REVIEW） | 013-flagship-nightwatchの総括レビュー（reviews/013-flagship-nightwatch-final.md）を作成。擬似実プレイのmaxTicksを60000へ延長し新規シード（311/312）を追加した結果、コアファン仮説後半「今夜どの拠点を見捨てるか」がseed312（前線拠点は守れたがホームが単一の夜(tick10000〜10159)で153→-3まで陥落）で初めて実際の敗北を伴って再現された。P02(seed302)は7回の夜すべてbaseDamageTaken=0という完璧な防衛も達成し、拠点防衛が理不尽な強弱の両極端でないことを実証した。一方P01は2セッション（seed301/311）とも夜フェーズ到達前（tick631/804）に前線戦闘で決着し、013の新規要素を一度も検証できなかった。これはP01のペルソナ特性（E3「軽い緊張を好む」、N16「重い恒久ロストは過剰」）と013のコア機構（ホーム陥落=恒久敗北）の構造的ミスマッチと判定し、SCRAP相当ではなく「このペルソナには相性が合わない要素」として記録した。判定はFIX。次サイクルへの提案として、（1）9サイクル連続で未実施のブラウザAIP実プレイの実施、（2）拠点防衛の予告システム（次の夜の脅威規模を昼のうちに知らせる新規危険度ヒント）を追加する014-flagship-*を挙げた。games/README.mdの索引を更新し、routine-state.mdをサイクル20・run1へ進めた（本行は実行履歴テーブルへの追記漏れを本PRで遡って補完した） | (#77) |
 | 2026-09-01 | 20 | 1（BUILD+REVIEW） | cycle19-finalの提案(2)に従い、013の昼夜サイクル・拠点HPシステムに、次の夜の脅威規模を昼のうちに知らせる新規危険度ヒント`baseForecasts`（拠点ごとの推定被弾リスク）を追加した014-flagship-forewarnを新規実装（CLAUDE.mdの「1ゲーム=1要素」原則から意図的に外れる組み合わせ試作）。013を土台に、`spawnRaidWave`が夜フェーズ開始時に実際に行う候補抽出・重み付け・最寄り拠点への配分ロジックを乱数を消費せず期待値として先読みする`computeBaseForecasts`を新規実装し、拠点ごとのsafe/caution/dangerを`forecastRiskLevel`/`baseForecasts`として公開した。実装中、序盤（掘削済みタイルがまだ拠点から十分離れていない段階）に実際は0体しか湧かない`spawnRaidWave`と矛盾して`caution`を返す不整合を一時トレーススクリプトで発見・その場で修正した（`totalWeight===0`時は期待レイダー数0とする）。`headless/simulate.ts`のボットに「夜が近づいたら予告最悪の拠点へ先回りしバリケードを増設する」ロジックを追加し、予告なし版との10シード比較診断（一時スクリプト、レビュー後削除）でavgScore・avgNightsSurvivedの明確な改善（cautious+39%/+48%、pusher+43%/+72%）を確認した。一方P02の擬似実プレイ（seed302, nights5）で**重大バグ#2「forecastRiskLevel=safeの拠点でも1体のレイダーに丸一晩張り付かれると全損しうる」**（`brute`1体がホーム(x=0)に居座り、プレイヤーが`danger`予告の前線拠点へ全振りしている間にホームHPが400→-20まで一方的に削られ敗北）を発見した。P01は013-finalと同様2セッションとも夜フェーズ到達前(tick631/811)に決着し新機能を検証できなかった（routine-state.md指示通り別枠評価）。npm run build / npm run simulateとも正常終了。reviews/014-flagship-forewarn-v1.md作成、判定FIX（コアファン仮説前半は成立、バグ#2はv2で最優先修正）。games/README.mdの索引を更新し、routine-state.mdをサイクル20・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-09-02 | 20 | 2（FIX+REVIEW） | v1重大バグ#2（`forecastRiskLevel=safe`の拠点でも1体のレイダーに丸一晩張り付かれると全損しうる）に対応。v1 Learningsの対応候補(a)(b)(c)のうち**(b)拠点に軽度の自動迎撃を持たせる**を採用し、`games/014-flagship-forewarn/src/core/game.ts`に`BASE_AUTO_DEFENSE_DMG`（=3、プレイヤー自身の迎撃atk18〜より十分弱い値）を追加、毎tick・全拠点圏内のレイダー全員へ少量ダメージを与える`applyBaseAutoDefense()`を新設して`stepEnemies()`直後に呼び出すようにした。10シード×2戦略の同一比較（v1と同一seed・maxTicks）でhomeDestroyedが両戦略とも実質消滅（cautious 9/10→0/10、pusher 4/10→0/10）、avgBaseDamageTakenも大幅改善（cautious -36.4%、pusher -52.3%）、avgScore・avgNightsSurvivedもいずれも改善方向に動いたことを確認した。さらにv1バグ#2の再現手順そのもの（P02設定ボットでseed302/312をmaxTicks延長して実行し、拠点圏内に居座るレイダーの挙動と拠点HP推移をtick単位で追跡する一時トレーススクリプト、検証後削除済み）で再検証し、両シードとも同じ状況からのhomeDestroyedが再発しないことを直接確認した（seed302: nightsSurvived5→14、loseReasonがhomeDestroyedからplayerHpへ変化。seed312: nightsSurvived6→17、maxTicks(30000)まで一度も敗北せず）。P01（交戦距離6・撤退HP閾値15%）は一時再構築した検証ボットでseed301が今回は夜フェーズへ到達したが、これはボット再構築による行動系列の違いが主因でありv2修正そのものの効果ではないと明記した。npm run build / npm run simulateとも正常終了。reviews/014-flagship-forewarn-v2.md作成、判定FIX。spec.mdに「v2 FIX内容」節を追記、package.jsonのversionを0.2.0へ、games/README.mdの索引を更新した。残るバグ#3（P01ペルソナと夜間コア機構の構造的ミスマッチ）は013-finalで既に判定済みの既知課題のため対応せず、routine-state.mdをサイクル20・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
