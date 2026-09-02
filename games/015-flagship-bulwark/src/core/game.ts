@@ -629,6 +629,14 @@ export class Game {
     const bases = this.allBases();
     const raidCount = Math.min(RAID_MAX_COUNT, RAID_BASE_COUNT + Math.floor(this.metrics.nightsSurvived / RAID_PER_NIGHT_DIV));
     const zoneWeight = new Map<number, number>(bases.map((b) => [b.x, 0]));
+    // v3 FIX バグ#6: 予告のband係数(mult)には拠点自身の座標のband(常にhomeなら0)を使っていたが、
+    // 実際にspawnRaidWaveが個々のレイダーへ与えるband係数は、そのレイダーの湧いたタイル
+    // (picked.x、拠点から10マス以上離れた掘削済みの地）のbandを使う。特にhome拠点(x=0)は
+    // どれだけ深く掘り進めても拠点自身のband常に0のままなので、この不一致により
+    // 「深く掘るほど強くなるレイダー」の実際の脅威をhome予告が一貫して過小評価していた
+    // （outpostは湧き元と近いため誤差は小さい）。zoneWeightと同じ重み付けで湧き元タイルの
+    // band加重平均を求め、拠点自身のbandの代わりに使うことでspawnRaidWaveの期待値と一致させる
+    const zoneBandWeight = new Map<number, number>(bases.map((b) => [b.x, 0]));
     let totalWeight = 0;
     for (let x = 0; x <= FIELD_WIDTH; x++) {
       if (bases.some((b) => Math.abs(x - b.x) < RAID_MIN_SPAWN_DIST)) continue;
@@ -637,7 +645,8 @@ export class Game {
         if (this.tileAt(x, y) === TILE.FLOOR) floorLanes++;
       }
       if (floorLanes === 0) continue;
-      const w = (1 + Math.max(0, bandAt(x)) * 2) * floorLanes;
+      const tileBand = Math.max(0, bandAt(x));
+      const w = (1 + tileBand * 2) * floorLanes;
       let nearest = bases[0];
       let bestDist = Infinity;
       for (const b of bases) {
@@ -648,6 +657,7 @@ export class Game {
         }
       }
       zoneWeight.set(nearest.x, (zoneWeight.get(nearest.x) ?? 0) + w);
+      zoneBandWeight.set(nearest.x, (zoneBandWeight.get(nearest.x) ?? 0) + w * tileBand);
       totalWeight += w;
     }
     return bases.map((b) => {
@@ -657,7 +667,10 @@ export class Game {
       // ここでraidCountをそのまま拠点数で等分してしまうと「誰も掘っていないのに今夜は危険」という
       // 実態と矛盾した予告になるため、実際の挙動に合わせ0体（safe）として扱う
       const expectedRaiders = totalWeight > 0 ? raidCount * (w / totalWeight) : 0;
-      const mult = 1 + Math.max(0, bandAt(b.x)) * 0.1 + this.metrics.nightsSurvived * RAID_NIGHT_ATK_MULT;
+      // v3 FIX バグ#6: 拠点自身のband(bandAt(b.x))ではなく、この拠点を狙うレイダーの
+      // 湧き元タイルのband加重平均(w>0なら按分、0なら実際にレイダーが湧かないのでband0で無害)を使う
+      const spawnBand = w > 0 ? (zoneBandWeight.get(b.x) ?? 0) / w : 0;
+      const mult = 1 + spawnBand * 0.1 + this.metrics.nightsSurvived * RAID_NIGHT_ATK_MULT;
       // v2 FIX バグ#5: basedefense投資(baseAutoDefenseDmg)を全く考慮せず、Lv0時と同じ
       // FORECAST_ENGAGEMENT_HITSで予測していたため、防衛にどれだけ投資しても予告の危険度が
       // 一切改善しない整合性バグがあった。自動迎撃ダメージが強いほどレイダーは早く倒れ、

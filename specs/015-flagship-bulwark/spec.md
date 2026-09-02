@@ -103,3 +103,37 @@ v1レビュー（reviews/015-flagship-bulwark-v1.md）の残課題#2〜4はい�
   loseReason・baseDamageTaken・basedefenseLvが**全シードでv1レビューの値と完全一致**することを
   確認した（＝この修正は予告の数値表示のみを補正し、ボットの意思決定・敗北判定など既存の
   ゲームバランスには一切影響しない）。詳細はreviews/015-flagship-bulwark-v2.md参照
+
+## 3回目で実施した修正内容（サイクル21・3回目、FIX only）
+
+v2レビュー（reviews/015-flagship-bulwark-v2.md）のバグリスト#2〜4はいずれも「軽微・対応不要」
+判定で、修正候補が残っていなかった。v2のLearnings「新しい投資先を追加したら、それが既存の
+ヒント/予告/UI表示のどの計算式に反映されるべきかを明示的にリストアップして確認する」を踏まえ
+`computeBaseForecasts()`をさらに再点検し、**バグ#5とは独立した新規バグ（#6）**を発見・修正した。
+
+- **バグ#6（中〜重大・情報精度、014由来）**: `computeBaseForecasts()`の予告ダメージ計算が、
+  レイダーの攻撃力倍率`mult`のband係数に**拠点自身の座標のband**（`bandAt(b.x)`）を使っていたが、
+  実際に`spawnRaidWave()`が個々のレイダーへ与えるband係数は**そのレイダーが湧いたタイル**
+  （`picked.x`、拠点から`RAID_MIN_SPAWN_DIST`(10)マス以上離れた掘削済みの地）のbandを使っていた。
+  特にホーム拠点(x=0)は常に`bandAt(0)`が0にクランプされるため、プレイヤーがどれだけ深く
+  （bandの高い場所まで）掘り進めても、ホームの予告は「深く掘るほど強くなるレイダー」による
+  攻撃力上昇を一切反映しないまま固定されていた（前線拠点は湧き元と地理的に近いため誤差は小さい）。
+  この不一致は014でbaseForecastsが導入されて以来存在していたが、v1/v2ではbasedefense関連の
+  バグ#5にのみ焦点が当たり見落とされていた
+- 修正: `zoneWeight`の集計と同じループ内で、拠点ごとに割り当てられた候補タイル群の
+  band加重平均（`zoneBandWeight / zoneWeight`）を新たに求め、`mult`のband項を
+  `Math.max(0, bandAt(b.x))`ではなくこの加重平均band（`spawnBand`）に置き換えた。
+  これは`spawnRaidWave`の重み付けランダム抽選（重み`w`は両者で完全に同一の式）における
+  「この拠点に割り当てられるレイダーの湧き元bandの期待値」と数学的に一致する
+- 検証: `DEBUG_FORECAST_BAND`環境変数で一時的に旧値（拠点自身のband、常に0）と新値
+  （加重平均spawnBand）を突き合わせたところ、cautious/pusher/p01/p02混合10シード×maxTicks=60000で
+  最大spawnBand=1.44（mult換算で+0.144相当）の乖離を確認し、修正の実効性を確認した
+  （デバッグ出力はコミット前に削除済み）。その上でv1/v2と同一の回帰セット
+  （10シード×maxTicks=20000のcautious/pusher、p01/p02×maxTicks=30000、p02×5シード×maxTicks=60000）
+  を再実行し、avgScore・nightsSurvived・loseReason・baseDamageTaken・basedefenseLvが**全シードで
+  v2レビューの値と完全一致**することを確認した（＝この修正も予告の数値表示のみを補正し、
+  spawnRaidWave/applyBaseAutoDefenseなど実際のゲーム挙動には一切影響しない）
+- 効果: ホーム拠点の予告が、深く掘り進めた後の実際の脅威（深部由来の強化されたレイダー）を
+  より正確に反映するようになった。特に前線拠点をまだ建てていない、または少ない序盤〜中盤の
+  長時間プレイで効果が大きい（前線拠点が建つと、深い候補タイルの多くがそちらへ割り当てられ
+  home側の乖離は自然に縮小するため）
