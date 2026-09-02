@@ -1,7 +1,7 @@
 # 仕様書: 014-flagship-forewarn
 
 - 作成日: 2026-09-01
-- ステータス: PLAYABLE（v1完了、判定FIX: [reviews/014-flagship-forewarn-v1.md](../../reviews/014-flagship-forewarn-v1.md)）
+- ステータス: サイクル完了・総括済み（final判定FIX: [reviews/014-flagship-forewarn-final.md](../../reviews/014-flagship-forewarn-final.md)）
 - 元になったレビュー: [reviews/013-flagship-nightwatch-final.md](../../reviews/013-flagship-nightwatch-final.md)
 
 ## 逸脱の明記（重要）
@@ -177,3 +177,13 @@ tick631決着、v2では再構築の行動系列差でtick9347まで延びた）
   行動系列を再現できるようになったことの直接的な裏付けと言える
 - ゲーム本体（`src/core/game.ts`）は無変更。合わせて`simulate.ts`のコンソール出力見出しが
   013からのコピー時に残っていた`Nightwatch`表記のままだったのを`Forewarn`へ修正した（軽微）
+
+## FINAL REVIEW（サイクル20・4回目）
+
+[reviews/014-flagship-forewarn-final.md](../../reviews/014-flagship-forewarn-final.md)で総括レビューを実施し、
+判定**FIX**で確定した。v1/v2の10シードを20シードへ倍増してもhomeDestroyedは0/20のまま安定していることを
+確認する一方、想定セッション時間の3倍（maxTicks=60000、21夜以降）まで擬似実プレイを延長すると、
+レイダー攻撃力倍率が際限なく上昇する設計（`RAID_NIGHT_ATK_MULT`に上限なし）に対し固定値の拠点自動迎撃
+（`BASE_AUTO_DEFENSE_DMG=3`）が長期的にはスケールせず、homeDestroyedが再発しうる境界事象を新たに発見した
+（バグ#4、軽微・想定プレイ時間内では対応不要）。次サイクルへは、この発見を拠点防衛への恒久投資システム
+（015候補）として活かすことを提案した。詳細はreviews/014-flagship-forewarn-final.md参照。

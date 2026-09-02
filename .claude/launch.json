@@ -60,6 +60,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/010-combat-building-bastion", "run", "dev", "--", "--port", "5182"],
       "port": 5182
+    },
+    {
+      "name": "forewarn",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/014-flagship-forewarn", "run", "dev", "--", "--port", "5183"],
+      "port": 5183
     }
   ]
 }
