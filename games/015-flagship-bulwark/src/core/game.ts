@@ -658,7 +658,13 @@ export class Game {
       // 実態と矛盾した予告になるため、実際の挙動に合わせ0体（safe）として扱う
       const expectedRaiders = totalWeight > 0 ? raidCount * (w / totalWeight) : 0;
       const mult = 1 + Math.max(0, bandAt(b.x)) * 0.1 + this.metrics.nightsSurvived * RAID_NIGHT_ATK_MULT;
-      const predictedDamage = expectedRaiders * AVG_RAIDER_ATK * mult * FORECAST_ENGAGEMENT_HITS;
+      // v2 FIX バグ#5: basedefense投資(baseAutoDefenseDmg)を全く考慮せず、Lv0時と同じ
+      // FORECAST_ENGAGEMENT_HITSで予測していたため、防衛にどれだけ投資しても予告の危険度が
+      // 一切改善しない整合性バグがあった。自動迎撃ダメージが強いほどレイダーは早く倒れ、
+      // 拠点への着弾回数(engagementHits)が減るはずなので、Lv0基準(BASE_AUTO_DEFENSE_DMG)からの
+      // 比で按分する（レイダーhpも同じmultでスケールするため、この比はnightsSurvivedに依存しない）
+      const engagementHits = (FORECAST_ENGAGEMENT_HITS * BASE_AUTO_DEFENSE_DMG) / this.baseAutoDefenseDmg();
+      const predictedDamage = expectedRaiders * AVG_RAIDER_ATK * mult * engagementHits;
       const ratio = predictedDamage / Math.max(1, b.hp);
       const level: RiskLevel = ratio < FORECAST_CAUTION_RATIO ? 'safe' : ratio < FORECAST_DANGER_RATIO ? 'caution' : 'danger';
       return { x: b.x, isHome: b.isHome, level };
