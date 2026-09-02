@@ -13,21 +13,26 @@
   資金を投じて拠点自動迎撃力そのものを恒久強化できる新しいビルド要素**（新規ショップ項目`basedefense`、
   全拠点共通・最大15レベル・+2dmg/tick/レベル）として解決した
 - 対象ゲーム番号: **015-flagship-bulwark**（サイクル21・1回目で決定・実装済み）
-- 次に行う回: **2回目（FIX＋REVIEW）**
+- 次に行う回: **3回目（FIX only）**
 - サイクル21・1回目（reviews/015-flagship-bulwark-v1.md）で新規実装し判定FIX。014-finalのバグ#4
   再現手順そのもの（seed312・p02戦略・maxTicks=60000）でhomeDestroyedの解消を確認、10シード×2戦略で
   maxTicks=60000〜90000（想定セッション時間の3〜4.5倍）まで延ばしてもhomeDestroyed 0件を維持。
   想定セッション時間内（maxTicks=20000/30000）では既存バランスへのregressionなし。v1の残課題（軽微）:
   (a) `basedefense`はmaxLevel到達後さらに極端に長時間プレイすれば理論上バグ#4相当が再発しうる限界を
   仕様書に明記済み・今回は対応不要、(b) P02の一部シードで購入優先度の変化により死因がホーム陥落から
-  前線死へ入れ替わる副作用を観測（バグではなく設計意図通りのトレードオフと判定）。v2はこれらの軽微な
-  観察事項の扱い（対応不要と判断済みのため実質的な修正候補なし）を再確認しつつ、他の観点（P01視点の
-  再検証、UIの調整余地等）があれば対応する
-- **【最優先・12サイクル連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜015-v1を含め直近12サイクル連続で未実施。本サイクルも
-  `preview_start`を試み、cycle20-finalより明確な拒否文言「Dev servers can't be started from
-  unattended sessions (scheduled-task runs and remote-dispatched trees) — nobody is present to
-  approve the command.」を受け取った。無人スケジュール実行が続く限り構造的に解消しないため、人間の
+  前線死へ入れ替わる副作用を観測（バグではなく設計意図通りのトレードオフと判定）
+- サイクル21・2回目（reviews/015-flagship-bulwark-v2.md）はv1の残課題#2〜4がいずれも対応不要判定
+  だったため実質的な修正候補が無く、代わりにコード再点検で**新規バグ#5**を発見・修正した:
+  拠点脅威予告`baseForecasts`が015新規の`basedefense`投資（`baseAutoDefenseDmg`）を一切考慮せず、
+  投資額に関わらず同じ危険度を表示し続ける整合性バグ（014のコア機構と015新機能の間の穴）。
+  `computeBaseForecasts()`の`FORECAST_ENGAGEMENT_HITS`をLv0基準からの比で按分するよう修正し、
+  Lv0で完全後方互換（v1と同一の10シード・p02再現シードすべてでシミュレーション結果が寸分違わず
+  一致）であることを確認した。P01/P02の擬似実プレイもv1と完全一致（新たな検証はP01の性質上できず）。
+  判定FIX。バグ#2〜4は引き続き対応不要のまま
+- **【最優先・13サイクル連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜015-v2を含め直近13サイクル連続で未実施。本サイクル（2回目）は
+  過去複数回で明文化された拒否（「無人セッションからは開発サーバを起動できない」）を踏まえ
+  `preview_start`の再試行はしなかった。無人スケジュール実行が続く限り構造的に解消しないため、人間の
   対話セッションでこのリポジトリを扱う機会があれば最優先で実施すること。`.claude/launch.json`には015
   （`games/015-flagship-bulwark`）のdevサーバ設定（`bulwark`、port 5184）を追加済みなので、
   該当ゲームであればすぐに`preview_start`できる**
@@ -609,6 +614,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-02 | 20 | 3（FIX only） | v2で残った軽微な観察事項は無かった（バグ#3は対応不要）ため、v2レビューのLearnings「一時検証スクリプトを削除する運用は再現性の観点でトレードオフがある（v1のP01 seed301はtick631決着だったが、v2でスクリプトを再構築したところ同一パラメータのはずがtick9347まで結果が変わった）」への対応を軽微な改善として実施した。`games/014-flagship-forewarn/headless/simulate.ts`に、擬似実プレイのP01/P02ペルソナ（P01=交戦距離6・撤退HP閾値15%、P02=交戦距離2・撤退HP閾値45%、いずれもv1/v2レビュー記載値）を再現する戦略`p01`/`p02`を恒久的なCLIオプション`--strategies`として追加し、以後は一時スクリプトを都度作り直さず`npm run simulate -- --strategies p01,p02 --seeds ... `で確実に再現できるようにした（ショップ優先度はP01を効率志向のPUSHER_PRIORITY、P02を慎重志向のCAUTIOUS_PRIORITYへ割り当て。レビュー未記載のため今回新たに採用した仮定）。デフォルト戦略（`--strategies`省略時のcautious/pusher）の10シード比較がv2レビューの数値（avgScore/avgBaseDamageTaken等）と完全一致することを確認して回帰なしを確認した上で、`--strategies p01,p02 --seeds 301,311,302,312 --maxTicks 30000`を実行し、seed302のp02がtick25088・nightsSurvived14・loseReason=playerHp・baseDamageTaken515とv2レビュー表の値と完全一致することを直接確認した（seed301のp01はv2の再構築結果tick9347ではなくv1オリジナルの結果tick631と一致し、恒久化による再現性向上を裏付けた）。ゲーム本体（`src/core/game.ts`）は無変更。あわせて`simulate.ts`のログ見出しが013からのコピー時に残っていた`Nightwatch`表記だったのを`Forewarn`へ修正した。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3 FIX内容」節を追記、package.jsonのversionを0.3.0へ、games/README.mdの索引を更新した。routine-state.mdをサイクル20・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-09-02 | 20 | 4（FINAL REVIEW） | 014-flagship-forewarnの総括レビュー（reviews/014-flagship-forewarn-final.md）を作成。v1/v2の10シードから20シードへサンプルを倍増してもhomeDestroyedが実質ゼロ（cautious/pusherとも0/20）のまま安定していることを再確認し、v2修正（拠点自動迎撃）が偶然でなく安定して機能する根本対応だったと裏付けた。P01はv1/v2の2シードに新規4シードを追加し合計8シードで検証、8シード中7シードがnightsSurvived=0という結果が新規シードでも再現し、013-final以来の構造的ミスマッチを追加のサンプルで再確認した。P02は想定セッション時間の上限（maxTicks=30000）まで4シードとも安定して生存継続することを確認した上で、013-finalの手法を踏襲しmaxTicksを想定セッション時間の3倍（60000、実時間約100分相当）へ延長した検証で、**新規バグ#4「21夜以降の極端な長時間プレイで際限なく上昇するレイダー攻撃力倍率が固定値の拠点自動迎撃を上回りhomeDestroyedが再発しうる」**を発見した（5シード中1シードで再発）。本セッションでは初めて実際に`preview_start`を呼び出し「無人セッションからは開発サーバを起動できない」という明示的な拒否を一次情報として確認し、`.claude/launch.json`に`forewarn`のdevサーバ設定を追加した。判定はFIX（バグ#4は想定セッション時間を3倍以上超えた境界事象でありSCRAP/PIVOT材料にはならない）。本命ゲームに採用すべき部分として拠点ごとの脅威予告と拠点自動迎撃による下限保証を確定させ、次サイクルへの提案として（1）ブラウザAIP実プレイの実施、（2）拠点防衛への恒久投資システム（バグ#4への対応も兼ねる）の2点を挙げた。games/README.mdの索引を更新し、routine-state.mdをサイクル21・run1へ進めた（本行は実行履歴テーブルへの追記漏れを本PRで遡って補完した） | (#81) |
 | 2026-09-02 | 21 | 1（BUILD+REVIEW） | cycle20-finalの提案(2)に従い、014の全システムに新規ショップ項目`basedefense`（拠点防衛への恒久投資、全拠点共通の自動迎撃ダメージを+2/tick/レベル・最大15レベルで恒久強化）を追加した015-flagship-bulwarkを新規実装（CLAUDE.mdの「1ゲーム=1要素」原則から意図的に外れる組み合わせ試作）。既存10項目と同じ拠点内購入フロー・指数コスト構造（基礎45・成長率1.32倍）に統合し、拠点ごとの個別投資ではなく全拠点共通1レベルとすることで「どの拠点を見捨てるか」という013由来のコアファン仮説を保つ設計判断をspec.mdに明記した。キー操作は`Q`（1〜0の10項目に続く11個目）、AIP/HUDには新規フィールド`baseAutoDefenseDmg`を追加し実効迎撃ダメージを可視化した。v1レビューで014-finalのバグ#4再現手順そのもの（seed312・p02戦略・maxTicks=60000）を用いて検証した結果、**homeDestroyedが解消**（014では発生していたが015では前線でのplayerHp死へ変化）したことを確認。10シード×2戦略でmaxTicks=60000〜90000（想定セッション時間の3〜4.5倍）まで延長してもhomeDestroyed 0件を維持し、想定セッション時間内（maxTicks=20000/30000）では既存バランスへのregressionもないことを確認した。P02の擬似実プレイでは`basedefense`購入が既存強化と競合し、シードによって決着パターンが入れ替わる（防衛は安定するが前線での早期死亡に転じる場合がある）という設計意図通りのトレードオフも観測した。P01は013-final以来の構造的ミスマッチが継続（8シード中7シードがnightsSurvived=0、014-finalの同シード表と完全一致）。ブラウザAIP実プレイは本サイクルも「Dev servers can't be started from unattended sessions」という明確な拒否メッセージを受け未実施（`.claude/launch.json`に`bulwark`のdevサーバ設定・port 5184を追加済み）。npm run build / npm run simulateとも正常終了。reviews/015-flagship-bulwark-v1.md作成、判定FIX（新機能がバグ#4を解消しつつregressionなし、致命・重大バグの新規発見なし）。games/README.mdの索引を更新し、routine-state.mdをサイクル21・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-09-03 | 21 | 2（FIX+REVIEW） | v1レビューの残課題#2〜4（いずれも軽微・対応不要判定）には実質的な修正候補が無かったため、routine-state.mdの申し送り「他の観点（P01視点の再検証、UIの調整余地等）があれば対応する」に従いコードを再点検し、**v1では未指摘の新規バグ#5**を発見・修正した。014由来の拠点脅威予告`baseForecasts`（`computeBaseForecasts()`）が、015新規の`basedefense`投資による自動迎撃強化（`baseAutoDefenseDmg`）を一切考慮せず、常に固定値`FORECAST_ENGAGEMENT_HITS=4`で予測ダメージを計算していた——`basedefense`へどれだけ投資しても「今夜は危険」という予告表示が改善しないという、014のコア機構（予告）と015の新機能（防衛投資）の間の整合性の穴だった。`games/015-flagship-bulwark/src/core/game.ts`の`computeBaseForecasts()`で、`FORECAST_ENGAGEMENT_HITS`をLv0基準（`BASE_AUTO_DEFENSE_DMG`）からの比で按分するよう修正（レイダーhpも予告計算内の`mult`と同じ倍率でスケールするためこの比はnightsSurvivedに依存せず、Lv0では従来と完全に同じ値になる後方互換な修正）。v1と同一の10シード×maxTicks=20000（cautious/pusher）、および同一のp01/p02再現ボットでmaxTicks=20000〜60000（seed301/311/302/312/321/322等）を再実行し、avgScore・nightsSurvived・loseReason・baseDamageTaken・basedefenseLvが**全シードでv1レビューの値と完全一致**することを確認した（この修正は予告の数値表示のみを補正し、ボットの意思決定・敗北判定など既存のゲームバランスには一切影響しない設計だったことを実測で裏付けた）。npm run build / npm run simulateとも正常終了。reviews/015-flagship-bulwark-v2.md作成、判定FIX。spec.mdに「v2 FIX内容」節を追記、package.jsonのversionを0.2.0へ、games/README.mdの索引を更新した。バグ#2〜4は引き続き対応不要のまま、routine-state.mdをサイクル21・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 

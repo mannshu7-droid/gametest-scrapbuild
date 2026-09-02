@@ -80,3 +80,26 @@
 - 自動迎撃以外の防衛設備（トラップ・タレット等の新規建築種）
 - レイダー攻撃力倍率(`RAID_NIGHT_ATK_MULT`)側への上限設定（014-finalが検討したもう一方の対応案。
   015では「プレイヤーの意思決定を増やす」方針を優先し採用しなかった）
+
+## v2 FIX内容（サイクル21・2回目）
+
+v1レビュー（reviews/015-flagship-bulwark-v1.md）の残課題#2〜4はいずれも「軽微・対応不要」判定
+だったが、v2の再検証中に**v1では未指摘の新規バグ**を発見し対応した。
+
+- **バグ#5（重大寄り・情報整合性）**: 拠点ごとの脅威予告（014由来の`baseForecasts`）が、015新規の
+  `basedefense`投資（全拠点自動迎撃ダメージ`baseAutoDefenseDmg`の恒久強化）を一切考慮せずに
+  予測ダメージを計算していた。`computeBaseForecasts()`は常に固定値`FORECAST_ENGAGEMENT_HITS=4`
+  （1体のレイダーが迎撃されない場合に想定する被弾回数）を使っており、実際には自動迎撃が強いほど
+  レイダーは早く倒れ着弾回数が減るにもかかわらず、予告のsafe/caution/danger判定には一切反映されて
+  いなかった。つまり**basedefenseへどれだけ投資しても「今夜は危険」という予告表示が改善しない**
+  という、014の核（予告を見て備える）と015の新機能を繋ぐ整合性の穴だった
+- 修正: `games/015-flagship-bulwark/src/core/game.ts`の`computeBaseForecasts()`で、
+  `FORECAST_ENGAGEMENT_HITS`をLv0基準（`BASE_AUTO_DEFENSE_DMG`）からの比で按分するよう変更
+  （`engagementHits = FORECAST_ENGAGEMENT_HITS * BASE_AUTO_DEFENSE_DMG / this.baseAutoDefenseDmg()`）。
+  レイダーのhpも予告計算内で使う`mult`と同じ倍率でスケールするため、この比はnightsSurvivedに
+  依存せず、Lv0（basedefense投資なし）では従来と完全に同じ値（変化なし）になる後方互換な修正
+- 検証: v1と同一の10シード×maxTicks=20000（cautious/pusher）、および同一のp02再現ボットで
+  maxTicks=30000/60000（seed301/311/302/312/321/322）を再実行し、avgScore・nightsSurvived・
+  loseReason・baseDamageTaken・basedefenseLvが**全シードでv1レビューの値と完全一致**することを
+  確認した（＝この修正は予告の数値表示のみを補正し、ボットの意思決定・敗北判定など既存の
+  ゲームバランスには一切影響しない）。詳細はreviews/015-flagship-bulwark-v2.md参照
