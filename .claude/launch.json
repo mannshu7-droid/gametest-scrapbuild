@@ -72,6 +72,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/015-flagship-bulwark", "run", "dev", "--", "--port", "5184"],
       "port": 5184
+    },
+    {
+      "name": "emplacement",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/016-flagship-emplacement", "run", "dev", "--", "--port", "5185"],
+      "port": 5185
     }
   ]
 }
