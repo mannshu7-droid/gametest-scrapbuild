@@ -120,10 +120,23 @@ const DEFENSE_LEVEL_DMG_BONUS = 2;
  */
 const TURRET_BASE_COST = 40;
 const TURRET_BAND_COST_MULT = 0.18;
+/**
+ * v2 FIX 観察事項#1: v1では設置数に関わらず基礎コスト40のまま固定だったため、cautious/P02は
+ * ほぼ毎ランMAX_TURRETS_PER_BASE付近まで到達し「予算が足りず設置を諦める」場面がほとんど
+ * 観測できなかった。他のショップ項目（SHOP_DEFS、baseCost*growth^level）と同じ複利成長パターンを
+ * 拠点ごとの設置数に適用し、1基目は安価なまま・2基目以降が段階的に高くなる構成にすることで、
+ * 「この拠点にあと1基積むか、他の強化に回すか」という悩ましさを作る
+ */
+const TURRET_COST_GROWTH = 1.6;
 const TURRET_HP = 60;
-/** 迎撃レイダーを探すチェビシェフ距離。HOME_RADIUS(3)/OUTPOST_RADIUS(2)いずれの拠点でも
- * 中央付近に置けば保護範囲内の複数レーンをカバーできる程度に設定 */
-const TURRET_RANGE = 2;
+/**
+ * 迎撃レイダーを探すチェビシェフ距離。
+ * v2 FIX 観察事項#2: v1は2だったため、LANE_COUNT(5)の中央（y=2）に置けば|dy|<=2で全レーンを
+ * カバーでき、仕様書のコアファン仮説「配置位置に応じて迎撃力が変わる」という空間トレードオフが
+ * 実質的に検証できなかった。1に絞ることで中央配置でも隣接2レーン（y=1〜3）までしか届かず、
+ * 両端レーン（y=0,4）を守るには別タイルへの追加配置が必要になる
+ */
+const TURRET_RANGE = 1;
 const TURRET_DMG = 10;
 const TURRET_ATK_CD_MAX = 8;
 /** 拠点1つあたりのタレット設置上限。無制限にすると壁の代わりに並べるだけの物量ゲーになり
@@ -1328,6 +1341,12 @@ export class Game {
     return this.turrets.filter((t) => Math.abs(t.x - base.x) <= r).length;
   }
 
+  /** 指定x座標が属する拠点（あれば）の設置済みタレット数。0はどの拠点内でもない場合を含む */
+  private turretsAtCurrentBase(x: number): number {
+    const base = this.allBases().find((b) => Math.abs(x - b.x) <= this.radiusFor(b));
+    return base ? this.turretsAtBase(base) : 0;
+  }
+
   /**
    * 拠点防衛タレットの設置（016新規、015final提案(2)「拠点防衛設備の新規建築種」への対応）。
    * バリケード（008パターン#6、フィールド上どこにでも置ける即席の壁）と異なり、拠点保護半径内のみ・
@@ -1343,8 +1362,11 @@ export class Game {
     if (this.obstacleAt(targetX, targetY)) return;
     const base = this.allBases().find((b) => Math.abs(targetX - b.x) <= this.radiusFor(b));
     if (!base) return; // 拠点保護半径内のみ設置可（basedefenseと同じく拠点の存在を前提にした投資）
-    if (this.turretsAtBase(base) >= MAX_TURRETS_PER_BASE) return;
-    const cost = Math.round(TURRET_BASE_COST * (1 + Math.max(0, bandAt(this.player.x)) * TURRET_BAND_COST_MULT));
+    const countAtBase = this.turretsAtBase(base);
+    if (countAtBase >= MAX_TURRETS_PER_BASE) return;
+    const cost = Math.round(
+      TURRET_BASE_COST * Math.pow(TURRET_COST_GROWTH, countAtBase) * (1 + Math.max(0, bandAt(this.player.x)) * TURRET_BAND_COST_MULT),
+    );
     if (this.player.money < cost) return;
     this.player.money -= cost;
     this.turrets.push({ id: this.nextTurretId++, x: targetX, y: targetY, hp: TURRET_HP, maxHp: TURRET_HP, atkCd: 0 });
@@ -1588,15 +1610,16 @@ export class Game {
         buildCosts: {
           barricade: Math.round(BARRICADE_BASE_COST * (1 + Math.max(0, bandAt(p.x)) * BARRICADE_BAND_MULT)),
           outpost: Math.round(OUTPOST_BASE_COST * (1 + Math.max(0, bandAt(p.x)) * OUTPOST_BAND_COST_MULT)),
-          turret: Math.round(TURRET_BASE_COST * (1 + Math.max(0, bandAt(p.x)) * TURRET_BAND_COST_MULT)),
+          turret: Math.round(
+            TURRET_BASE_COST *
+              Math.pow(TURRET_COST_GROWTH, this.turretsAtCurrentBase(p.x)) *
+              (1 + Math.max(0, bandAt(p.x)) * TURRET_BAND_COST_MULT),
+          ),
         },
         canBuildOutpost: baseDist >= OUTPOST_MIN_GAP && this.tileAt(p.x, p.y) === TILE.FLOOR,
         baseDistance: baseDist,
         baseAutoDefenseDmg: this.baseAutoDefenseDmg(),
-        turretsAtCurrentBase: (() => {
-          const base = this.allBases().find((b) => Math.abs(p.x - b.x) <= this.radiusFor(b));
-          return base ? this.turretsAtBase(base) : 0;
-        })(),
+        turretsAtCurrentBase: this.turretsAtCurrentBase(p.x),
         maxTurretsPerBase: MAX_TURRETS_PER_BASE,
       },
       map: {
