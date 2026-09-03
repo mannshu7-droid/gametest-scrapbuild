@@ -15,7 +15,16 @@
   「建築による防衛投資」を新設することで、「戦闘・採掘・建築」を併せ持つ本命ゲームの"建築"要素を
   拠点防衛にもう一段深く結びつけられるか検証する
 - 対象ゲーム番号: **016-flagship-emplacement**（サイクル22・1回目で決定・実装済み）
-- 次に行う回: **3回目（FIX only、レビューは書かない）**
+- 次に行う回: **4回目（FINAL REVIEW）**
+- サイクル22・3回目（FIX only、レビューなし・詳細はPR本文とspec.md「v3で実施した修正内容」節参照）:
+  v2の軽微な観察事項#3（ヘッドレスbotのタレット配置ロジックが機械的で「意図的に特定レーンへ寄せる」
+  判断をしていない）に対応した。`headless/simulate.ts`のみ変更（game.ts無変更）。防衛志向2戦略
+  （cautious・p02）に、拠点の既存タレットレーンから最も離れたレーンを選ぶfarthest-point方式の
+  `pickDefensiveTurretLane()`を追加し、狙いのレーンへ移動してから設置するようにした。攻勢志向
+  2戦略（pusher・p01）は無変更のまま「意図的配置 vs 機械的配置」の対比を作った。cautiousの
+  avgTurretKillsがv2比2.6→6.0・1.6→6.1へ大幅増加、hp死亡も2/10→0/10・1/10へ減少しavgScoreも
+  向上。pusher/p01は既存シードでv2と完全一致（回帰なし）。P02×maxTicks=60000（6シード）・
+  P01/P02×maxTicks=30000（4シード）ともhomeDestroyed 0件を維持しバランス回帰なし
 - サイクル22・1回目（reviews/016-flagship-emplacement-v1.md）で新規実装し判定**FIX**。015の全システムに
   新規建築`turret`（拠点保護半径内のみ・拠点ごとに最大3基・コスト基礎40・HP60・射程2・毎tick自動迎撃、
   レイダーに阻まれ破壊されうる）を追加し、`basedefense`（恒久ステータス投資・全拠点一括・破壊されない）
@@ -688,6 +697,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-03 | 21 | 4（FINAL REVIEW） | 015-flagship-bulwarkの総括レビュー（reviews/015-flagship-bulwark-final.md）を作成。maxTicks=20000のcautious/pusherを新規10シード（11〜20）追加して20シードへ倍増し、014-finalの3倍検証（maxTicks=60000）も未使用の新規シード（P02の331/332、cautious/pusherの21〜30、計17run）で追加検証したところ、既知シード・新規シードともhomeDestroyed 0件を一貫して維持し014-finalバグ#4解消の信頼度をさらに引き上げた。basedefenseLvはこれらの長時間runでも最大10（maxLevel15には未到達）に留まり、v1/v2が「対応不要」と判定したmaxLevel到達後の理論上の限界も今回は観測されなかった。P01・P02とも既知シードの全指標がv1/v2レビューの値と完全一致（コード無変更を再確認）。P01は013・014・015の3ゲーム連続で夜フェーズに到達できず、次サイクル以降は「P01は夜フェーズ検証の対象外、コア機構の判定はP02主体」という運用をデフォルト化することを提案した。ブラウザAIP実プレイは`preview_start`を試み15サイクル連続（012final以降）で同一の拒否を再確認。判定はFIX。本命ゲームに採用すべき部分として「拠点防衛への恒久投資（basedefense）」と「新しい投資先追加時は既存の情報系統への反映を明示的にリストアップする開発プロセス」を確定し、次サイクルへの提案として（1）ブラウザAIP実プレイの実施、（2）015スコープ外の拠点防衛設備（トラップ・タレット等の新規建築種）を追加する016-flagship-*、（3）P01除外運用の明文化の3点を挙げた。package.jsonのversionを0.3.0へ、games/README.mdの索引を更新し、routine-state.mdをサイクル22・run1へ進めた | (本PR) |
 | 2026-09-03 | 22 | 1（BUILD+REVIEW） | 015-flagship-bulwark-finalの提案(2)を受け、015の全システム（拠点防衛への恒久投資`basedefense`含む）を継承し、拠点保護半径内に実際に配置する新規建築「拠点防衛タレット」(`turret`)を追加した016-flagship-emplacementを新規実装。`basedefense`（恒久ステータス・全拠点一括・破壊されない）と役割分担する「配置による防衛投資」として、拠点ごとに最大3基・被弾で破壊されうる建築物（コスト基礎40・HP60・射程2・毎tick自動迎撃）を実装した。cautious/pusher20シード×2・maxTicks=20000、P02×maxTicks=60000（6シード、想定セッション時間の3倍）のいずれもhomeDestroyed 0件を維持し、015のバランスへの回帰なし。タレットは`turretKills`10〜17/run（cautious/P02）と実働の撃退火力として機能することを確認。致命・重大バグは発見されず、軽微な観察事項2件（タレット設置数が理論上限付近まで到達しがちでコスト調整の余地がある、ヘッドレスbotの配置ロジックが単純で「配置位置に応じて迎撃力が変わる」空間トレードオフを実質的に検証できていない）をv2以降へ持ち越した。ブラウザAIP実プレイは`preview_start`を試み16サイクル連続（012final以降）で同一の拒否を再確認（`.claude/launch.json`に`emplacement`のdevサーバ設定・port 5185を追加済み）。npm run build / npm run simulateとも正常終了。reviews/016-flagship-emplacement-v1.md作成、判定FIX。games/README.mdの索引を更新し、routine-state.mdをサイクル22・run2（FIX+REVIEW）へ進めた（本行は実行履歴テーブルへの追記漏れを本PRで遡って補完した） | [#86](https://github.com/mannshu7-droid/gametest-scrapbuild/pull/86) |
 | 2026-09-04 | 22 | 2（FIX+REVIEW） | v1レビューの軽微な観察事項2件に対応。(1)タレット設置数がほぼ毎ランMAX_TURRETS_PER_BASE付近まで到達し「予算が足りず諦める」場面が観測できない問題へ、他のショップ項目（`SHOP_DEFS`）と同じ複利成長パターンを導入した`TURRET_COST_GROWTH`(=1.6)で対応。同一拠点内の設置数に応じて1基目40→2基目64→3基目102と段階的に高くなるようにした。(2)`TURRET_RANGE=2`がLANE_COUNT=5の中央に置けば全レーンをカバーでき空間トレードオフが検証できない問題へ、射程を2から1へ縮小して対応。中央（y=2）に置いても隣接2レーン（y=1〜3）までしか守れなくなり、両端レーン（y=0,4）は追加配置が必須になった。修正後もcautious/pusher20シード×2・maxTicks=20000、P02×maxTicks=60000（6シード）、P01/P02×maxTicks=30000（4シード）のいずれもhomeDestroyed 0件を維持し回帰なし。avgTurretsBuilt（cautious 1-10: 5.6→4.4）・avgTurretKills（同: 11.6→2.6）はいずれも減少し「作れるだけ作る」自動購入から脱却、一部シード（P02 seed301/311）でbaseDamageTaken増加という形で空間トレードオフの効果が定量的に可視化され始めたことを確認した。新規の軽微な観察事項1件（ヘッドレスbotの配置戦略が依然「意図的にレーンへ偏らせる」判断をしていないため、botが実際に空間ミスを犯すシナリオは未検証）をv3以降へ持ち越した。ブラウザAIP実プレイは`preview_start`を試み17サイクル連続で同一の拒否を再確認。npm run build / npm run simulateとも正常終了。reviews/016-flagship-emplacement-v2.md作成、判定FIX。spec.mdに「v2で実施した修正内容」節を追記、package.jsonのversionを0.2.0へ、games/README.mdの索引を更新し、routine-state.mdをサイクル22・run3（FIX only）へ進めた | (本PR) |
+| 2026-09-04 | 22 | 3（FIX only） | v2観察事項#3（ヘッドレスbotのタレット配置ロジック`pickTurretDir`が「その場で空いている方向に機械的に設置」するだけで、意図的に特定レーンへ寄せる判断をしていないため、v2の射程縮小で理論上作れたはずの空間ミスのシナリオを実際には検証できていない問題）を修正。ゲーム本体（`src/core/game.ts`）は無変更、`headless/simulate.ts`のみ変更。防衛志向の2戦略（cautious・p02）に、その拠点の既存タレットのレーン(y)群から最も離れたレーンをfarthest-point方式で選ぶ`pickDefensiveTurretLane()`を新設（既存レーンが無ければ中央y=2、以降{0,2,4}の順で3基＋TURRET_RANGE=1・LANE_COUNT=5なら全5レーンをカバーできる）し、狙いのレーンと現在地がずれていれば先に上下移動してから設置するようにした。攻勢志向の2戦略（pusher・p01）は従来通り無変更とし、「意図的な配置」対「機械的な配置」の対比を作った。検証: pusher/p01は既存シードでv2と完全一致（回帰なし）を確認。cautiousは10シード×2（1-10, 11-20）・maxTicks=20000でavgTurretKillsがv2の2.6/1.6から6.0/6.1へ大幅増加し意図的配置の効果を定量確認、hp死亡も2/10→0/10・1/10へ減少しavgScoreも向上。P02×maxTicks=60000（6シード）・P01/P02×maxTicks=30000（4シード）のいずれもhomeDestroyed 0件を維持し015・v1・v2が確立した拠点防衛バランスへの回帰なし（p02のturretKillsも軒並み増加、例seed301は6→9、seed312は8→13）。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3で実施した修正内容」節を追記した。判定は次回（4回目FINAL REVIEW）で総括、routine-state.mdをサイクル22・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
