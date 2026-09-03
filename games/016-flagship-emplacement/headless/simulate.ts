@@ -94,6 +94,15 @@ function inBaseRadius(s: GameState): boolean {
   return false;
 }
 
+/** プレイヤーが現在いる拠点とその保護半径（v3 FIX: 意図的なタレット配置レーン計算に使う） */
+function currentBaseInfo(s: GameState): { x: number; radius: number } | null {
+  for (const b of s.bases) {
+    const r = b.isHome ? s.map.homeRadius : s.map.outpostRadius;
+    if (Math.abs(s.player.x - b.x) <= r) return { x: b.x, radius: r };
+  }
+  return null;
+}
+
 /**
  * 夜フェーズの帰還先を決める: 既にレイダーに攻撃されている拠点があれば最優先（複数あれば近い方）、
  * なければ最寄りの拠点へ予防的に帰還する。013固有ロジック（どの拠点を見捨てるかの判断が生まれるか）
@@ -185,7 +194,8 @@ const TURRET_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.3, pusher: 1.
 function clampLane(y: number): number {
   return Math.max(0, Math.min(LANE_COUNT - 1, y));
 }
-/** 現在地からタレットを設置できる空きFLOORタイルを4方向から探す（016新規） */
+/** 現在地からタレットを設置できる空きFLOORタイルを4方向から探す（016新規）。
+ * DIRS=[left,right,up,down]の順で探すため、左右（現在のレーンを維持）を優先する副作用がある。 */
 function pickTurretDir(s: GameState): Dir | null {
   for (const dir of DIRS) {
     const [dx, dy] = DELTA[dir];
@@ -197,6 +207,32 @@ function pickTurretDir(s: GameState): Dir | null {
     return dir;
   }
   return null;
+}
+
+/**
+ * v3 FIX（v2レビュー観察事項#3への対応）: この拠点に既に設置済みのタレットのレーン(y)から
+ * 最も離れたレーンを返す（farthest-point方式でレーンを分散させる）。TURRET_RANGE=1・LANE_COUNT=5
+ * の下では、既存レーンが無ければ中央(y=2)、その後は{0,2,4}の順に選ばれ3基で全5レーンをカバーできる。
+ * 「意図的に空間トレードオフを解決しようとする」防衛志向ボット(cautious/p02)専用に使う
+ */
+function pickDefensiveTurretLane(s: GameState, base: { x: number; radius: number }): number {
+  const existing = s.turrets.filter((t) => Math.abs(t.x - base.x) <= base.radius).map((t) => t.y);
+  if (existing.length === 0) return Math.floor(LANE_COUNT / 2);
+  let bestY = 0;
+  let bestMinDist = -1;
+  for (let y = 0; y < LANE_COUNT; y++) {
+    const minDist = Math.min(...existing.map((ey) => Math.abs(ey - y)));
+    if (minDist > bestMinDist) {
+      bestMinDist = minDist;
+      bestY = y;
+    }
+  }
+  return bestY;
+}
+
+/** 意図的なレーン配置を行う防衛志向ボットの戦略か（v3 FIX） */
+function usesDeliberateTurretPlacement(strategy: Strategy): boolean {
+  return strategy === 'cautious' || strategy === 'p02';
 }
 
 function mineDirs(s: GameState, strategy: Strategy): Dir[] {
@@ -249,6 +285,19 @@ class Bot {
       if (s.player.turretsAtCurrentBase < s.player.maxTurretsPerBase) {
         const budgetMult = TURRET_BUDGET_MULT[this.strategy];
         if (s.player.money >= s.player.buildCosts.turret * budgetMult) {
+          // v3 FIX（v2観察事項#3）: cautious/p02は「意図的に空いているレーンを埋める」判断をする。
+          // まだ狙いのレーンにいなければ先にそちらへ移動してから設置し、pusher/p01は従来通り
+          // その場で空いている方向に機械的に設置する（意図的配置 vs 機械的配置の対比を作る）
+          if (usesDeliberateTurretPlacement(this.strategy)) {
+            const base = currentBaseInfo(s);
+            if (base) {
+              const targetY = pickDefensiveTurretLane(s, base);
+              if (s.player.y !== targetY) {
+                const moveDir: Dir = s.player.y < targetY ? 'down' : 'up';
+                if (canAdvance(s, moveDir)) return { type: 'move', dir: moveDir };
+              }
+            }
+          }
           const dir = pickTurretDir(s);
           if (dir) return { type: 'build', target: 'turret', dir };
         }
