@@ -1,5 +1,5 @@
 /**
- * ヘッドレスシミュレーション: 2種類のボットが自動プレイし、バランス指標をJSONで出力する。
+ * ヘッドレスシミュレーション: 3種類のボットが自動プレイし、バランス指標をJSONで出力する。
  * 実行: npm run simulate [-- --seeds 1,2,3 --maxTicks 20000]
  *
  * 017の核心仮説は「探査（scanner）で豊富さを見抜いてフォークで良いレーンを選ぶこと」と
@@ -9,6 +9,12 @@
  *   選ぶ。「新システムを無視しても最低限詰まずに遊べるか」の対照群
  * - planner: scanner/chargeを優先的に購入し、見えているヒントから最も期待値の高いレーンを選ぶ。
  *   「新システムに投資すると明確に得をするか」の検証群
+ * - pusher: レーン選択・購入優先度はplannerに準じるが、`miningRiskLevel==='danger'`（安全マージン
+ *   15込みの警告）では帰還せず、`estFuelToReturn`ちょうど＋わずかなバッファ（3）まで安全マージンを
+ *   意図的に削って前進し続ける。v2レビュー（reviews/017-mining-forkshaft-v2.md）で「全カテゴリ最大
+ *   強化してもリスク回避戦略ではband4境界（x≈160）までしか到達できず、band5
+ *   （x=201-240、プラチナ鉱石の本領）へは意図的なリスクテイクが必要」と判明したため追加した。
+ *   band5到達がどの程度「魅力的なリスクテイク」として機能するかを次回のFINAL REVIEWで検証する
  */
 import { Game, LANES, LENGTH, BAND_SIZE, NUM_BANDS, bandAt, isForkPos, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type Dir, type GameState, type TileId, type UpgradeId } from '../src/core/types';
@@ -70,10 +76,17 @@ function bfsToHome(s: GameState): Dir | null {
   return null;
 }
 
-type Strategy = 'blind' | 'planner';
+type Strategy = 'blind' | 'planner' | 'pusher';
 
 const BLIND_PRIORITY: UpgradeId[] = ['drill', 'capacity', 'fuel', 'hp', 'digspeed', 'hazardresist'];
 const PLANNER_PRIORITY: UpgradeId[] = ['scanner', 'drill', 'charge', 'capacity', 'fuel', 'hp', 'digspeed', 'hazardresist'];
+/** band5（プラチナ）到達を狙うため、深部到達に直結するドリル威力・燃料・生存力を先に固める */
+const PUSHER_PRIORITY: UpgradeId[] = ['drill', 'fuel', 'hazardresist', 'hp', 'capacity', 'scanner', 'charge', 'digspeed'];
+/** pusherが帰還判定に使う安全マージン（game.ts本体のRISK_DANGER_MARGIN=15より意図的に小さい）。
+ * 0〜2では死亡0/20を保ったまま最大到達（avgMaxDistance≈166.7）、-5以下では逆に死亡20/20へ
+ * 崖のように転落する（中間の緩やかなリスク/リターン曲線が存在しない）ことを検証済み。
+ * 0が「安全に押し切れる限界」を表す値として最も検証価値が高いためこれを採用した */
+const PUSHER_FUEL_BUFFER = 0;
 
 /**
  * フォーク選択bot。「一度入ったレーンは次のフォークまで変えられない」設計のため、単純に固定レーンへ
@@ -163,7 +176,8 @@ class Bot {
     const nextBand = Math.floor(p.x / BAND_SIZE);
 
     if (s.phase === 'shop') {
-      const priority = this.strategy === 'blind' ? BLIND_PRIORITY : PLANNER_PRIORITY;
+      const priority =
+        this.strategy === 'blind' ? BLIND_PRIORITY : this.strategy === 'pusher' ? PUSHER_PRIORITY : PLANNER_PRIORITY;
       for (const id of priority) {
         const item = s.shop.find((it) => it.id === id);
         if (item && item.nextCost !== null && s.player.money >= item.nextCost) {
@@ -180,7 +194,11 @@ class Bot {
       return this.moveTowardChosenLane(s, nextBand);
     }
 
-    const needsReturn = p.fuel <= 0 || p.cargoUnits >= p.maxCapacity || p.miningRiskLevel === 'danger';
+    const pusherMarginless = p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + PUSHER_FUEL_BUFFER;
+    const needsReturn =
+      p.fuel <= 0 ||
+      p.cargoUnits >= p.maxCapacity ||
+      (this.strategy === 'pusher' ? pusherMarginless : p.miningRiskLevel === 'danger');
     if (needsReturn) {
       const dir = bfsToHome(s);
       if (dir) return { type: 'move', dir };
@@ -285,7 +303,7 @@ const seeds = (argVal('seeds') ?? '1,2,3,4,5').split(',').map(Number);
 const maxTicks = Number(argVal('maxTicks') ?? 20000);
 
 console.log(`# Forkshaft headless simulation  (field ${LENGTH - 1}x${LANES}, ${NUM_BANDS} bands, maxTicks=${maxTicks})`);
-for (const strategy of ['blind', 'planner'] as Strategy[]) {
+for (const strategy of ['blind', 'planner', 'pusher'] as Strategy[]) {
   const results: RunResult[] = [];
   for (const seed of seeds) {
     const r = runOne(seed, strategy, maxTicks);
