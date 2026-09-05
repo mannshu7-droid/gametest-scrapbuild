@@ -85,30 +85,47 @@ const PLANNER_PRIORITY: UpgradeId[] = ['scanner', 'drill', 'charge', 'capacity',
  */
 class Bot {
   private progressLane = new Map<number, number>();
-  private blockedLane = new Map<number, Set<number>>();
-  private lastDrillLevel = 0;
+  /** band -> lane -> そのレーンで実際に詰まった際の要求ドリル威力（現在のドリル威力がこれ未満の間だけ詰みとして扱う）。
+   * 以前は「ドリル威力が変わるたび全バンドの詰み記憶を丸ごとクリア」していたが、3レーン中2レーンを
+   * 詰みと判定した直後に強化を1回買うと記憶が消え、正しい3レーン目に到達する前に同じ2レーンを
+   * 再度詰みと確認して……を繰り返す無限ループに陥っていた（v2で発見・修正）。要求値を覚えておき
+   * 現在のドリル威力で解消したかだけを判定すれば、全消去せずに正しく再挑戦できる */
+  private blockedLane = new Map<number, Map<number, number>>();
   private farthestX = 0;
+  /** 燃料残量ベースの安全マージン（estFuelToReturn）で往復可能な距離の壁に達すると、レーン自体は
+   * 「詰み」と判定されない（ドリル威力は足りている）のに、既に掘削済みの床を往復するだけで新しい鉱石に
+   * 一切届かず、そのため詰みからの脱出手段（stuckIncome）も発動しないまま無限に出発→即撤退を繰り返す、
+   * という第2の停滞パターン（v2で発見）。「直近の外出で前進距離・採掘量のどちらも増えなかった」を
+   * 検知して回数を数え、一定回数続いたらホームで待機に切り替え、脱出手段の発動条件を満たせるようにする */
+  private prevPhase: 'mine' | 'shop' | 'gameover' = 'shop';
+  private snapshotAtHome = { maxDistance: 0, oreMined: 0 };
+  private noGainStreak = 0;
+  private static readonly NO_GAIN_WAIT_THRESHOLD = 3;
 
   constructor(private strategy: Strategy) {}
 
-  private candidateLanes(band: number): number[] {
+  private candidateLanes(band: number, drillPower: number): number[] {
     const blocked = this.blockedLane.get(band);
     const all = [0, 1, 2];
     if (!blocked || blocked.size === 0) return all;
-    return all.filter((l) => !blocked.has(l));
+    return all.filter((l) => {
+      const req = blocked.get(l);
+      return req === undefined || drillPower >= req;
+    });
   }
 
   /** そのバンドの3レーン全てが現在のドリル威力では詰みと判明済みか */
-  private allLanesBlocked(band: number): boolean {
-    return (this.blockedLane.get(band)?.size ?? 0) >= 3;
+  private allLanesBlocked(band: number, drillPower: number): boolean {
+    return this.candidateLanes(band, drillPower).length === 0;
   }
 
-  private chooseLane(s: GameState, band: number): number {
+  private chooseLane(s: GameState, band: number, drillPower: number): number {
     const blocked = this.blockedLane.get(band);
     const progress = this.progressLane.get(band);
-    if (progress !== undefined && !(blocked && blocked.has(progress))) return progress; // 既に前進済みの経路を再利用
+    const progressBlocked = progress !== undefined && blocked?.get(progress) !== undefined && drillPower < blocked.get(progress)!;
+    if (progress !== undefined && !progressBlocked) return progress; // 既に前進済みの経路を再利用
 
-    const candidates = this.candidateLanes(band);
+    const candidates = this.candidateLanes(band, drillPower);
     if (candidates.length === 0) return 0; // 全滅（呼び出し側でallLanesBlockedとして扱われるはずの防御的フォールバック）
     if (this.strategy === 'blind') return candidates[0];
 
@@ -130,14 +147,17 @@ class Bot {
   }
 
   decide(s: GameState): Action {
-    if (s.player.drillPower !== this.lastDrillLevel) {
-      this.lastDrillLevel = s.player.drillPower;
-      this.blockedLane.clear(); // 強化後は詰みレーンも掘れる可能性があるため再挑戦を許す
-    }
     if (s.player.x > this.farthestX) {
       this.farthestX = s.player.x;
       if (s.player.x > 0) this.progressLane.set(bandAt(s.player.x), s.player.y);
     }
+    if (this.prevPhase !== 'shop' && s.phase === 'shop') {
+      // ちょうどホームに帰着した瞬間: 直前の外出で前進距離・採掘量のどちらかが伸びたかを確認する
+      const gained = s.metrics.maxDistance > this.snapshotAtHome.maxDistance || s.metrics.oreMined > this.snapshotAtHome.oreMined;
+      this.noGainStreak = gained ? 0 : this.noGainStreak + 1;
+      this.snapshotAtHome = { maxDistance: s.metrics.maxDistance, oreMined: s.metrics.oreMined };
+    }
+    this.prevPhase = s.phase;
 
     const p = s.player;
     const nextBand = Math.floor(p.x / BAND_SIZE);
@@ -147,12 +167,16 @@ class Bot {
       for (const id of priority) {
         const item = s.shop.find((it) => it.id === id);
         if (item && item.nextCost !== null && s.player.money >= item.nextCost) {
+          this.noGainStreak = 0; // 強化後は状況が変わるため、待機を解除して即再挑戦を許す
           return { type: 'buy', item: id };
         }
       }
-      // 次バンドの全レーンが詰みと判明済みなら、無駄に出発せずホームで足踏みして
-      // 詰みからの脱出手段（stuckIncome）が資金を貯めるのを待つ（ドリル強化で自動的に再挑戦になる）
-      if (this.allLanesBlocked(nextBand)) return { type: 'wait' };
+      // 次バンドの全レーンが詰みと判明済み、または直近の外出が続けて空振り（燃料切れの安全マージンで
+      // 新しい鉱石に届かない等）なら、無駄に出発せずホームで足踏みして詰みからの脱出手段
+      // （stuckIncome）が資金を貯めるのを待つ（強化を買えば上のガードで即座に再挑戦になる）
+      if (this.allLanesBlocked(nextBand, p.drillPower) || this.noGainStreak >= Bot.NO_GAIN_WAIT_THRESHOLD) {
+        return { type: 'wait' };
+      }
       return this.moveTowardChosenLane(s, nextBand);
     }
 
@@ -164,7 +188,7 @@ class Bot {
 
     if (p.atFork) {
       // 遠方のフォークで詰みと判明した場合は、そこで足踏みせずホームへ戻って強化を待つ
-      if (p.x > 0 && this.allLanesBlocked(nextBand)) {
+      if (p.x > 0 && this.allLanesBlocked(nextBand, p.drillPower)) {
         const dir = bfsToHome(s);
         if (dir) return { type: 'move', dir };
       }
@@ -178,15 +202,17 @@ class Bot {
       if (t === TILE.FLOOR || canDig(s, nx, p.y)) return { type: 'move', dir: 'right' };
     }
     const band = bandAt(p.x);
-    if (!this.blockedLane.has(band)) this.blockedLane.set(band, new Set());
-    this.blockedLane.get(band)!.add(p.y);
+    const blockingTile = tileAt(s, nx, p.y);
+    const requiredPower = blockingTile === null ? p.drillPower + 1 : requiredDrillPower(blockingTile as TileId, band);
+    if (!this.blockedLane.has(band)) this.blockedLane.set(band, new Map());
+    this.blockedLane.get(band)!.set(p.y, requiredPower);
     const dir = bfsToHome(s);
     if (dir) return { type: 'move', dir };
     return { type: 'wait' };
   }
 
   private moveTowardChosenLane(s: GameState, nextBand: number): Action {
-    const target = this.chooseLane(s, nextBand);
+    const target = this.chooseLane(s, nextBand, s.player.drillPower);
     if (s.player.y < target) return { type: 'move', dir: 'down' };
     if (s.player.y > target) return { type: 'move', dir: 'up' };
     return { type: 'move', dir: 'right' };

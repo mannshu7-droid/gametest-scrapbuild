@@ -176,8 +176,17 @@ function hazardMultOf(hazardresistLevel: number): number {
   return Math.max(0.55, 1 - 0.15 * hazardresistLevel);
 }
 function maxChargeOf(chargeLevel: number): number {
-  return chargeLevel === 0 ? 0 : 4 + chargeLevel * 2;
+  return chargeLevel === 0 ? 0 : 2 + chargeLevel * 2;
 }
+
+/** 鉱石種別ごとの共鳴チャージ増分。要求ドリル威力が高い（=投資が必要な）鉱石ほど多く貯まり、
+ * 「ドリル威力への投資→高価値鉱石へ到達→チャージがより速く満タンになる」というシナジーを強める */
+const CHARGE_GAIN: Partial<Record<TileId, number>> = {
+  [TILE.ORE_COPPER]: 1,
+  [TILE.ORE_IRON]: 2,
+  [TILE.ORE_GOLD]: 3,
+  [TILE.ORE_PLATINUM]: 4,
+};
 
 interface PlayerState {
   x: number;
@@ -512,7 +521,7 @@ export class Game {
         this.player.cargoUnits++;
         this.player.cargoValue += oreValue(type, band);
         this.metrics.oreMined++;
-        this.player.charge = Math.min(this.maxCharge(), this.player.charge + 1);
+        this.player.charge = Math.min(this.maxCharge(), this.player.charge + (CHARGE_GAIN[type] ?? 1));
       } else {
         this.metrics.oreWasted++;
       }
