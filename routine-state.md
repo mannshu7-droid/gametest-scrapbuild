@@ -15,26 +15,29 @@
   詳細はspecs/018-flagship-veinsight/spec.mdの「スコープ外」節参照）
 - 対象ゲーム番号: **018-flagship-veinsight**（サイクル24・1回目で決定・実装済み）。016の全システム
   （拠点防衛タレットまで）を継承しつつ、mining側にフォグ（非対称の情報公開）と共鳴チャージを追加
-- 次に行う回: **3回目（FIX only）**
-- **サイクル24・2回目（reviews/018-flagship-veinsight-v2.md）の判定はFIX。v1の重大課題（コアファン
-  仮説不成立）を解消済み: scanner基礎コスト18→11・charge基礎コスト22→12（growth1.7→1.5）へ引き下げ、
-  共鳴チャージ増分（銅/鉄/金）+1/+2/+3→+2/+3/+5へ強化、'planner'専用に探査済みバンドの豊富な
-  レーンへ意図的に寄る`pickRichestRevealedLane`を追加、検証botの`canDig()`のUNSCANNED過小評価も
-  worst-case判定へ修正。20シード再検証で'planner'が'blind'をavgScore(+16.3%)・avgMaxDistance(+18.9%)・
-  avgKills(+9.5%)・avgOreMined(+151.6%)で上回りコアファン仮説の成立を確認した。3回目で対応すべき
-  課題（優先度順、いずれも軽微・参考でFIX必須ではないため取捨選択してよい）**:
-  1. 軽微・継続: 共鳴チャージの発動頻度は改善したが完全解消ではない（cautious11.7・pusher13.1・
-     planner15.6回/セッション、v1比で改善済み）。さらなる増分強化や上限見直しの余地があるか検討する
-  2. 軽微・継続: P01のための「探査結果を見てレーンを選ぶ」計画的なbot戦略は'planner'にのみ追加した。
-     P01（PUSHER_PRIORITY流用）にも同種のロジックを追加すればA5仮説検証・A1経済の評価精度が
-     上がる可能性があるが、P01は夜フェーズ到達前に前線戦闘で決着する構造的傾向があるため
-     費用対効果を見て判断してよい
-  3. 参考: cautious/pusherのavgScoreがv1比で軽微に低下（-6〜8%、死亡率は概ね維持・改善）。
-     scanner/charge最大Lv到達による資金配分の変化とcanDig()修正による経路変化が原因と推定。
-     016までのシステムに致命的回帰はないため対応不要と判断済みだが、4回目の総括で再確認すること
-  4. 参考: p01のセッション展開（早期死亡までのtick数・score）がv1と個体差レベルで変化した
-     （決定論的PRNGの消費パターンがbotロジック変更でずれるため）。P01は夜フェーズ検証対象外の
-     運用ルールに該当し実害なしと判断済み
+- 次に行う回: **4回目（FINAL REVIEW）**
+- **サイクル24・3回目（FIX only、レビューなし・詳細はPR本文参照）**: v2引き継ぎ課題のうち#2
+  （P01専用の計画的レーン選択ロジック未実装）に対応した。`headless/simulate.ts`の
+  `pickRichestRevealedLane`によるバンド境界での意図的レーン選択（v2で'planner'専用に追加）を
+  'p01'にも適用範囲を広げた（cautious/pusher/blind/p02は戦略間比較の基準線を保つため無変更）。
+  20シード再検証でcautious/pusher/planner/blindのavgScore等は完全に無変化（既存戦略のロジックは
+  一切変更していないため）、p01は20シードでavgResonanceTriggers=3.4・avgScannerLv=2.5と条件成立
+  ケースが存在することを確認したが、v2と同一のペルソナ再現シード（301,302,311,312、maxTicks30000）
+  では4シードともtick/score/scannerLv/chargeLvがv2と完全一致（早期死亡がバンド境界到達前に発生する
+  ため新ロジックが発火しなかった）。これはv2レビューの想定通り（「P01は夜フェーズ到達前に前線戦闘で
+  決着する構造的傾向があるため効果は限定的」）であり、新規の悪影響もないため意図通りの結果と判断した。
+  残りの課題（v2引き継ぎ#1・#3・#4）は下記の通り扱った:
+  - #1（共鳴チャージ発動頻度のさらなる増分強化・上限見直し）: 見送り。v2で既にavgScore/avgKills/
+    avgOreMinedでコアファン仮説を明確に実証済みの状態からさらに数値をいじると、2回のFIXサイクルを
+    経てようやく安定した既存のバランス（scanner/charge基礎コスト・共鳴チャージ増分）を再び崩す
+    リスクの方が大きいと判断した。発動頻度（cautious11.7・pusher13.1・planner15.6回/セッション）は
+    「軽微・参考」レベルまで既に改善済みであり、4回目の総括で体感面の課題として残るか再確認する
+  - #3（cautious/pusherのavgScore軽微低下）: v2レビューで「対応不要」と判定済みのため今回も不変更。
+    20シード再検証でも数値は完全に同一（avgScore cautious2900.4・pusher2577.1、死亡数2/20・10/20）
+  - #4（p01のRNG消費パターンのシード依存変化）: ボットロジックを変更した以上、原理的に解消しない
+    参考事項のため対応不要（v2から変わらぬ運用ルール）
+  - `npm run build`・`npm run simulate`（20シード×5戦略、ペルソナ再現4シード）とも正常完了、
+    既存戦略への回帰なしを確認
 - **サイクル23-final（reviews/017-mining-forkshaft-final.md）からの引き継ぎ事項（継続分）**:
   1. 017の最終決定: band5（x=201-240）は燃料タンク最大強化・安全マージンを0まで削っても往復前提では
      構造的に到達不能と判明し、**バグではなく「一方通行の捨て身プレイ」専用区画として受け入れる**と
@@ -800,6 +803,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-06 | 23 | 4（FINAL REVIEW） | 017-mining-forkshaftの総括レビュー（reviews/017-mining-forkshaft-final.md）を作成。20シード×3戦略をmaxTicks=60000で再検証し（pusher avgMaxDistance166.7・avgScore820.4、死亡0/20を維持）、band5(x=201-240)到達性について一時スクリプト（P01=band5狙いのリスクテイクbot・安全マージンをバッファ0まで削る／P02=保守bot、各5シード×maxTicks=60000、レビュー後削除）で再検証した。P01でもmaxDistance平均166.2止まりでP02（160.2）比+3.7%の上積みに留まり、「安全マージンを0まで削っても僅かな上積みにしかならず、僅かでも踏み込むと死亡率が崖状に転落する」という v3の発見を追試確認した。最終判断として**band5はバグではなく「一方通行の捨て身プレイ」専用区画として受け入れる**とspec.mdに追記し（燃料タンクmaxLevel引き上げ等の設計変更は不要と判定）、一方でリスクカーブの非連続性自体はP01視点でN6（渋い報酬）に近く次の類似設計への教訓として持ち越した。P01基本点約3.9/5・P02基本点約3.3/5（P02はE4想像の余地の構造的欠如が主因、003・011でも同様の結果）で判定**FIX**。「フォーク型一本道分岐」「非対称の情報公開」「三位一体シナジー（探査×ドリル威力×チャージ）」を採掘パターンとして採用すべきと結論し、次サイクルは（1）本命ゲーム統合フェーズ（018-flagship-*）でmining側にこれらのパターンを統合、（2）安全圏外ボーナス領域のリスクカーブを緩やかにする新規mining単体プロトタイプ、の2案を提示し(1)を優先案とした。ブラウザAIP実プレイは22サイクル連続で無人セッション制約により未実施。games/README.mdの索引を更新し、routine-state.mdをサイクル24・run1へ進めた | (本PR) |
 | 2026-09-07 | 24 | 1（BUILD+REVIEW） | cycle23-finalの提案(1)を受け、016-flagship-emplacementを土台に`018-flagship-veinsight`を新規実装。016の全システム（拠点防衛タレットまで）を継承し、017-mining-forkshaftの「非対称の情報公開」（未到達バンドはフォグ`TILE.UNSCANNED`に包まれ、危険タイル(GAS/UNSTABLE)のみ1バンド先まで常に見えるが、豊富さ含む実体は探査ドリル`scanner`投資でしか見えない）と「共鳴チャージ」（`charge`を満タンにして次の採掘で同x座標の他4レーンを巻き込み採掘、鉱石階層比例で蓄積）の2点をmining側へ移植した。017の「フォーク型一本道分岐」は016までの横方向帯状フィールド（自由なレーン変更前提の戦闘・建築・タレット配置）と根本的に噛み合わないため対象外と判断した。フォグは`getState()`が返す表示専用の変換（`visibleTiles()`）としてのみ実装し、内部の掘削・戦闘・拠点防衛ロジックは常に実タイルを参照するため016までの全システムへの回帰リスクを最小化した。ヘッドレスシミュレーションに新設した'planner'（scanner/charge最優先で購入）'blind'（一切購入しない）の2戦略で20シード×maxTicks=20000を比較したところ、**'blind'が'planner'をavgScore(2234.5 vs 1972.5)・avgMaxDistance(104.3 vs 98.0)・avgKills(213.9 vs 185.9)のいずれでも上回り、コアファン仮説の中核「情報投資が経済成長の差になる」がv1時点では不成立**と判明した。scanner(基礎コスト18)/charge(22)がdrill(30)と同格の価格帯でdrill/fuel投資と競合する機会費用が原因と推定。加えて`headless/simulate.ts`の`canDig()`がフォグ越しのUNSCANNEDタイルの要求ドリル威力を実際より低く見積もる検証ボット側の限界（ゲーム本体のバグではない）も発見し、この比較を歪めている懸念があると記録した。視界制限（1バンド先読み）由来の理不尽な死は0件（プレイヤーは1マスずつしか移動できないため次に踏みうるタイルのbandは「到達済み」か「1バンド先」に限られ、危険タイルはこの2ケースで常に実体が見える設計にした結果）。cautious/pusher/planner/blind×20シード×maxTicks=20000、p01/p02×4シード×maxTicks=30000、p02/pusher×4シード×maxTicks=60000の合計92セッションでクラッシュ・回帰は0件、homeDestroyedも0件。P01は4シード全てplayerHp死（013〜017と同じ既知の構造的ミスマッチ）、P02は4シード全てmaxTicks到達まで生存し拠点防衛システムは無回帰。npm run build / npm run simulateとも正常終了。ブラウザAIP実プレイは`preview_start`を試み24サイクル連続で同一の拒否を再確認（`.claude/launch.json`にport 5187で`veinsight`設定を追加済み）。reviews/018-flagship-veinsight-v1.md作成、判定FIX。games/README.mdの索引を更新し、routine-state.mdをサイクル24・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-09-10 | 24 | 2（FIX+REVIEW） | v1最優先課題（バグ#1、重大: scanner/charge投資のROIがマイナスで'blind'が'planner'を上回っていた）に対応。`src/core/game.ts`でscanner基礎コスト18→11（growth1.6維持）、charge基礎コスト22→12・growth1.7→1.5へ引き下げ（maxLevel到達までの累計コストはscanner93→57・charge123→57）、共鳴チャージ増分を銅+1→+2・鉄+2→+3・金+3→+5へ強化した。あわせてv1バグ#2（`headless/simulate.ts`の`canDig()`がフォグ越しUNSCANNEDタイルの要求ドリル威力をtier0として過小評価していた検証bot側の限界）を「未知はORE_GOLD(tier3)相当のworst-caseで判定」する方式へ修正し、v1バグ#3・Learnings#4（共鳴チャージを狙って発動する判断が未実装）に対応するため'planner'専用に探査済みバンドで鉱石密度が最も高いレーンへ意図的に寄ってから越境する`pickRichestRevealedLane()`を新規追加した（他戦略は無変更、'planner'限定の変更で比較可能性を保持）。20シード再検証（`--seeds 1-20 --maxTicks 20000`）で**'planner'が'blind'をavgScore(2561.5 vs 2202.7、+16.3%)・avgMaxDistance(91.9 vs 77.3、+18.9%)・avgKills(248.3 vs 226.8、+9.5%)・avgOreMined(69.7 vs 27.7、+151.6%)のいずれでも上回り、コアファン仮説「情報投資が経済成長の差になる」の成立を確認**（avgScannerLv/avgChargeLvともほぼ全ランmaxLevelの3.0に到達）。avgResonanceTriggersも5.9→15.6・avgResonanceBonusOreも6.5→13.9へ改善。既存2戦略（cautious/pusher）はavgScoreが軽微に低下（-6〜8%）したが死亡率は概ね維持・改善（pusher12/20→10/20）で016までのシステムに致命的回帰なし、3シード×maxTicks=60000の長時間チェックでもクラッシュなくplannerの優位を再確認した。P02（4シード×maxTicks=30000）は無回帰（homeDestroyed0件、avgScore3957.5→4111.5）、P01は既知の構造的ミスマッチにより4シード全て早期死亡のまま（個々のtick/scoreはbotロジック変更によるRNG消費パターンのずれで変化したが評価対象外のため実害なし）。npm run build / npm run simulateとも正常終了。ブラウザAIP実プレイは`preview_start`を試み25サイクル連続で同一の拒否を再確認。reviews/018-flagship-veinsight-v2.md作成、判定FIX。spec.mdのショップ・共鳴チャージ表とAI評価の観点を更新、games/README.mdの索引を更新し、package.jsonのversionを0.2.0へ、routine-state.mdをサイクル24・run3（FIX only）へ進めた | (本PR) |
+| 2026-09-10 | 24 | 3（FIX only） | v2引き継ぎ課題#2（P01専用の「探査結果を見てレーンを選ぶ」計画的なbot戦略が'planner'にのみ実装されていた問題）に対応。`src/core/game.ts`は無変更、`headless/simulate.ts`のみ変更。v2で'planner'専用に追加した`pickRichestRevealedLane()`によるバンド境界での意図的レーン選択の適用対象を'p01'にも拡大した（cautious/pusher/blind/p02は戦略間比較の基準線を保つため無変更）。20シード再検証（`--seeds 1-20 --maxTicks 20000`）でcautious/pusher/planner/blindの全指標がv2と完全一致（ロジック変更なしのため回帰なし）、p01は新条件（scannerLv>=1かつバンド境界直前）が成立するランが存在しavgResonanceTriggers=3.4・avgScannerLv=2.5を記録したが、v2と同一のペルソナ再現シード（301,302,311,312、`--maxTicks 30000`）では4シードともtick/score/scannerLv/chargeLvがv2と完全一致し新ロジックは発火しなかった（P01が夜フェーズ到達前・バンド境界到達前に早期死亡する構造的傾向のため、v2レビューが事前に想定した通りの結果）。残る引き継ぎ課題は今回見送りと判断: #1（共鳴チャージ発動頻度のさらなる増分強化・上限見直し）は、2回のFIXサイクルを経て確立したコアファン仮説の実証済みバランスを崩すリスクの方が大きいため次回総括まで様子見、#3（cautious/pusherのavgScore軽微低下）・#4（p01のRNG消費パターンのシード依存変化）はv2レビューで既に「対応不要」と判定済みのため今回も不変更（20シード再検証でも数値は完全同一）。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、routine-state.mdをサイクル24・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
