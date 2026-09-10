@@ -24,7 +24,7 @@
  *   scanner/chargeを一切買わずフォグの外へ機械的に突っ込み続ける'blind'と、
  *   他の何よりも先にscanner/chargeへ投資してから前進する'planner'の2戦略を新設した
  */
-import { Game, FIELD_WIDTH, LANE_COUNT, LENGTH, bandAt, requiredDrillPower } from '../src/core/game';
+import { Game, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type Dir, type Enemy, type GameState, type ShopItemId, type TileId } from '../src/core/types';
 
 const DELTA: Record<Dir, [number, number]> = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
@@ -149,14 +149,54 @@ function pickWorstForecastBase(s: GameState): { x: number; isHome: boolean; leve
   return best;
 }
 
+/**
+ * v2 FIX（v1バグ#2）: フォグ越しのUNSCANNEDタイルは実タイル種が分からないため、`requiredDrillPower`に
+ * そのまま渡すとTIER未定義でtier0扱いになり実際より要求ドリル威力を低く見積もっていた。
+ * 「未知＝最悪ケース（最も硬いORE_GOLD、tier3）を仮定する」判定に変更し、scanner投資で実タイルが
+ * 見えている場合とそうでない場合の差（=情報投資の価値）を正しく反映する
+ */
 function canDig(s: GameState, x: number, y: number): boolean {
   const t = tileAt(s, x, y);
   if (t === null || t === TILE.FLOOR) return false;
   const band = Math.max(0, bandAt(x));
-  return s.player.drillPower >= requiredDrillPower(t as TileId, band);
+  const worstCase = t === TILE.UNSCANNED;
+  const req = requiredDrillPower(worstCase ? TILE.ORE_GOLD : (t as TileId), band);
+  return s.player.drillPower >= req;
 }
 function isHazard(t: number | null): boolean {
   return t === TILE.GAS || t === TILE.UNSTABLE;
+}
+function isOre(t: number | null): boolean {
+  return t === TILE.ORE_COPPER || t === TILE.ORE_IRON || t === TILE.ORE_GOLD;
+}
+/**
+ * v2新規: scannerで見えているバンドの中で最も鉱石密度が高いレーンを返す（見えていなければnull）。
+ * v1のヘッドレスbotは探査で得た情報を一切使わず機械的に前進するだけだったため、'planner'が
+ * scanner/charge投資を実際に活かして意図的にレーンを選べるようにする（v1レビューLearnings#4）
+ */
+function pickRichestRevealedLane(s: GameState, band: number): number | null {
+  const startX = band * BAND_SIZE + 1;
+  const endX = Math.min(FIELD_WIDTH, startX + BAND_SIZE - 1);
+  const counts = new Array<number>(LANE_COUNT).fill(0);
+  let revealedAny = false;
+  for (let x = startX; x <= endX; x++) {
+    for (let y = 0; y < LANE_COUNT; y++) {
+      const t = tileAt(s, x, y);
+      if (t === null || t === TILE.UNSCANNED) continue;
+      revealedAny = true;
+      if (isOre(t)) counts[y]++;
+    }
+  }
+  if (!revealedAny) return null;
+  let bestY = 0;
+  let bestCount = -1;
+  for (let y = 0; y < LANE_COUNT; y++) {
+    if (counts[y] > bestCount) {
+      bestCount = counts[y];
+      bestY = y;
+    }
+  }
+  return bestY;
 }
 /** dir方向が実際に前進可能か（既にFLOOR、またはドリル威力で掘削可能）。
  * v2 FIX: 敵を追う移動がこれを確認せず、ドリル威力不足で掘れない壁の前で敵と睨み合ったまま
@@ -403,6 +443,22 @@ class Bot {
         }
         // 追う方向が実際に前進可能な時だけ追う。掘削不可の壁越しなら採掘ロジックへフォールバック
         if (canAdvance(s, towardDir)) return { type: 'move', dir: towardDir };
+      }
+    }
+
+    // v2新規（v1レビューLearnings#4）: 'planner'はバンド境界が近く、探査ドリルで次バンドが
+    // 見えている場合、最も鉱石密度が高いレーンへ意図的に寄ってから越境する。バンド途中では
+    // 頻繁なレーン変更を避けるため境界の直前（残りx<=6）でのみ判断する
+    const scannerLv = s.shop.find((it) => it.id === 'scanner')?.level ?? 0;
+    if (this.strategy === 'planner' && scannerLv >= 1) {
+      const band = Math.max(0, bandAt(p.x));
+      const bandEndX = (band + 1) * BAND_SIZE;
+      if (bandEndX - p.x <= 6 && bandEndX < FIELD_WIDTH) {
+        const richY = pickRichestRevealedLane(s, band + 1);
+        if (richY !== null && richY !== p.y) {
+          const dir: Dir = richY > p.y ? 'down' : 'up';
+          if (canAdvance(s, dir)) return { type: 'move', dir };
+        }
       }
     }
 

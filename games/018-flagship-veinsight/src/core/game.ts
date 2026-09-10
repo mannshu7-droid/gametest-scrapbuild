@@ -24,7 +24,7 @@ import {
 export const FIELD_WIDTH = 320;
 export const LANE_COUNT = 5;
 export const LENGTH = FIELD_WIDTH + 1;
-const BAND_SIZE = 40;
+export const BAND_SIZE = 40;
 export const HOME_RADIUS = 3;
 export const OUTPOST_RADIUS = 2;
 export const OUTPOST_MIN_GAP = 50;
@@ -168,9 +168,9 @@ function maxChargeOf(chargeLv: number): number {
 /** 鉱石種別ごとの共鳴チャージ増分。要求ドリル威力が高い（＝投資が必要な）鉱石ほど多く貯まり、
  * 「ドリル威力への投資→高価値鉱石へ到達→チャージがより速く満タンになる」というシナジーを強める（017と同一） */
 const CHARGE_GAIN: Partial<Record<TileId, number>> = {
-  [TILE.ORE_COPPER]: 1,
-  [TILE.ORE_IRON]: 2,
-  [TILE.ORE_GOLD]: 3,
+  [TILE.ORE_COPPER]: 2,
+  [TILE.ORE_IRON]: 3,
+  [TILE.ORE_GOLD]: 5,
 };
 
 // ---- 拠点ごとの脅威予告(baseForecasts、014新規): 昼のうちに「今夜どの拠点が危ないか」を伝える ----
@@ -363,7 +363,11 @@ const SHOP_DEFS: ShopDef[] = [
     id: 'scanner',
     name: '探査ドリル',
     desc: 'まだ到達していない先のバンドを見通せる距離+1バンド（018新規、017の非対称の情報公開を移植）。危険度は探査Lv0でも1バンド先まで常に見えるが、豊富さ（実際の鉱石）はLv1以上でしか見えない',
-    baseCost: 18,
+    // v1(baseCost18)はdrill(30)と同格の価格帯でoffense/vitality/drill等の既存投資先と競合し
+    // 機会費用が情報投資のリターンを上回っていた（v1レビュー#1）。018は017と違い多数の既存投資先が
+    // あるため、017と同一の価格構造を移植するだけでは不十分と判明し、v2で単独では明確に安価な
+    // 価格帯へ引き下げた
+    baseCost: 11,
     growth: 1.6,
     maxLevel: 3,
   },
@@ -371,8 +375,9 @@ const SHOP_DEFS: ShopDef[] = [
     id: 'charge',
     name: '共鳴チャージ',
     desc: 'Lv1で解禁、以降チャージ上限+2（018新規、017の共鳴チャージを移植）。鉱石を採掘するたびに階層比例でチャージが溜まり、満タン時に次の採掘で同じx座標の他レーンも要求ドリル威力さえ満たせば同時に採掘する',
-    baseCost: 22,
-    growth: 1.7,
+    // v1(baseCost22, growth1.7)からv2で引き下げ（理由は scanner と同様）
+    baseCost: 12,
+    growth: 1.5,
     maxLevel: 3,
   },
 ];
