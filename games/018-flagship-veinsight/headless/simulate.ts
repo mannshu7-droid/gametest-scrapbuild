@@ -449,8 +449,12 @@ class Bot {
     // v2新規（v1レビューLearnings#4）: 'planner'はバンド境界が近く、探査ドリルで次バンドが
     // 見えている場合、最も鉱石密度が高いレーンへ意図的に寄ってから越境する。バンド途中では
     // 頻繁なレーン変更を避けるため境界の直前（残りx<=6）でのみ判断する
+    // v3新規（v2レビューroutine-state課題#2）: p01にも同種のロジックを追加する。P01は夜フェーズ
+    // 到達前に前線戦闘で決着する構造的傾向があり効果は限定的と見込まれるが、A5仮説検証・A1経済の
+    // 評価精度を上げるため'planner'限定だった判断を'p01'にも広げる（cautious/pusher/blind/p02は
+    // 戦略間比較の基準線を保つため無変更のまま据え置く）
     const scannerLv = s.shop.find((it) => it.id === 'scanner')?.level ?? 0;
-    if (this.strategy === 'planner' && scannerLv >= 1) {
+    if ((this.strategy === 'planner' || this.strategy === 'p01') && scannerLv >= 1) {
       const band = Math.max(0, bandAt(p.x));
       const bandEndX = (band + 1) * BAND_SIZE;
       if (bandEndX - p.x <= 6 && bandEndX < FIELD_WIDTH) {
