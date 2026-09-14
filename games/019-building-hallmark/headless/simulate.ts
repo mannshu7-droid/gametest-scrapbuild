@@ -17,9 +17,15 @@ import type { Action, GameState, StructMaterial } from '../src/core/types';
 
 type Strategy = 'careful' | 'informed' | 'braced' | 'reckless' | 'sloppy';
 
+/** HPがこの割合を下回ったら登坂を中断し地上へ退避する（v2で追加、004最大の積み残し対応の副作用だった「常に死んで終わる」問題への対策） */
+const RETREAT_HP_RATIO = 0.4;
+/** 地上退避後、この割合までHPが回復するまで再度登り始めない */
+const RESUME_HP_RATIO = 0.85;
+
 class Bot {
   private descending = false;
   private appraisalBuys = 0;
+  private recovering = false;
 
   constructor(private strategy: Strategy) {}
 
@@ -138,11 +144,28 @@ class Bot {
 
     if (p.y === 0) this.descending = false;
 
+    // HPが低くなったら登坂を中断し地上へ退避、地上で回復するまで再び登らない（careful/braced/informed限定の安全行動）
+    const smart = this.usesInsight() || this.usesBrace();
+    if (smart) {
+      if (p.hp / p.maxHp <= RETREAT_HP_RATIO && p.y > 0 && !this.descending) {
+        this.recovering = true;
+        this.descending = true;
+      }
+      if (this.recovering && p.y === 0 && p.hp / p.maxHp >= RESUME_HP_RATIO) {
+        this.recovering = false;
+      }
+    }
+
     if (this.descending) {
       return { type: 'move', dir: 'down' };
     }
 
-    if ((this.usesInsight() || this.usesBrace()) && s.shake.state !== 'idle' && s.structure.maxStressRatio > 0.55 && p.y > 0) {
+    if (this.recovering && p.y === 0) {
+      const buy = this.maybeBuy(s);
+      return buy ?? { type: 'wait' };
+    }
+
+    if (smart && s.shake.state !== 'idle' && s.structure.maxStressRatio > 0.55 && p.y > 0) {
       return { type: 'wait' };
     }
 
