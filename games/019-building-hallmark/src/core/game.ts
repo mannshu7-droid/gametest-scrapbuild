@@ -35,10 +35,15 @@ export const LABOR_INCOME_INTERVAL = 15;
 export const LABOR_INCOME_AMOUNT = 1;
 
 /** 構造材ロットの隠れた品質倍率の範囲（耐荷重にそのまま乗算される） */
-export const QUALITY_MIN = 0.7;
-export const QUALITY_MAX = 1.3;
-/** 鑑定Lv0→1→2→3への各段階のコスト */
-export const APPRAISAL_COSTS = [20, 35, 55];
+export const QUALITY_MIN = 0.5;
+export const QUALITY_MAX = 1.5;
+/** 鑑定Lv0→1→2→3への各段階のコスト（v1の20/35/55から引き下げ、情報投資のROIを改善） */
+export const APPRAISAL_COSTS = [6, 10, 16];
+/** 地上で回復するHP（地上滞在間隔ごとに+1、labor incomeと同じ間隔を流用） */
+export const HP_REGEN_INTERVAL = 10;
+export const HP_REGEN_AMOUNT = 1;
+/** マイルストーン報酬の逓増が緩やかになり始める高度（これ以上は増分が半減し、無限に登り続ける金銭的動機を薄める） */
+export const MILESTONE_TAPER_HEIGHT = 60;
 
 export const MATERIAL_DEFS: Record<Material, { cost: number; weight: number; capacity: number }> = {
   wood: { cost: 4, weight: 3, capacity: 8 },
@@ -132,6 +137,7 @@ export class Game {
   private groundedSet = new Set<string>();
   private stressMap = new Map<string, number>();
   private laborTicks = 0;
+  private hpRegenTicks = 0;
 
   private debrisHitAppliedThisTick = false;
 
@@ -173,19 +179,43 @@ export class Game {
     return false;
   }
 
-  /** (x,y)に適用される最良のbrace肩代わり率を返す（周囲にbraceが無ければ1=軽減なし） */
-  private braceFactorAt(x: number, y: number): number {
-    let best = 1;
+  /**
+   * (x,y)に適用される最良のbrace肩代わり率をブロック単位で返す関数を作る。
+   * 以前は全ノード×全brace×全braceの三重ループ(O(blocks^3))で毎回スキャンしていたが、
+   * brace一覧とlinked判定を1回だけ前計算するO(blocks*braces)方式に置き換えた
+   * （braceが多いタワーではブロック数の増加に伴いシミュレーション時間が急激に悪化していたため、
+   * v2でパフォーマンス改善として対応。数値上のバランスには影響しない）
+   */
+  private buildBraceFactorLookup(): (key: string) => number {
+    const braces: { x: number; y: number; linked: boolean }[] = [];
     for (const b of this.blocks.values()) {
-      if (b.material !== 'brace') continue;
-      const linked = this.braceLinked(b);
-      const radius = linked ? BRACE_RADIUS_LINKED : BRACE_RADIUS;
-      if (Math.abs(b.x - x) <= radius && Math.abs(b.y - y) <= radius) {
-        const factor = linked ? LINK_FACTOR : BRACE_FACTOR;
-        if (factor < best) best = factor;
+      if (b.material === 'brace') braces.push({ x: b.x, y: b.y, linked: false });
+    }
+    for (let i = 0; i < braces.length; i++) {
+      for (let j = i + 1; j < braces.length; j++) {
+        if (braces[i].linked && braces[j].linked) continue;
+        if (Math.abs(braces[i].x - braces[j].x) <= 1 && Math.abs(braces[i].y - braces[j].y) <= 1) {
+          braces[i].linked = true;
+          braces[j].linked = true;
+        }
       }
     }
-    return best;
+    const cache = new Map<string, number>();
+    return (key: string) => {
+      const cached = cache.get(key);
+      if (cached !== undefined) return cached;
+      const b = this.blocks.get(key)!;
+      let best = 1;
+      for (const br of braces) {
+        const radius = br.linked ? BRACE_RADIUS_LINKED : BRACE_RADIUS;
+        if (Math.abs(br.x - b.x) <= radius && Math.abs(br.y - b.y) <= radius) {
+          const factor = br.linked ? LINK_FACTOR : BRACE_FACTOR;
+          if (factor < best) best = factor;
+        }
+      }
+      cache.set(key, best);
+      return best;
+    };
   }
 
   private hasNearbyStabilizer(x: number, y: number, radius: number): boolean {
@@ -199,6 +229,12 @@ export class Game {
   private capacityOf(b: Block): number {
     if (b.material === 'brace' || b.material === 'stabilizer') return MATERIAL_DEFS[b.material].capacity;
     return MATERIAL_DEFS[b.material].capacity * b.qualityMult;
+  }
+
+  /** 品質が高いほど、その資材自身が下の構造へ伝える荷重が軽くなる（耐荷重が高いだけでなく伝達効率も良い） */
+  private qualityWeightFactor(b: Block): number {
+    if (b.material === 'brace' || b.material === 'stabilizer') return 1;
+    return 2 - b.qualityMult;
   }
 
   /** BFSで支持経路・負荷率を再計算する。戻り値は浮遊しているブロックのキー配列 */
@@ -231,15 +267,16 @@ export class Game {
       }
     }
 
+    const braceFactorOf = this.buildBraceFactorLookup();
+
     const subtreeWeight = new Map<string, number>();
     for (let i = queue.length - 1; i >= 0; i--) {
       const key = queue[i];
       const b = this.blocks.get(key)!;
       const def = MATERIAL_DEFS[b.material];
-      let sum = def.weight;
+      let sum = def.weight * this.qualityWeightFactor(b);
       for (const c of info.get(key)!.children) {
-        const childBlock = this.blocks.get(c)!;
-        const factor = this.braceFactorAt(childBlock.x, childBlock.y);
+        const factor = braceFactorOf(c);
         sum += (subtreeWeight.get(c) ?? 0) * factor;
       }
       subtreeWeight.set(key, sum);
@@ -261,8 +298,7 @@ export class Game {
       }
       let loadAbove = 0;
       for (const c of info.get(key)!.children) {
-        const childBlock = this.blocks.get(c)!;
-        const factor = this.braceFactorAt(childBlock.x, childBlock.y);
+        const factor = braceFactorOf(c);
         loadAbove += (subtreeWeight.get(c) ?? 0) * factor;
       }
       const load = loadAbove * windMult * shakeMult;
@@ -375,6 +411,24 @@ export class Game {
     }
   }
 
+  /** 地上（安全地帯）に留まっている間はHPが少しずつ回復する。「危険を感じたら地上へ退避する」ことに意味を持たせる */
+  private applyHpRegen(): void {
+    if (this.player.y !== 0 || this.player.hp >= this.player.maxHp) {
+      this.hpRegenTicks = 0;
+      return;
+    }
+    this.hpRegenTicks++;
+    if (this.hpRegenTicks >= HP_REGEN_INTERVAL) {
+      this.hpRegenTicks = 0;
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + HP_REGEN_AMOUNT);
+    }
+  }
+
+  private milestoneBonus(m: number): number {
+    if (m <= MILESTONE_TAPER_HEIGHT) return 15 + m * 3;
+    return 15 + MILESTONE_TAPER_HEIGHT * 3 + (m - MILESTONE_TAPER_HEIGHT) * 1.5;
+  }
+
   private applyMilestones(prevMax: number, newMax: number): void {
     for (
       let m = Math.floor(prevMax / MILESTONE_STEP) * MILESTONE_STEP + MILESTONE_STEP;
@@ -382,7 +436,7 @@ export class Game {
       m += MILESTONE_STEP
     ) {
       if (m <= prevMax) continue;
-      const bonus = 15 + m * 3;
+      const bonus = this.milestoneBonus(m);
       this.player.money += bonus;
       this.metrics.moneyEarned += bonus;
     }
@@ -521,6 +575,7 @@ export class Game {
     this.applyGravity();
     this.collectScrap();
     this.applyLaborIncome();
+    this.applyHpRegen();
 
     const prevMax = this.maxHeightReached;
     const newMax = Math.max(prevMax, this.player.y);
@@ -546,7 +601,8 @@ export class Game {
       (this.won ? 200 : 0) +
       Math.round(this.metrics.moneyEarned * 0.3) -
       this.metrics.collapseEvents * 5 -
-      Math.round(this.metrics.debrisDamageTaken * 0.5);
+      Math.round(this.metrics.debrisDamageTaken * 0.5) +
+      (this.over && this.player.hp > 0 ? 100 + Math.round(this.player.hp * 2) : 0);
 
     return this.getState();
   }
