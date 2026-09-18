@@ -200,6 +200,7 @@ interface RunResult {
   debrisDamageTaken: number;
   invalidActions: number;
   blindPlacements: number;
+  informedPlacements: number;
   avgPlacedQuality: number;
   appraisalLevel: number;
   linkedBraceCount: number;
@@ -232,6 +233,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     debrisDamageTaken: s.metrics.debrisDamageTaken,
     invalidActions: s.metrics.invalidActions,
     blindPlacements: s.metrics.blindPlacements,
+    informedPlacements: s.metrics.informedPlacements,
     avgPlacedQuality: s.metrics.avgPlacedQuality,
     appraisalLevel: s.shop.appraisalLevel,
     linkedBraceCount: s.structure.linkedBraceCount,
@@ -262,6 +264,6 @@ for (const strategy of strategies) {
   }
   const avg = (f: (r: RunResult) => number) => (results.reduce((a, r) => a + f(r), 0) / results.length).toFixed(2);
   console.log(
-    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMaxHeight=${avg((r) => r.maxHeight)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgBlocksPlaced=${avg((r) => r.blocksPlaced)} avgBlocksLost=${avg((r) => r.blocksLost)} avgCollapseEvents=${avg((r) => r.collapseEvents)} avgAppraisalLevel=${avg((r) => r.appraisalLevel)} avgPlacedQuality=${avg((r) => r.avgPlacedQuality)} avgLinkedBraces=${avg((r) => r.linkedBraceCount)} avgBlindPlacements=${avg((r) => r.blindPlacements)} wins=${results.filter((r) => r.won).length}/${results.length} deaths=${results.filter((r) => r.finalHp <= 0).length}/${results.length}`,
+    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMaxHeight=${avg((r) => r.maxHeight)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgBlocksPlaced=${avg((r) => r.blocksPlaced)} avgBlocksLost=${avg((r) => r.blocksLost)} avgCollapseEvents=${avg((r) => r.collapseEvents)} avgAppraisalLevel=${avg((r) => r.appraisalLevel)} avgPlacedQuality=${avg((r) => r.avgPlacedQuality)} avgInformedPlacements=${avg((r) => r.informedPlacements)} avgLinkedBraces=${avg((r) => r.linkedBraceCount)} avgBlindPlacements=${avg((r) => r.blindPlacements)} wins=${results.filter((r) => r.won).length}/${results.length} deaths=${results.filter((r) => r.finalHp <= 0).length}/${results.length}`,
   );
 }

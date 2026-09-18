@@ -44,6 +44,14 @@ export const HP_REGEN_INTERVAL = 10;
 export const HP_REGEN_AMOUNT = 1;
 /** マイルストーン報酬の逓増が緩やかになり始める高度（これ以上は増分が半減し、無限に登り続ける金銭的動機を薄める） */
 export const MILESTONE_TAPER_HEIGHT = 60;
+/**
+ * lotIndexを明示指定して(=鑑定情報を見て選別して)構造材を設置するたびに得られる少額のスコアボーナス。
+ * v2で鑑定投資のROIをscore/collapseEvents/blocksLostという効率指標で実証できたが、金銭ボーナスに
+ * すると braced 側の「資材購入に全額回せる」資金雪だるま効果と同じ土俵で競合し埋もれてしまうため、
+ * money経由ではなくscoreに直接加点することで、鑑定＋brace併用(careful)がbrace単体(braced)を
+ * 僅差で下回っていた逆転（v2バグ#5）を、money経済に影響を与えずに是正する
+ */
+export const INFORMED_PLACEMENT_SCORE_BONUS = 1.5;
 
 export const MATERIAL_DEFS: Record<Material, { cost: number; weight: number; capacity: number }> = {
   wood: { cost: 4, weight: 3, capacity: 8 },
@@ -155,6 +163,7 @@ export class Game {
     invalidActions: 0,
     ticksSurvived: 0,
     blindPlacements: 0,
+    informedPlacements: 0,
     avgPlacedQuality: 0,
     score: 0,
   };
@@ -500,6 +509,7 @@ export class Game {
             break;
           }
           if (action.lotIndex === undefined) this.metrics.blindPlacements++;
+          else this.metrics.informedPlacements++;
           const [q] = queueArr.splice(idx, 1);
           this.blocks.set(key, { x: tx, y: ty, material: mat, qualityMult: q });
           this.placedQualitySum += q;
@@ -602,6 +612,7 @@ export class Game {
       Math.round(this.metrics.moneyEarned * 0.3) -
       this.metrics.collapseEvents * 5 -
       Math.round(this.metrics.debrisDamageTaken * 0.5) +
+      Math.round(this.metrics.informedPlacements * INFORMED_PLACEMENT_SCORE_BONUS) +
       (this.over && this.player.hp > 0 ? 100 + Math.round(this.player.hp * 2) : 0);
 
     return this.getState();
