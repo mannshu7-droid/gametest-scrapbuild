@@ -44,6 +44,8 @@ export interface Metrics {
   ticksSurvived: number;
   /** lotIndexを指定せず(=キュー先頭任せで)構造材を設置した回数 */
   blindPlacements: number;
+  /** lotIndexを明示指定して(=鑑定情報を見て選別して)構造材を設置した回数 */
+  informedPlacements: number;
   /** これまでに設置した構造材(wood/stone/steel)の平均qualityMult */
   avgPlacedQuality: number;
   score: number;
