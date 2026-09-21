@@ -705,6 +705,9 @@ interface RunResult {
   turretShots: number;
   turretShieldedShots: number;
   turretDamageDealt: number;
+  deathPhase: 'day' | 'night' | null;
+  deathAtBase: boolean;
+  deathByRaider: boolean;
   hazardHits: number;
   hazardDamage: number;
   fuelEmptyTicks: number;
@@ -740,12 +743,26 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
   const game = new Game(seed);
   const bot = new Bot(strategy);
   let ticks = 0;
+  // 死亡直前の状況（v3新規、v2バグ#2の調査用）: 昼夜・拠点内か・近傍の敵がレイダーか
+  let deathPhase: 'day' | 'night' | null = null;
+  let deathAtBase = false;
+  let deathByRaider = false;
   while (!game.over && ticks < maxTicks) {
-    game.step(bot.decide(game.getState()));
+    const before = game.getState();
+    game.step(bot.decide(before));
     ticks++;
+    if (game.over && game.loseReason === 'playerHp') {
+      deathPhase = before.phase;
+      deathAtBase = inBaseRadius(before);
+      const near = (before.enemies ?? []).filter((e: { x: number; y: number }) => Math.max(Math.abs(e.x - before.player.x), Math.abs(e.y - before.player.y)) <= 3);
+      deathByRaider = near.some((e: { isRaider?: boolean }) => e.isRaider);
+    }
   }
   const s = game.getState();
   return {
+    deathPhase,
+    deathAtBase,
+    deathByRaider,
     seed,
     strategy,
     ticks,
