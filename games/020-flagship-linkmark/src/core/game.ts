@@ -137,7 +137,7 @@ const TURRET_HP = 60;
  * 両端レーン（y=0,4）を守るには別タイルへの追加配置が必要になる
  */
 const TURRET_RANGE = 1;
-const TURRET_DMG = 10;
+const TURRET_DMG = 24;
 const TURRET_ATK_CD_MAX = 8;
 /** 拠点1つあたりのタレット設置上限。無制限にすると壁の代わりに並べるだけの物量ゲーになり
  * 015final提案の「配置位置に応じて迎撃力が変わる」という悩ましさが失われるため上限を設ける */
@@ -184,8 +184,25 @@ const LOT_QUALITY_MIN = 0.5;
 const LOT_QUALITY_RANGE = 1.0;
 /** 連携（隣接チェビシェフ距離1に別のバリケード/タレット）中のobstacleが受ける被ダメージ倍率（019のbrace肩代わり率相当） */
 const LINK_DAMAGE_MULT = 0.6;
-/** 連携中のタレットの攻撃ダメージ倍率（隣接タレット同士の相乗効果） */
+/**
+ * 盾持ち（隣接にバリケードがある）タレットの攻撃ダメージ倍率。v2 FIXで「隣接するobstacleなら何でも」から
+ * 「隣接にバリケードがある」へ絞った（v1バグ#3: タレット3基の縦クラスタが5レーン全射程＋連携で
+ * 支配的最適解になっていた）。タレットを並べるだけでは火力ボーナスが付かず、バリケードを前に
+ * 置く維持コスト（バリケードは被弾で壊れる→建て直す）を払う必要がある
+ */
 const TURRET_LINK_DMG_MULT = 1.5;
+/**
+ * タレットの品質→攻撃ダメージの指数（v2 FIX、v1バグ#1）。v1は線形（品質×ダメージ）でタレットの撃破貢献自体が
+ * 小さく（1セッションのtaretKills3〜9）、品質+42%が成果に跳ね返らなかった。凸にして選別の差を広げる
+ * （期待値: 一様0.5〜1.5でE[q^1.5]≒1.03のため、鑑定なしプレイヤーの平均性能は据え置き）
+ */
+const TURRET_QUALITY_DMG_EXP = 2;
+/**
+ * バリケードへ効く品質の割合（v2 FIX）。バリケードのHPは 1+(品質-1)×BARRICADE_QUALITY_SPREAD 倍になる
+ * （0.5〜1.5 → 0.8〜1.2）。v1は品質を素のままHPへ乗せて鑑定なしプレイヤーへ純損失（-13.6%）が出たため
+ * ばらつきを1/5に抑え、それでも悪ロットの捨て先（＝良ロットをタレットへ温存する選別の後半）としては機能させる
+ */
+const BARRICADE_QUALITY_SPREAD = 0.4;
 /**
  * 鑑定Lv1以上で`lotIndex`を明示指定して建てるたびにscoreへ直接加点する。019 v3で「money経由だと
  * 強い既存システムの複利に埋もれる」と判明したためmoney非依存のscore直接加点にし、最初から設計に含める
@@ -483,6 +500,8 @@ export class Game {
   private buildLots: number[] = [];
   /** 連携判定のキャッシュ。obstacleの増減時のみ再計算する（毎回O(n²)のペアワイズ判定を避ける） */
   private linkedCache: Set<number> | null = null;
+  /** 隣接にバリケードがある（盾持ち）タレットのキー集合（v2、linkedCacheと同時に無効化・再計算する） */
+  private shieldedCache: Set<number> | null = null;
   private player: PlayerState;
   private enemies: Enemy[] = [];
   private barricades: Barricade[] = [];
@@ -542,6 +561,9 @@ export class Game {
     informedPlacements: 0,
     linkedPlacements: 0,
     linkSavedDamage: 0,
+    turretShots: 0,
+    turretShieldedShots: 0,
+    turretDamageDealt: 0,
     score: 0,
   };
 
@@ -748,24 +770,40 @@ export class Game {
   private linkedSet(): Set<number> {
     if (this.linkedCache) return this.linkedCache;
     const occ = new Set<number>();
+    const wallKeys = new Set<number>();
     const all: { x: number; y: number }[] = [...this.barricades, ...this.turrets];
     for (const o of all) occ.add(o.x * LANE_COUNT + o.y);
+    for (const b of this.barricades) wallKeys.add(b.x * LANE_COUNT + b.y);
     const linked = new Set<number>();
     for (const o of all) {
-      search: for (let dx = -1; dx <= 1; dx++) {
+      for (let dx = -1; dx <= 1; dx++) {
         for (let dy = -1; dy <= 1; dy++) {
           if (dx === 0 && dy === 0) continue;
           const ny = o.y + dy;
           if (ny < 0 || ny >= LANE_COUNT) continue;
-          if (occ.has((o.x + dx) * LANE_COUNT + ny)) {
-            linked.add(o.x * LANE_COUNT + o.y);
-            break search;
-          }
+          if (occ.has((o.x + dx) * LANE_COUNT + ny)) linked.add(o.x * LANE_COUNT + o.y);
+        }
+      }
+    }
+    const shielded = new Set<number>();
+    for (const t of this.turrets) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          const ny = t.y + dy;
+          if (ny < 0 || ny >= LANE_COUNT) continue;
+          if (wallKeys.has((t.x + dx) * LANE_COUNT + ny)) shielded.add(t.x * LANE_COUNT + t.y);
         }
       }
     }
     this.linkedCache = linked;
+    this.shieldedCache = shielded;
     return linked;
+  }
+  /** タレットの隣接にバリケードがあるか（盾持ち＝攻撃ダメージボーナス対象、v2） */
+  private isShielded(x: number, y: number): boolean {
+    this.linkedSet();
+    return this.shieldedCache!.has(x * LANE_COUNT + y);
   }
   private isLinked(x: number, y: number): boolean {
     return this.linkedSet().has(x * LANE_COUNT + y);
@@ -799,6 +837,7 @@ export class Game {
   /** 設置直後の共通記録（品質・連携・鑑定投資に基づく選別配置のメトリクス）。obstacleを配列へ追加した後に呼ぶ */
   private recordPlacement(x: number, y: number, quality: number, informed: boolean, isTurret: boolean): void {
     this.linkedCache = null;
+    this.shieldedCache = null;
     this.metrics.obstaclesBuilt++;
     this.metrics.qualitySumBuilt += quality;
     if (isTurret) this.metrics.turretQualitySumBuilt += quality;
@@ -815,6 +854,7 @@ export class Game {
     o.ref.hp -= dmg;
     if (o.ref.hp > 0) return;
     this.linkedCache = null;
+    this.shieldedCache = null;
     if (o.kind === 'barricade') {
       this.barricades = this.barricades.filter((b) => b.id !== o.ref.id);
       this.metrics.barricadesLost++;
@@ -1198,7 +1238,12 @@ export class Game {
       if (!target) continue;
       t.atkCd = TURRET_ATK_CD_MAX;
       // 品質倍率（020新規）と連携ボーナス（隣接obstacleがあれば強化）が攻撃ダメージに乗る
-      target.hp -= TURRET_DMG * t.quality * (this.isLinked(t.x, t.y) ? TURRET_LINK_DMG_MULT : 1);
+      const shielded = this.isShielded(t.x, t.y);
+      const shot = TURRET_DMG * Math.pow(t.quality, TURRET_QUALITY_DMG_EXP) * (shielded ? TURRET_LINK_DMG_MULT : 1);
+      target.hp -= shot;
+      this.metrics.turretShots++;
+      if (shielded) this.metrics.turretShieldedShots++;
+      this.metrics.turretDamageDealt += shot;
       if (target.hp <= 0) {
         this.killEnemy(target);
         this.metrics.turretKills++;
@@ -1611,11 +1656,19 @@ export class Game {
     const cost = Math.round(BARRICADE_BASE_COST * (1 + Math.max(0, bandAt(this.player.x)) * BARRICADE_BAND_MULT));
     if (this.player.money < cost) return;
     this.player.money -= cost;
-    const { quality, informed } = this.takeLot(lotIndex);
-    const maxHp = Math.round(BARRICADE_HP * quality);
-    this.barricades.push({ id: this.nextBarricadeId++, x: targetX, y: targetY, hp: maxHp, maxHp, quality, linked: false });
+    // v2 FIX（v1バグ#2/#6）: バリケードはロットの品質が薄く（BARRICADE_QUALITY_SPREAD）しか効かない。使い捨ての
+    // 消耗品に強いばらつきを乗せると「足りないと防壁にならず余っても無駄」な凹の価値関数で鑑定なしプレイヤー
+    // へ純損失（pusher -13.6%）が出たため。一方でロットは消費するので、鑑定投資者は悪ロットをバリケードへ
+    // 逃がし、良ロットをタレット（品質^2が攻撃ダメージに効く）へ温存する選別が成立する
+    const { quality } = this.takeLot(lotIndex);
+    const effective = 1 + (quality - 1) * BARRICADE_QUALITY_SPREAD;
+    const maxHp = Math.round(BARRICADE_HP * effective);
+    this.barricades.push({ id: this.nextBarricadeId++, x: targetX, y: targetY, hp: maxHp, maxHp, quality: effective, linked: false });
     this.metrics.barricadesBuilt++;
-    this.recordPlacement(targetX, targetY, quality, informed, false);
+    // 選別配置の加点(INFORMED_PLACEMENT_SCORE_BONUS)はタレットの選別だけが対象。バリケードへの悪ロット投棄は
+    // 1セッションで60〜80回あり、これを加点すると「lotIndexを指定するだけで+100点」の機械的な加点になって
+    // しまうため（v2で発見）、判断の重みが大きいタレット設置に限定する
+    this.recordPlacement(targetX, targetY, effective, false, false);
   }
 
   /** 指定拠点の保護半径内に現在設置されているタレット数（016新規、MAX_TURRETS_PER_BASEの判定用） */
@@ -1691,6 +1744,10 @@ export class Game {
   private tickStuckIncome(): void {
     let minCost: number | null = null;
     for (const def of SHOP_DEFS) {
+      // v2 FIX（v1バグ#5）: 鑑定は任意の建築補助で成長の詰みには関与しないため、閾値の計算から除外する。
+      // v1では基礎コスト9の鑑定が加わったことで、鑑定を買わないプレイヤーの詰み救済収入の発生条件が
+      // 018より狭まり（money<9のみ）、018との無回帰比較が完全一致しなかった
+      if (def.id === 'appraisal') continue;
       const cost = this.shopCostOf(def.id);
       if (cost !== null && (minCost === null || cost < minCost)) minCost = cost;
     }
@@ -1925,7 +1982,7 @@ export class Game {
       },
       enemies: this.enemies.map((e) => ({ ...e })),
       barricades: this.barricades.map((b) => ({ ...b, linked: this.isLinked(b.x, b.y) })),
-      turrets: this.turrets.map((t) => ({ ...t, linked: this.isLinked(t.x, t.y) })),
+      turrets: this.turrets.map((t) => ({ ...t, linked: this.isLinked(t.x, t.y), shielded: this.isShielded(t.x, t.y) })),
       outposts: this.outposts.map((o) => o.x),
       bases: this.allBases().map((b) => ({ ...b })),
       baseForecasts: this.baseForecasts.map((f) => ({ ...f })),

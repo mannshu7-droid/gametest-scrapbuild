@@ -30,6 +30,9 @@
  *   scatter=タレットをレーン分散（隣接させない＝連携なし）・鑑定なし、
  *   linker=タレットを隣接クラスタで配置（連携あり）・鑑定なし、
  *   smith=linker＋鑑定投資＋ロット選別（高品質ロットをタレットへ、低品質ロットをバリケードへ）
+ * - 020 v2新規: タレットの攻撃ダメージ強化を「隣接バリケードのある盾持ち状態」へ変更したため、クラスタ配置
+ *   戦略（linker/smith/wall/mason）は盾（バリケード）の建て足しを維持行動として行う。'ranger'は
+ *   cautious同様の分散配置＋盾の建て足しで、クラスタ配置が支配的最適解かを公平に比較するための戦略
  */
 import { Game, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type Dir, type Enemy, type GameState, type ShopItemId, type TileId } from '../src/core/types';
@@ -225,8 +228,8 @@ function canAdvance(s: GameState, dir: Dir): boolean {
 // CLIオプションとしてこのファイルに統合し、以後のレビューは`--strategies p01,p02`で
 // 同一パラメータのボットを毎回確実に再現できるようにした。デフォルトの戦略一覧
 // （cautious/pusher）は10シード比較の既存ベースラインを崩さないよう変更していない
-type Strategy = 'cautious' | 'pusher' | 'p01' | 'p02' | 'planner' | 'blind' | 'scatter' | 'linker' | 'smith' | 'wall' | 'mason';
-const ALL_STRATEGIES: Strategy[] = ['cautious', 'pusher', 'p01', 'p02', 'planner', 'blind', 'scatter', 'linker', 'smith', 'wall', 'mason'];
+type Strategy = 'cautious' | 'pusher' | 'p01' | 'p02' | 'planner' | 'blind' | 'scatter' | 'linker' | 'smith' | 'wall' | 'mason' | 'ranger' | 'p01n';
+const ALL_STRATEGIES: Strategy[] = ['cautious', 'pusher', 'p01', 'p02', 'planner', 'blind', 'scatter', 'linker', 'smith', 'wall', 'mason', 'ranger', 'p01n'];
 const DRIFT_CAP = 80;
 // v3 FIX バグ#5: HP危険域判定が戦略に関わらず固定25%だった(擬似実プレイ用ペルソナ設定では
 // P01=15%・P02=45%と差別化されているのに、10シード比較用のcautious/pusherは無差別だった)。
@@ -239,15 +242,24 @@ const DRIFT_CAP = 80;
 // HP撤退閾値・交戦域・前線拠点建設余力・タレット設置余力はいずれもpusherと同値を流用する。
 // 両者の唯一の違いはショップ優先度（scanner/chargeを買うか否か）に絞り、情報公開投資の効果だけを
 // 分離して比較できるようにする
-const HP_RETREAT_THRESHOLD: Record<Strategy, number> = { cautious: 0.3, pusher: 0.25, p01: 0.15, p02: 0.45, planner: 0.25, blind: 0.25, scatter: 0.25, linker: 0.25, smith: 0.25, wall: 0.3, mason: 0.3 };
+/**
+ * p01（野望型）の系列か。v2新規の'p01n'は「夜フェーズまで到達するP01」: p01は撤退HP15%の攻勢で20シード中19シードが
+ * 夜フェーズ到達前（〜500tick）に前線で死亡し、建築パートの評価がほぼ空白になっていた（v1レビュー#4）。
+ * p01nは交戦域6・鑑定/前進優先などP01の行動様式はそのまま、撤退HPだけ35%へ引き上げる（過去サイクルとの
+ * 比較可能性を保つため既存のp01は変更しない）
+ */
+function isP01(strategy: Strategy): boolean {
+  return strategy === 'p01' || strategy === 'p01n';
+}
+const HP_RETREAT_THRESHOLD: Record<Strategy, number> = { cautious: 0.3, pusher: 0.25, p01: 0.15, p02: 0.45, planner: 0.25, blind: 0.25, scatter: 0.25, linker: 0.25, smith: 0.25, wall: 0.3, mason: 0.3, ranger: 0.3, p01n: 0.35 };
 /** 交戦域（隣接超の敵をどこまで追って戦うか）。cautious/pusherは従来のswitch式を維持し、p01/p02はレビュー記載値を使う */
-const ENGAGE_RANGE: Record<Strategy, number> = { cautious: 2, pusher: 5, p01: 6, p02: 2, planner: 5, blind: 5, scatter: 5, linker: 5, smith: 5, wall: 2, mason: 2 };
+const ENGAGE_RANGE: Record<Strategy, number> = { cautious: 2, pusher: 5, p01: 6, p02: 2, planner: 5, blind: 5, scatter: 5, linker: 5, smith: 5, wall: 2, mason: 2, ranger: 2, p01n: 6 };
 /** 前線拠点の建設余力（購入コストの何倍の所持金があれば建てるか） */
-const OUTPOST_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.6, pusher: 1.2, p01: 1.2, p02: 1.6, planner: 1.2, blind: 1.2, scatter: 1.2, linker: 1.2, smith: 1.2, wall: 1.6, mason: 1.6 };
+const OUTPOST_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.6, pusher: 1.2, p01: 1.2, p02: 1.6, planner: 1.2, blind: 1.2, scatter: 1.2, linker: 1.2, smith: 1.2, wall: 1.6, mason: 1.6, ranger: 1.6, p01n: 1.2 };
 // 016新規: 拠点防衛タレットの設置余力。防衛志向のcautious/p02（あき型・慎重寄り）は低めの
 // マージンで早めに投資し、攻勢志向のpusher/p01（野望型・効率重視）は高めのマージンで
 // ドリル・攻撃力等の前進投資を優先してから余剰資金で投資する非対称な優先度を設定する
-const TURRET_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.3, pusher: 1.8, p01: 1.8, p02: 1.3, planner: 1.8, blind: 1.8, scatter: 1.8, linker: 1.8, smith: 1.8, wall: 1.3, mason: 1.3 };
+const TURRET_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.3, pusher: 1.8, p01: 1.8, p02: 1.3, planner: 1.8, blind: 1.8, scatter: 1.8, linker: 1.8, smith: 1.8, wall: 1.3, mason: 1.3, ranger: 1.3, p01n: 1.8 };
 
 function clampLane(y: number): number {
   return Math.max(0, Math.min(LANE_COUNT - 1, y));
@@ -290,7 +302,7 @@ function pickDefensiveTurretLane(s: GameState, base: { x: number; radius: number
 
 /** 意図的なレーン配置を行う防衛志向ボットの戦略か（v3 FIX）。020新規: scatterも「隣接させず分散させる」意図的配置 */
 function usesDeliberateTurretPlacement(strategy: Strategy): boolean {
-  return strategy === 'cautious' || strategy === 'p02' || strategy === 'scatter';
+  return strategy === 'cautious' || strategy === 'p02' || strategy === 'scatter' || strategy === 'ranger';
 }
 /** 020新規: タレットを既存obstacleと隣接する位置へクラスタ配置して連携を狙う戦略か */
 function usesClusterTurretPlacement(strategy: Strategy): boolean {
@@ -298,7 +310,13 @@ function usesClusterTurretPlacement(strategy: Strategy): boolean {
 }
 /** 020新規: 鑑定(appraisal)に投資し、ロット品質を見て選別配置する戦略か。p01は仮説検証志向のため利用する */
 function usesAppraisal(strategy: Strategy): boolean {
-  return strategy === 'smith' || strategy === 'p01' || strategy === 'mason';
+  return strategy === 'smith' || isP01(strategy) || strategy === 'mason';
+}
+
+/** v2新規: 盾（隣接バリケード）の建て足しを維持行動として行う戦略か。'ranger'は「分散配置＋盾」で、
+ * クラスタ配置（壁を共有できる）との比較用（v1バグ#3: クラスタが支配的最適解か）に用いる */
+function usesShieldMaintenance(strategy: Strategy): boolean {
+  return usesClusterTurretPlacement(strategy) || strategy === 'ranger';
 }
 
 function occupied(s: GameState, x: number, y: number): boolean {
@@ -344,6 +362,36 @@ function pickClusterTurretTile(s: GameState, base: { x: number; radius: number }
   return best;
 }
 
+/**
+ * v2新規: 盾持ち（隣接にバリケード）でないタレットを1基選び、その隣接の空きFLOORタイルのうち
+ * 他の盾なしタレットにも同時に隣接できる（1枚の壁で複数の盾になる）ものを優先して返す。
+ * クラスタ配置戦略（linker/smith/wall/mason）は、夜に壊れたバリケードを昼に建て直す維持行動を取る
+ */
+function pickShieldTile(s: GameState, base: { x: number; radius: number }): { x: number; y: number } | null {
+  const bare = s.turrets.filter((t) => Math.abs(t.x - base.x) <= base.radius && !t.shielded);
+  if (bare.length === 0) return null;
+  let best: { x: number; y: number } | null = null;
+  let bestScore = -Infinity;
+  for (const t of bare) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = t.x + dx;
+        const y = t.y + dy;
+        if (y < 0 || y >= LANE_COUNT || x < 0 || x >= LENGTH) continue;
+        if (Math.abs(x - base.x) > base.radius) continue;
+        if (tileAt(s, x, y) !== TILE.FLOOR || occupied(s, x, y)) continue;
+        const covers = bare.filter((o) => chebyshev(o.x, o.y, x, y) <= 1).length;
+        if (covers > bestScore) {
+          bestScore = covers;
+          best = { x, y };
+        }
+      }
+    }
+  }
+  return best;
+}
+
 /** 目標タイルに4近傍で隣接して立てる位置から、目標へ向けるdirを返す（既にその位置なら建設方向、そうでなければ移動方向） */
 function actionToBuildAt(s: GameState, target: { x: number; y: number }, build: (dir: Dir) => Action): Action | null {
   const p = s.player;
@@ -374,7 +422,8 @@ function actionToBuildAt(s: GameState, target: { x: number; y: number }, build: 
 /**
  * 020新規: 建材ロットの選別。鑑定Lv0（品質不明）では常にindex0（undefinedを返し、lotIndex省略）。
  * 鑑定Lv1以上では、タレットには見えている中で最高品質のロット、バリケードには最低品質のロットを
- * 明示指定して使う（良いロットは高価値のタレットへ温存し、悪いロットは使い捨てのバリケードで消化する）
+ * 明示指定して使う（良いロットは高価値のタレットへ温存し、悪いロットは品質が薄くしか効かない
+ * バリケードで消化する。v2でバリケード側の効きを0.8〜1.2倍へ抑えたため悪ロット消化の損失は小さい）
  */
 function pickLot(s: GameState, forTurret: boolean): number | undefined {
   if (s.player.appraisalLv < 1) return undefined;
@@ -397,7 +446,7 @@ function turretAction(s: GameState, strategy: Strategy, dir: Dir): Action {
 }
 
 function mineDirs(s: GameState, strategy: Strategy): Dir[] {
-  if (strategy === 'pusher' || strategy === 'p01' || strategy === 'planner' || strategy === 'blind' || strategy === 'scatter' || strategy === 'linker' || strategy === 'smith') {
+  if (strategy === 'pusher' || isP01(strategy) || strategy === 'planner' || strategy === 'blind' || strategy === 'scatter' || strategy === 'linker' || strategy === 'smith') {
     return ['right', 'up', 'down', 'left'];
   }
   return s.player.x < DRIFT_CAP ? ['right', 'up', 'down', 'left'] : ['up', 'down', 'left'];
@@ -429,10 +478,10 @@ const CAUTIOUS_APPRAISER_PRIORITY: ShopItemId[] = ['vitality', 'fuel', 'hazardre
 function shopPriorityFor(strategy: Strategy): ShopItemId[] {
   if (strategy === 'planner') return PLANNER_PRIORITY;
   if (strategy === 'blind') return BLIND_PRIORITY;
-  if (strategy === 'smith' || strategy === 'p01') return APPRAISER_PRIORITY;
+  if (strategy === 'smith' || isP01(strategy)) return APPRAISER_PRIORITY;
   if (strategy === 'mason') return CAUTIOUS_APPRAISER_PRIORITY;
   if (strategy === 'scatter' || strategy === 'linker') return PUSHER_PRIORITY;
-  if (strategy === 'wall') return CAUTIOUS_PRIORITY;
+  if (strategy === 'wall' || strategy === 'ranger') return CAUTIOUS_PRIORITY;
   return strategy === 'pusher' ? PUSHER_PRIORITY : CAUTIOUS_PRIORITY;
 }
 
@@ -493,6 +542,17 @@ class Bot {
           }
           const dir = pickTurretDir(s);
           if (dir) return turretAction(s, this.strategy, dir);
+        }
+      }
+      // v2新規: クラスタ配置戦略は、盾（隣接バリケード）のないタレットに壁を建て足す（昼に維持行動）
+      if (usesShieldMaintenance(this.strategy) && s.player.money >= s.player.buildCosts.barricade * 3) {
+        const base = currentBaseInfo(s);
+        if (base) {
+          const target = pickShieldTile(s, base);
+          if (target) {
+            const act = actionToBuildAt(s, target, (dir) => barricadeAction(s, this.strategy, dir));
+            if (act) return act;
+          }
         }
       }
       const priority = shopPriorityFor(this.strategy);
@@ -583,7 +643,7 @@ class Bot {
     // 評価精度を上げるため'planner'限定だった判断を'p01'にも広げる（cautious/pusher/blind/p02は
     // 戦略間比較の基準線を保つため無変更のまま据え置く）
     const scannerLv = s.shop.find((it) => it.id === 'scanner')?.level ?? 0;
-    if ((this.strategy === 'planner' || this.strategy === 'p01') && scannerLv >= 1) {
+    if ((this.strategy === 'planner' || isP01(this.strategy)) && scannerLv >= 1) {
       const band = Math.max(0, bandAt(p.x));
       const bandEndX = (band + 1) * BAND_SIZE;
       if (bandEndX - p.x <= 6 && bandEndX < FIELD_WIDTH) {
@@ -642,6 +702,9 @@ interface RunResult {
   turretsBuilt: number;
   turretsLost: number;
   turretKills: number;
+  turretShots: number;
+  turretShieldedShots: number;
+  turretDamageDealt: number;
   hazardHits: number;
   hazardDamage: number;
   fuelEmptyTicks: number;
@@ -703,6 +766,9 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     turretsBuilt: s.metrics.turretsBuilt,
     turretsLost: s.metrics.turretsLost,
     turretKills: s.metrics.turretKills,
+    turretShots: s.metrics.turretShots,
+    turretShieldedShots: s.metrics.turretShieldedShots,
+    turretDamageDealt: Math.round(s.metrics.turretDamageDealt),
     hazardHits: s.metrics.hazardHits,
     hazardDamage: s.metrics.hazardDamage,
     fuelEmptyTicks: s.metrics.fuelEmptyTicks,
@@ -759,6 +825,6 @@ for (const strategy of strategies) {
   const homeDeaths = results.filter((r) => r.loseReason === 'homeDestroyed').length;
   const hpDeaths = results.filter((r) => r.loseReason === 'playerHp').length;
   console.log(
-    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDistance=${avg((r) => r.maxDistance)} avgOreMined=${avg((r) => r.oreMined)} avgKills=${avg((r) => r.kills)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgOutposts=${avg((r) => r.outpostsBuilt)} avgBarricadesBuilt=${avg((r) => r.barricadesBuilt)} avgTurretsBuilt=${avg((r) => r.turretsBuilt)} avgTurretsLost=${avg((r) => r.turretsLost)} avgTurretKills=${avg((r) => r.turretKills)} avgTrips=${avg((r) => r.tripsToHome)} avgNightsSurvived=${avg((r) => r.nightsSurvived)} avgOutpostsLost=${avg((r) => r.outpostsLost)} avgRaidersKilled=${avg((r) => r.raidersKilled)} avgBaseDamageTaken=${avg((r) => r.baseDamageTaken)} avgBasedefenseLv=${avg((r) => r.basedefenseLv)} avgScannerLv=${avg((r) => r.scannerLv)} avgChargeLv=${avg((r) => r.chargeLv)} avgResonanceTriggers=${avg((r) => r.resonanceTriggers)} avgResonanceBonusOre=${avg((r) => r.resonanceBonusOre)} avgAppraisalLv=${avg((r) => r.appraisalLv)} avgObstaclesBuilt=${avg((r) => r.obstaclesBuilt)} avgQuality=${(results.reduce((a, r) => a + r.avgQuality, 0) / results.length).toFixed(3)} avgTurretQuality=${(results.filter((r) => r.turretsBuilt > 0).reduce((a, r) => a + r.avgTurretQuality, 0) / Math.max(1, results.filter((r) => r.turretsBuilt > 0).length)).toFixed(3)} avgInformedPlacements=${avg((r) => r.informedPlacements)} avgLinkedPlacements=${avg((r) => r.linkedPlacements)} avgLinkSavedDamage=${avg((r) => r.linkSavedDamage)} avgBarricadesLost=${avg((r) => r.barricadesLost)} avgCombatRiskEsc=${avg((r) => r.combatRiskEscalations)} avgMiningRiskEsc=${avg((r) => r.miningRiskEscalations)} avgRaidRiskEsc=${avg((r) => r.raidRiskEscalations)} avgForecastRiskEsc=${avg((r) => r.forecastRiskEscalations)} deaths=${results.filter((r) => r.over && !r.won).length}/${results.length}(hp:${hpDeaths}/home:${homeDeaths}) wins=${results.filter((r) => r.won).length}/${results.length}`,
+    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDistance=${avg((r) => r.maxDistance)} avgOreMined=${avg((r) => r.oreMined)} avgKills=${avg((r) => r.kills)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgOutposts=${avg((r) => r.outpostsBuilt)} avgBarricadesBuilt=${avg((r) => r.barricadesBuilt)} avgTurretsBuilt=${avg((r) => r.turretsBuilt)} avgTurretsLost=${avg((r) => r.turretsLost)} avgTurretKills=${avg((r) => r.turretKills)} avgTurretDmg=${avg((r) => r.turretDamageDealt)} shieldedShotRatio=${(results.reduce((a, r) => a + r.turretShieldedShots, 0) / Math.max(1, results.reduce((a, r) => a + r.turretShots, 0))).toFixed(3)} turretLossRate=${(results.reduce((a, r) => a + r.turretsLost, 0) / Math.max(1, results.reduce((a, r) => a + r.turretsBuilt, 0))).toFixed(3)} avgTrips=${avg((r) => r.tripsToHome)} avgNightsSurvived=${avg((r) => r.nightsSurvived)} avgOutpostsLost=${avg((r) => r.outpostsLost)} avgRaidersKilled=${avg((r) => r.raidersKilled)} avgBaseDamageTaken=${avg((r) => r.baseDamageTaken)} avgBasedefenseLv=${avg((r) => r.basedefenseLv)} avgScannerLv=${avg((r) => r.scannerLv)} avgChargeLv=${avg((r) => r.chargeLv)} avgResonanceTriggers=${avg((r) => r.resonanceTriggers)} avgResonanceBonusOre=${avg((r) => r.resonanceBonusOre)} avgAppraisalLv=${avg((r) => r.appraisalLv)} avgObstaclesBuilt=${avg((r) => r.obstaclesBuilt)} avgQuality=${(results.reduce((a, r) => a + r.avgQuality, 0) / results.length).toFixed(3)} avgTurretQuality=${(results.filter((r) => r.turretsBuilt > 0).reduce((a, r) => a + r.avgTurretQuality, 0) / Math.max(1, results.filter((r) => r.turretsBuilt > 0).length)).toFixed(3)} avgInformedPlacements=${avg((r) => r.informedPlacements)} avgLinkedPlacements=${avg((r) => r.linkedPlacements)} avgLinkSavedDamage=${avg((r) => r.linkSavedDamage)} avgBarricadesLost=${avg((r) => r.barricadesLost)} avgCombatRiskEsc=${avg((r) => r.combatRiskEscalations)} avgMiningRiskEsc=${avg((r) => r.miningRiskEscalations)} avgRaidRiskEsc=${avg((r) => r.raidRiskEscalations)} avgForecastRiskEsc=${avg((r) => r.forecastRiskEscalations)} deaths=${results.filter((r) => r.over && !r.won).length}/${results.length}(hp:${hpDeaths}/home:${homeDeaths}) wins=${results.filter((r) => r.won).length}/${results.length}`,
   );
 }

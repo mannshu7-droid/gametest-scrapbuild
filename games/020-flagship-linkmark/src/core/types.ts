@@ -96,8 +96,10 @@ export interface Turret {
   atkCd: number;
   /** 建材ロットの真の品質倍率（020新規）。HPと自動攻撃ダメージの両方に乗る */
   quality: number;
-  /** 隣接に別のバリケード/タレットがある連携状態か（020新規） */
+  /** 隣接に別のバリケード/タレットがある連携状態か（020新規、被ダメージ軽減の対象） */
   linked: boolean;
+  /** 隣接にバリケードがある「盾持ち」状態か（v2新規、攻撃ダメージ強化の対象） */
+  shielded?: boolean;
 }
 
 export interface Base {
@@ -180,6 +182,10 @@ export interface Metrics {
   linkedPlacements: number;
   /** 連携効果で軽減できたobstacleへの被ダメージの累計（020新規、連携共鳴の効き目を数値公開する） */
   linkSavedDamage: number;
+  /** タレットの自動攻撃回数・うち盾持ち状態での攻撃回数・与えた総ダメージ（v2新規、防衛系の主指標） */
+  turretShots: number;
+  turretShieldedShots: number;
+  turretDamageDealt: number;
   score: number;
 }
 
@@ -246,7 +252,8 @@ export interface GameState {
     appraisalLv: number;
     /**
      * 建材ロットキュー（020新規、先頭=index0）。要素は鑑定Lvに応じた精度で公開される品質推定値
-     * （Lv0=null完全不明、Lv1=0.2刻み、Lv2=0.1刻み、Lv3=正確値）。バリケード/タレット設置時の
+     * （Lv0=null完全不明、Lv1=0.2刻み、Lv2=0.1刻み、Lv3=正確値）。タレット・バリケード設置時に
+     * 1つ消費される（v2: 品質はタレットには攻撃ダメージ^2・HPへ、バリケードには薄く0.8〜1.2倍のHPへ効く）。
      * `lotIndex`はこの配列のindexを指す（省略時は0＝先頭を消費）
      */
     buildLots: (number | null)[];
@@ -310,7 +317,7 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
     params: { target: 'barricade', dir: 'up|down|left|right', lotIndex: '(任意) 使用する建材ロットのindex(0〜3)。省略時は0' },
     description:
       '隣接する既に掘った道(dir)にバリケードを設置。空きマスのみ・所持金消費。敵の移動を塞ぎ、射線上にあれば遠距離攻撃の身代わりにもなる。' +
-      '建材ロット(buildLots)を1つ消費し、そのロットの品質倍率がHPに掛かる。他のバリケード/タレットに隣接して置くと連携し被ダメージが軽減される（020新規）',
+      '建材ロットを1つ消費するが、品質はHPに薄く(0.8〜1.2倍)しか効かない＝悪ロットの捨て先（v2）。他のバリケード/タレットに隣接して置くと連携し被ダメージが軽減される。隣接タレットの攻撃ダメージを強化する「盾」にもなる（020新規）',
   },
   {
     type: 'build',
@@ -321,7 +328,7 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
     type: 'build',
     params: { target: 'turret', dir: 'up|down|left|right', lotIndex: '(任意) 使用する建材ロットのindex(0〜3)。省略時は0' },
     description:
-      '隣接する既に掘った道(dir)に拠点防衛タレットを設置（016新規）。建材ロットを1つ消費し品質倍率がHP・攻撃ダメージに掛かる。他のバリケード/タレットに隣接すると連携し被ダメージ軽減＋攻撃ダメージ強化（020新規）。拠点（ホームor前線拠点）保護半径内のみ・' +
+      '隣接する既に掘った道(dir)に拠点防衛タレットを設置（016新規）。建材ロットを1つ消費し品質倍率がHP・攻撃ダメージ（品質^1.5）に掛かる。他のバリケード/タレットに隣接すると連携し被ダメージ軽減、隣接にバリケードがある「盾持ち」状態だと攻撃ダメージが1.5倍（020新規、v2で盾持ち条件に変更）。拠点（ホームor前線拠点）保護半径内のみ・' +
       '拠点ごとにmaxTurretsPerBase基まで・空きマスのみ・所持金消費。設置後は毎tick自動でレイダーを射程内から迎撃する。' +
       'バリケード同様に敵に阻まれ攻撃を受けて破壊されうる',
   },
