@@ -75,10 +75,19 @@ const OUTPOST_BAND_COST_MULT = 0.2;
 export const DAY_LENGTH = 1200;
 export const NIGHT_LENGTH = 500;
 const NIGHT_WARNING_TICKS = 150;
-const HOME_BASE_MAX_HP = 400;
+/**
+ * v3 FIX（v2バグ#1・#3）: 400→250。BASE_DAY_REGENの引き下げとセット（下記）。
+ * v2までは自宅HP400・昼の回復が実質フル（1.5×1200tick）で、夜ごとの拠点被害（1夜15〜65）が
+ * 翌朝に必ず全快し、「拠点被害の少なさ」が生存にもscoreにも一切効かなかった（クラスタ配置の唯一の利点である
+ * BDT低下が結果に繋がらず、45000tickでは分散配置rangerがscore・生存とも一方的に優位だった）。
+ * 後半（15夜以降）の被害が蓄積して自宅を落とし得るように絞り、序盤〜中盤（〜20000tick）の挙動は変えない
+ * （120シードでwall/mason/ranger/cautiousのavgScore・死亡数が旧設定と一致、p02/p01nも無回帰）
+ */
+const HOME_BASE_MAX_HP = 250;
 const OUTPOST_BASE_MAX_HP = 200;
 const OUTPOST_HP_BAND_MULT = 0.15;
-const BASE_DAY_REGEN = 1.5;
+/** v3 FIX: 1.5→0.05（1昼で最大60回復）。理由はHOME_BASE_MAX_HPの注釈を参照 */
+const BASE_DAY_REGEN = 0.05;
 /** 拠点からこの距離未満のタイルはレイダーのスポーン候補から除外する（拠点直下への湧きを防ぐ） */
 const RAID_MIN_SPAWN_DIST = 10;
 const RAID_BASE_COUNT = 3;
