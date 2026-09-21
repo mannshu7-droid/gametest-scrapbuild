@@ -34,7 +34,7 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
 
   /** バリケード/タレットの品質・連携表示（020新規）。品質は左下の小さな四角の色、連携中はシアンの枠 */
-  private drawObstacleMarks(sx: number, sy: number, quality: number, linked: boolean): void {
+  private drawObstacleMarks(sx: number, sy: number, quality: number, linked: boolean, shielded = false): void {
     const ctx = this.ctx;
     ctx.fillStyle = this.qualityColor(quality);
     ctx.fillRect(sx + 2, sy + TILE_PX - 8, 6, 6);
@@ -45,6 +45,11 @@ export class Renderer {
       ctx.strokeStyle = '#00e5ff';
       ctx.lineWidth = 2;
       ctx.strokeRect(sx + 1, sy + 1, TILE_PX - 2, TILE_PX - 2);
+    }
+    if (shielded) {
+      // 盾持ちタレット（隣接にバリケードがあり攻撃ダメージ強化中、v2）は右上に金色の印
+      ctx.fillStyle = '#f1c40f';
+      ctx.fillRect(sx + TILE_PX - 9, sy + 3, 6, 6);
     }
   }
 
@@ -148,7 +153,7 @@ export class Renderer {
       ctx.fillRect(sx, sy - 4, TILE_PX, 3);
       ctx.fillStyle = '#4aa3e0';
       ctx.fillRect(sx, sy - 4, TILE_PX * ratio, 3);
-      this.drawObstacleMarks(sx, sy, t.quality, t.linked);
+      this.drawObstacleMarks(sx, sy, t.quality, t.linked, t.shielded ?? false);
     }
 
     // 敵（夜間レイダーは赤い外枠で通常の前線敵と区別する）
@@ -266,9 +271,9 @@ export class Renderer {
       .map((q, i) => `${i === selectedLot && s.player.appraisalLv >= 1 ? '>' : ' '}${q === null ? '?' : q.toFixed(2)}`)
       .join(' |');
     const linkedCount = s.barricades.filter((b) => b.linked).length + s.turrets.filter((t) => t.linked).length;
-    ctx.fillText(`建材ロット[V鑑定 Z/X選択] 鑑定Lv${s.player.appraisalLv}: ${lotText}`, 6, hudY + 194);
+    ctx.fillText(`建材ロット[Z/X選択・タレット=品質²で攻撃力/バリケード=薄く] 鑑定Lv${s.player.appraisalLv}: ${lotText}`, 6, hudY + 194);
     ctx.fillText(
-      `連携中${linkedCount}/${s.barricades.length + s.turrets.length}基（軽減dmg累計${Math.round(s.metrics.linkSavedDamage)}）  選別配置${s.metrics.informedPlacements}回  平均品質${s.metrics.obstaclesBuilt > 0 ? (s.metrics.qualitySumBuilt / s.metrics.obstaclesBuilt).toFixed(2) : '-'}`,
+      `連携中${linkedCount}/${s.barricades.length + s.turrets.length}基（軽減dmg累計${Math.round(s.metrics.linkSavedDamage)}）盾持ちタレット${s.turrets.filter((t) => t.shielded).length}/${s.turrets.length}  選別配置${s.metrics.informedPlacements}回  平均品質${s.metrics.obstaclesBuilt > 0 ? (s.metrics.qualitySumBuilt / s.metrics.obstaclesBuilt).toFixed(2) : '-'}`,
       6,
       hudY + 210,
     );

@@ -12,27 +12,33 @@
   **バリケード/タレットの隣接連携共鳴**）を拠点防衛の建築パートへ統合した`020-flagship-linkmark`を
   サイクル26で開発する（019の次点提案「多脚・分岐構造による単一支柱の構造的限界の克服」は
   別サイクルの新規building単体プロトタイプへ持ち越し）
-- 対象ゲーム番号: **020-flagship-linkmark**（サイクル26・1回目で新規実装＋v1レビュー完了、判定FIX）
-- 次に行う回: **2回目（FIX＋REVIEW）**。v1レビュー（reviews/020-flagship-linkmark-v1.md）の
-  「v2で対応すべき改善点」を優先度順に修正する:
-  1. **（重大・必須）鑑定投資のROIを成果に跳ね返らせる**: タレット品質は+23〜42%上がるがavgTurretKills・
-     avgBaseDamageTaken・avgScoreは横ばい（scoreボーナスを除くと-2.8%）。品質の効きをタレットに集中させる
-     （バリケードは固定品質にする等）、または品質の効果を強める
-  2. **（重大・必須）鑑定なしプレイヤーへの純損失の解消**: 品質のばらつきでpusherが-13.6%。Lv0でも粗い
-     兆候が見える／悪ロットを捨てる手段／バリケードは品質固定にして分散の損失をなくす等
-  3. **（中）連携の支配的最適解の緩和**: タレット3基の縦クラスタが5レーン全射程＋連携で支配的
-  4. **（中）防衛系の評価指標**: avgScoreは前線に支配されるため、BDT・turretKills・obstacle喪失率を主指標に
-     置く。P01（p01 bot）が夜まで到達できずP01視点の建築評価が統計的に弱い点も併せて検討
-- 検証環境メモ: `headless/simulate.ts`の新戦略 `scatter`（分散配置・鑑定なし）/`linker`（クラスタ・鑑定なし）/
-  `smith`（クラスタ＋鑑定＋選別）はpusher系、`wall`/`mason`はcautious系（wall=クラスタ・鑑定なし、
-  mason=wall＋鑑定＋選別）。`--strategies cautious,wall,mason`で防衛系（夜重視）、
-  `--strategies pusher,scatter,linker,smith`で攻勢系を比較する。ロット品質は専用PRNG（`seed ^ 0x5bd1e995`）
-  のため既存の世界・敵スポーンの乱数列は018と同一（ただし`appraisal`基礎コスト9の追加で
-  `tickStuckIncome`の閾値が下がる副作用あり、v1バグ#5）
-- **【最優先・30サイクル連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜020v1を含め直近30サイクル連続で未実施。サイクル26・1回目でも
+- 対象ゲーム番号: **020-flagship-linkmark**（サイクル26・1回目で新規実装＋v1レビュー完了・判定FIX、
+  2回目でFIX+REVIEW完了・v2レビュー判定FIX）
+- サイクル26・2回目（reviews/020-flagship-linkmark-v2.md）の要点: v1の重大2件に対応。
+  **真因は「タレットが拠点自動迎撃の1/10以下の火力しかなく装飾に近い」こと**と判明し`TURRET_DMG`を10→24へ、
+  タレット攻撃を品質の2乗に凸化、バリケードの品質の効きを0.8〜1.2倍へ圧縮（鑑定なしの純損失
+  -13.6%→-0.2%、pusher 120シード）、タレット攻撃強化の条件を「隣接にバリケードがある盾持ち」へ変更
+  （クラスタ=BDT小 vs 分散=撃破・生存 の二択が成立）。選別配置加点はタレット設置のみに限定。
+  120シードで攻勢系 smith vs linker はavgScore+8.6%・BDT-15%と成立、防衛系 mason vs wall は
+  turretDmg+21%・BDT-11%だがscore+0.5%（撃破数の飽和で検出限界内）
+- 次に行う回: **3回目（FIX only、レビューは書かずPR本文に修正内容を記載）**。v2レビューの
+  「v3で対応すべき改善点」を優先度順に修正する:
+  1. **（中）防衛系のROIをscoreに近づける**: 品質が「撃破数」ではなく「拠点被害の軽減」に直接効く形にする
+     （例: 高品質タレットの周囲は被ダメージが減る）。または後半（21夜以降）を主指標にする
+  2. **（中）mason系の死亡増の原因調査**: 鑑定購入タイミング（basedefense後など）を変えたボットで比較
+     （120シード: mason 27 vs wall 22、p≈0.4で有意差不明）
+  3. **（軽微）タレット火力の過剰化の確認**: 品質²＋盾持ちで最良1発約75ダメージ。45000tick以上の
+     長時間でhomeDestroyed・BDTを確認
+- 検証環境メモ: `headless/simulate.ts`の戦略 `scatter`/`linker`/`smith`はpusher系、`wall`/`mason`/`ranger`は
+  cautious系（wall=クラスタ＋盾、mason=wall＋鑑定＋選別、ranger=分散＋盾）。`p01n`は撤退HP35%で夜フェーズまで
+  到達するP01系（既存p01は過去サイクルとの比較用に据え置き、20シード中19シードが夜前に死亡）。
+  `--strategies cautious,ranger,wall,mason`で防衛系（夜重視）、`--strategies pusher,scatter,linker,smith`で
+  攻勢系を比較する。**効果の比較は120シード（例: `seq -s, 101 220`）で行うこと**（40シードでは標準誤差が±4%あり
+  v1の+1%は検出限界以下だった）。ロット品質は専用PRNG（`seed ^ 0x5bd1e995`）のため世界・敵スポーンの乱数列は018と同一
+- **【最優先・31サイクル連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜020v2を含め直近31サイクル連続で未実施。サイクル26・2回目でも
   無人セッション（スケジュールタスク実行）からは開発サーバを起動できない構造的制約は変わらず
-  （`preview_start`は試みていないが、29回分の拒否が確認済みのため）。`.claude/launch.json`に
+  （`preview_start`は試みていないが、過去の拒否が確認済みのため）。`.claude/launch.json`に
   port 5189で`linkmark`のdevサーバ設定を追加済み。人間の対話セッションでこのリポジトリを
   扱う機会があれば最優先で実施すること**
 
@@ -876,6 +882,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-18 | 25 | 3（FIX only） | v2からの持ち越し事項3件を検討。**バグ#5（careful<braced逆転、-4.5%）に対応**: `lotIndex`を明示指定して(=鑑定情報を見て選別して)構造材を設置するたび少額のスコアボーナスを加算する`INFORMED_PLACEMENT_SCORE_BONUS=1.5`を新設（`src/core/game.ts`、新規metrics`informedPlacements`で計測）。money経由のインセンティブにするとbraced側（資材購入に全額回せる）の資金雪だるま効果と同じ土俵で競合し埋もれる懸念があったため、money経済に触れずscoreへ直接加点する設計にした。20シード再検証でcareful 2290.60 > braced 2201.15（**+4.1%**、v1の+3.8%相当まで回復、v2の-4.5%逆転を解消）、副次効果としてinformed vs sloppyの差もavgScore+11.8%→**+26.1%**に拡大（informedもlotIndex明示指定の恩恵を受けるため）。maxHeight/moneyEarned/blocksPlaced/collapseEvents等の他指標はボットの意思決定に影響しない純粋なscore加点のため無変化（回帰なしを確認）。**バグ#3（invalidActions平均増加）を調査**: 10シードでcareful(35〜51件)・braced(34〜39件)を比較し、鑑定の有無に関わらず同程度であることを確認。死亡解消によりセッションが常に3600tick丸ごと実行されるようになった分の比例増加であり鑑定固有のバグではないと結論づけ、対応不要と判断（コード変更なし）。**バグ#2（informedのavgMaxHeight頭打ち）は今回対応見送り**: 単一支柱構造の揺れダメージ特性という大掛かりな設計変更を要するため、4回目（FINAL REVIEW）で次サイクル以降の提案として扱うのが適切と判断した。npm run build / npm run simulateとも正常終了。3回目FIX onlyの規約通りレビューは書かず、spec.mdに「v3で追加」節を追記、games/README.mdの索引を更新した。routine-state.mdをサイクル25・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-09-19 | 25 | 4（FINAL REVIEW） | 019-building-hallmarkの総括レビュー（reviews/019-building-hallmark-final.md）を作成。20シード×5戦略（maxTicks=4000）・P01/P02擬似実プレイ（careful/sloppy代替、4シード×maxTicks=3600）の全再検証でv3時点からのコード無変更・数値完全一致（careful avgScore2290.60>braced2201.15の+4.1%、死亡0/20）を確認した。`preview_start`は29サイクル連続で「無人セッションからは開発サーバを起動できない」拒否を再確認。informedのavgMaxHeight頭打ち（バグ#2、v2で発見）は単一支柱構造の物理的制約（揺れイベントの負荷が一律・乗算的に跳ね上がる）による「バグではなく構造的限界」と最終判定し、次サイクルの新規仕様書（多脚・分岐構造）へ持ち越した。サイクル25で発見した6件のバグ・問題（鑑定投資ROI不成立／height頭打ち／目標到達後の全滅／invalidActions増加／brace連携判定のO(blocks³)／careful<braced逆転）はすべて解消または構造的限界と最終判定済みで判定**FIX**。P01基本点約4.1/5・P02基本点約3.3/5（P02はE4想像の余地の構造的欠如が主因、mining単体003・011・017と同型）。「補強材の隣接連携共鳴」を017/018に続く3例目の投資シナジーパターンとして、「安全地帯に実利＋HPベース自動退避」を「クリア後も遊べる」設計の完成テンプレートとして採用。次サイクルは（優先）019の2パターン（非対称の情報公開・連携共鳴）を本命ゲーム（flagship）の建築パート（バリケード・タレット）へ統合する`020-flagship-*`、（次点）単一支柱の構造的限界を克服する新規building単体プロトタイプを提案。games/README.mdの索引を更新し、routine-state.mdをサイクル26・run1へ進めた | (本PR) |
 | 2026-09-21 | 26 | 1（BUILD+REVIEW） | cycle25-final（019-building-hallmark-final）の提案(1)を受け、019で確立したbuildingの2パターン（建材ロットの非対称品質公開＝鑑定`appraisal`、バリケード/タレットの隣接連携共鳴）を018-flagship-veinsightベースの拠点防衛の建築パートへ統合した`020-flagship-linkmark`を新規実装（specs/020-flagship-linkmark/spec.md、games/020-flagship-linkmark/）。ロットは専用PRNGで生成し既存の乱数列に無干渉、連携判定は近傍8マスのSet参照でO(n×8)、`lotIndex`明示指定にscore直接加点（019の教訓を初版から反映）。headless/simulate.tsにscatter/linker/smith（pusher系）・wall/mason（cautious系）を追加。v1レビュー（reviews/020-flagship-linkmark-v1.md、40シード×攻勢系/防衛系、p01/p02擬似実プレイ）で判定**FIX**: 隣接連携は拠点防衛でBDT-46%と機能した一方、鑑定投資は選別自体（タレット品質+23〜42%）は動くが成果指標に跳ね返らず（scoreボーナスを除くと-2.8%）、品質のばらつきが鑑定なしプレイヤーへの純損失（pusher-13.6%）となる重大課題2件を発見。ブラウザAIP実プレイは30サイクル連続で未実施 | [#102](https://github.com/mannshu7-droid/gametest-scrapbuild/pull/102) |
+| 2026-09-21 | 26 | 2（FIX+REVIEW） | 020-flagship-linkmarkのv1重大バグ2件・中2件・軽微1件に対応しreviews/020-flagship-linkmark-v2.mdを作成（判定FIX）。調査で**真因は「タレットが拠点自動迎撃（拠点圏内の全レイダーへ3+2Lv/tick）の1/10以下の火力しかなく装飾に近い」こと**と判明し、`TURRET_DMG`を10→24へ引き上げ、タレット攻撃を品質の2乗（凸）に変更、バリケードの品質の効きを0.8〜1.2倍へ圧縮（純損失: pusher 120シードで-13.6%→-0.2%）、タレット攻撃強化の条件を「隣接にバリケードがある盾持ち」へ変更（クラスタ=BDT152 vs 分散ranger=BDT230だがturretKills18.6・死亡10/120の二択が成立）、`tickStuckIncome`から`appraisal`を除外（v1バグ#5）、選別配置加点をタレットのみに限定（バリケード投棄で機械的に+約100点入っていたため）。120シードで攻勢系smith vs linkerはavgScore+8.6%・BDT-15%・turretDmg+35%と成立、防衛系mason vs wallはturretDmg+21%・BDT-11%だがscore+0.5%（撃破数の飽和で検出限界内）。headlessに`ranger`（分散＋盾）・`p01n`（夜まで到達するP01系）を追加、p02は無回帰（avgScore 4051.8 vs 018の4061.7）。ブラウザAIP実プレイは31サイクル連続で未実施。npm run build / simulateとも正常終了・決定論確認済み。games/README.mdの索引・spec.mdの「v2 FIX内容」節を更新し、routine-state.mdをサイクル26・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
