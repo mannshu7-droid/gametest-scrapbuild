@@ -4,6 +4,31 @@
 
 ## 現在位置
 
+- サイクル: 27
+- 要素: **戦闘（combat）単体: 「日没の撤退戦」**。cycle26-final（reviews/020-flagship-linkmark-final.md）の提案(1)を採用する。
+  020の最大の発見は「防衛系の死亡の94%（80件中75件）が夜のフィールドで起き、拠点内の死亡は7.5%。拠点のタレット・壁・鑑定は
+  実際に死ぬ場面に届かない」こと。009-ironmarch以来の戦闘単体として、**戦闘だけ**（採掘・建築は入れない）に絞り、
+  「拠点から離れた場所で日没を迎え、追ってくるレイダーから逃げ切る／退きながら戦う」ことを主題にした新規プロトタイプを作る。
+  検証したいのは ①帰還の巧拙（逃走・ダッシュ・囮・迎撃地点の選択）がスキルとして面白いか ②撤退の準備（退路の確保・帰路の投資）が
+  悩ましい選択になるか。単体で確立できたら、サイクル28以降で本命ゲームの拠点防衛へ「帰還ルートの安全度に効く設備」として統合する
+  （017/019で単体→flagship統合の順が成功した手順と同じ）。次点提案（019finalからの持ち越し）は「多脚・分岐構造の建築単体プロトタイプ」
+- 対象ゲーム番号: **021-combat-<名前>**（サイクル27・1回目で新規に採番。specs/021-combat-<名前>/ と games/021-combat-<名前>/）
+- 次に行う回: **1回目（BUILD+REVIEW）**。過去のreviews/のLearningsとpersonas/を読み、`templates/spec-template.md`で仕様書を書き、
+  タッチ操作の想定を含める。simulateには**死亡直前状況メトリクス（deathPhase/deathAtBase/deathByRaider相当＝「どこで・いつ・何に死ぬか」）
+  を最初から標準で入れる**（020の最大の発見はこれで初めて見えた）。効果の比較は120シード以上、複数指標（与ダメ・被害・死亡・score）が
+  同じ向きに揃うかで読む
+- サイクル26（020-flagship-linkmark）の結論: 判定FIX（P01約3.9/5、P02約3.7/5）。連携共鳴（盾持ちタレット）と品質の凸な効かせ方は採用、
+  防衛系の鑑定投資は生存・scoreに出ないため本命へ持ち込まない（持ち込むならフィールド側の生存・帰還に効く品質公開へ移す）。
+  詳細は「過去のサイクル26」節とreviews/020-flagship-linkmark-final.md
+- 検証環境メモ: 020のsimulateには戦略`scatter`/`linker`/`smith`（pusher系）、`wall`/`mason`/`ranger`（cautious系）、`p01n`（撤退HP35%のP01）がある。
+  **効果の比較は120シード（例: `seq -s, 101 220`）で行う**（40シードでは標準誤差±4%）。simulateは決定論のため、コード無変更なら数値は完全一致する
+- **【最優先・33回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜020finalを含め直近33回連続で未実施。サイクル26・4回目でも`preview_start`（`linkmark`、port 5189）を試みたが
+  「無人セッション（スケジュールタスク実行）からは開発サーバを起動できない」と即座に拒否された。人間の対話セッションでこのリポジトリを
+  扱う機会があれば最優先で実施すること（特にロット品質UIの分かりやすさ・日没に間に合わない帰還の体感は画面上でしか確認できない）**
+
+## 過去のサイクル26（完了・アーカイブ）
+
 - サイクル: 26
 - 要素: **本命ゲーム統合フェーズ（flagship）: 建築パートへの非対称品質公開＋隣接連携共鳴の統合**。
   019-building-hallmark-final（reviews/019-building-hallmark-final.md）の提案(1)を採用し、
@@ -38,7 +63,7 @@
   制圧射撃（タレット命中で敵の攻撃を遅延）も試したが、1セッションのタレット発射数が約17発と少なく遅延合計が
   約10tickで無効果だったため不採用（コードは撤回済み）。`simulate`に死亡直前状況（deathPhase/deathAtBase/
   deathByRaider）を追加
-- 次に行う回: **4回目（FINAL REVIEW）**。p01n・p02の2ペルソナ擬似実プレイ（ブラウザAIP不可）で
+- サイクル26・4回目（FINAL REVIEW、reviews/020-flagship-linkmark-final.md）で最終総括し判定**FIX**（P01約3.9/5・P02約3.7/5）。120シード×8戦略（20000tick）・40シード×4戦略（45000tick）・p01n/p02（24シード×30000tick）でコード無変更・v2と完全一致（決定論）を確認。**防衛系の死亡80件中75件（94%）が夜のフィールド、拠点内は6件（7.5%）**（全戦略でも479件中夜286・拠点内81・自宅陥落12）で、拠点設備の投資が死ぬ場面に届かない構造を特定。防衛系の鑑定ROIはタレット与ダメ+21〜74%にしか出ずscore/生存には出ない（mason vs wall 45000tickでもscore-2.6%・死亡34 vs 33/40）。長時間ではranger（分散＋盾）がwall比score+22%・撃破2.2倍と一方的に優位。死ぬとp01nのscoreが約43%減（生存者4385 vs 死亡者2484）。次サイクルは戦闘単体「日没の撤退戦」を提案。ブラウザAIPは33回連続で未実施。以下は4回目実施前の引き継ぎ記述（実施済み）: p01n・p02の2ペルソナ擬似実プレイ（ブラウザAIP不可）で
   reviews/020-flagship-linkmark-final.md を書き、routine-state.md を次サイクル（サイクル27・run1）へ進める。
   final で必ず扱うこと: ①「防衛系のROIがscoreに出ない」の根本原因（死亡は夜のフィールド、拠点被害は非拘束だった、
   今回HP250/regen0.05で長時間のみ拘束）②本命ゲームで拠点タレットの品質投資が「フィールドで死ぬ採掘者」を
@@ -899,6 +924,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-21 | 26 | 1（BUILD+REVIEW） | cycle25-final（019-building-hallmark-final）の提案(1)を受け、019で確立したbuildingの2パターン（建材ロットの非対称品質公開＝鑑定`appraisal`、バリケード/タレットの隣接連携共鳴）を018-flagship-veinsightベースの拠点防衛の建築パートへ統合した`020-flagship-linkmark`を新規実装（specs/020-flagship-linkmark/spec.md、games/020-flagship-linkmark/）。ロットは専用PRNGで生成し既存の乱数列に無干渉、連携判定は近傍8マスのSet参照でO(n×8)、`lotIndex`明示指定にscore直接加点（019の教訓を初版から反映）。headless/simulate.tsにscatter/linker/smith（pusher系）・wall/mason（cautious系）を追加。v1レビュー（reviews/020-flagship-linkmark-v1.md、40シード×攻勢系/防衛系、p01/p02擬似実プレイ）で判定**FIX**: 隣接連携は拠点防衛でBDT-46%と機能した一方、鑑定投資は選別自体（タレット品質+23〜42%）は動くが成果指標に跳ね返らず（scoreボーナスを除くと-2.8%）、品質のばらつきが鑑定なしプレイヤーへの純損失（pusher-13.6%）となる重大課題2件を発見。ブラウザAIP実プレイは30サイクル連続で未実施 | [#102](https://github.com/mannshu7-droid/gametest-scrapbuild/pull/102) |
 | 2026-09-21 | 26 | 2（FIX+REVIEW） | 020-flagship-linkmarkのv1重大バグ2件・中2件・軽微1件に対応しreviews/020-flagship-linkmark-v2.mdを作成（判定FIX）。調査で**真因は「タレットが拠点自動迎撃（拠点圏内の全レイダーへ3+2Lv/tick）の1/10以下の火力しかなく装飾に近い」こと**と判明し、`TURRET_DMG`を10→24へ引き上げ、タレット攻撃を品質の2乗（凸）に変更、バリケードの品質の効きを0.8〜1.2倍へ圧縮（純損失: pusher 120シードで-13.6%→-0.2%）、タレット攻撃強化の条件を「隣接にバリケードがある盾持ち」へ変更（クラスタ=BDT152 vs 分散ranger=BDT230だがturretKills18.6・死亡10/120の二択が成立）、`tickStuckIncome`から`appraisal`を除外（v1バグ#5）、選別配置加点をタレットのみに限定（バリケード投棄で機械的に+約100点入っていたため）。120シードで攻勢系smith vs linkerはavgScore+8.6%・BDT-15%・turretDmg+35%と成立、防衛系mason vs wallはturretDmg+21%・BDT-11%だがscore+0.5%（撃破数の飽和で検出限界内）。headlessに`ranger`（分散＋盾）・`p01n`（夜まで到達するP01系）を追加、p02は無回帰（avgScore 4051.8 vs 018の4061.7）。ブラウザAIP実プレイは31サイクル連続で未実施。npm run build / simulateとも正常終了・決定論確認済み。games/README.mdの索引・spec.mdの「v2 FIX内容」節を更新し、routine-state.mdをサイクル26・run3（FIX only）へ進めた | #103 |
 | 2026-09-22 | 26 | 3（FIX only） | 020-flagship-linkmarkのv2改善点3件を調査・対応（レビューは書かずPR本文に記載）。**死亡はほぼ全て夜のフィールドでのレイダー被害（拠点内は22件中1件）**、**自宅HP400・昼の回復フル（1.5×1200）で拠点被害BDTが生存/scoreに一切効いていなかった**（45000tickでranger+盾が一方的に優位）と判明。`HOME_BASE_MAX_HP`400→250・`BASE_DAY_REGEN`1.5→0.05へ変更し後半の被害が蓄積するようにした（〜30000tickの標準セッションは120シードで旧設定と一致・p02/p01n無回帰、45000tickでranger homeDestroyed 5/40 vs wall 1/40・mason 0/40）。mason vs wallの死亡差（27 vs 22）は品質を1.0へ中立化した比較（18 vs 19、28 vs 19）でも符号が揺れるノイズと結論（鑑定の購入順位変更も不変）。タレット火力過剰（#3）は45000tickでhomeDestroyed 0のため過剰ではないが長時間ではranger+盾が一方的に強い。制圧射撃（命中で敵攻撃を遅延）は1セッションのタレット発射数が約17発で遅延合計約10tickの無効果だったため撤回。simulateに死亡直前状況（deathPhase/deathAtBase/deathByRaider）を追加、spec.mdに「v3 FIX内容」を追記。ブラウザAIP実プレイは32サイクル連続で未実施。npm run build / simulate正常・決定論確認済み | #104 |
+| 2026-09-22 | 26 | 4（FINAL REVIEW） | 020-flagship-linkmarkの総括レビュー（reviews/020-flagship-linkmark-final.md）を作成し判定**FIX**（P01約3.9/5・P02約3.7/5）。120シード×8戦略（20000tick）・40シード×4戦略（45000tick）・p01n/p02（24シード×30000tick）を再検証し、コード無変更でv2と完全一致（決定論・無回帰）。**防衛系の死亡80件中75件（94%）が夜のフィールド、拠点内は6件（7.5%）**で、拠点設備（タレット・壁・鑑定）が死ぬ場面に届かない構造を特定（防衛系の鑑定ROIはタレット与ダメ+21〜74%にしか出ずscore/生存には出ない、mason vs wall 45000tickもscore-2.6%）。長時間はranger（分散＋盾）がwall比score+22%と一方的に優位。死ぬとp01nのscoreが約43%減。採用: 盾持ち連携・品質の凸な効かせ方・寄与比チェック・死亡直前メトリクス。持ち込まない: 防衛系の鑑定。次サイクル(27)は戦闘単体「日没の撤退戦」を提案。routine-stateを次サイクルへ進行、games/README索引を更新。`preview_start`を再試行したが無人セッション制約で拒否（ブラウザAIPは33回連続で未実施）。npm run build正常 | #PRNUM |
 
 ## 備考・引き継ぎ事項
 
