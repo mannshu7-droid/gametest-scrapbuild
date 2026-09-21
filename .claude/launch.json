@@ -96,6 +96,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/019-building-hallmark", "run", "dev", "--", "--port", "5188"],
       "port": 5188
+    },
+    {
+      "name": "linkmark",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/020-flagship-linkmark", "run", "dev", "--", "--port", "5189"],
+      "port": 5189
     }
   ]
 }
