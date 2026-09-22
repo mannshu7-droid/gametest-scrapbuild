@@ -151,7 +151,10 @@ const STRATEGIES: BotConfig[] = [
   },
   {
     name: 'decoy-heavy',
-    buyOrder: ['maxFlare', 'maxFlare', 'atk', 'maxHp', 'maxDash', 'daylight'],
+    // v2レビューで「maxFlareを2連続最優先」の購入順がatk/maxHp投資を遅らせ、decoy自体の効果とは
+    // 無関係にscore ROIを悪化させていたと判明したため、atk/maxHpを先に確保してからflare投資へ進む
+    // 順番へ変更した（購入順依存性の検証結果はPR本文に記載）
+    buyOrder: ['atk', 'maxHp', 'maxFlare', 'maxFlare', 'maxDash', 'daylight'],
     marginRetreatThreshold: 50,
     hpCriticalRatio: 0.35,
     routePolicy: 'adaptive',
