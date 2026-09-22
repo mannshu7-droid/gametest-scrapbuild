@@ -12,20 +12,24 @@
   検証したいのは ①帰還の巧拙（逃走・ダッシュ・囮・迎撃地点の選択）がスキルとして面白いか ②撤退の準備（退路の確保・帰路の投資）が
   悩ましい選択になるか。単体で確立できたら、サイクル28以降で本命ゲームの拠点防衛へ「帰還ルートの安全度に効く設備」として統合する
   （017/019で単体→flagship統合の順が成功した手順と同じ）。次点提案（019finalからの持ち越し）は「多脚・分岐構造の建築単体プロトタイプ」
-- 対象ゲーム番号: **021-combat-<名前>**（サイクル27・1回目で新規に採番。specs/021-combat-<名前>/ と games/021-combat-<名前>/）
-- 次に行う回: **1回目（BUILD+REVIEW）**。過去のreviews/のLearningsとpersonas/を読み、`templates/spec-template.md`で仕様書を書き、
-  タッチ操作の想定を含める。simulateには**死亡直前状況メトリクス（deathPhase/deathAtBase/deathByRaider相当＝「どこで・いつ・何に死ぬか」）
-  を最初から標準で入れる**（020の最大の発見はこれで初めて見えた）。効果の比較は120シード以上、複数指標（与ダメ・被害・死亡・score）が
-  同じ向きに揃うかで読む
+- 対象ゲーム番号: **021-combat-duskrun**（サイクル27・1回目で新規実装＋v1レビュー完了・判定FIX、
+  specs/021-combat-duskrun/spec.md、games/021-combat-duskrun/）
+- 次に行う回: **2回目（FIX+REVIEW）**。reviews/021-combat-duskrun-v1.mdの改善点（優先度順、致命・重大は必須）を修正し、
+  再プレイして reviews/021-combat-duskrun-v2.md を書く。**最優先の重大課題は「daylight（帰路投資）が生存・scoreに
+  全く反映されず、適度な帰還判断さえあれば夜(night)が事実上発生しない」こと**（daylightMaxの初期値引き下げ、
+  もしくは移動距離の伸びに対する相対的な余裕を締める調整を検討）。次点は「ルート選択(direct/detour)のEVヒントが
+  常にdetourを推奨し続けadaptive-routeがdetour-alwaysと完全一致してしまう」「囮(decoy)がscoreに見合わない」の2件。
+  修正後は120シード以上・複数指標（score・生存率・deathPhase内訳・nightEntries）が同じ向きに揃うかで判定する
 - サイクル26（020-flagship-linkmark）の結論: 判定FIX（P01約3.9/5、P02約3.7/5）。連携共鳴（盾持ちタレット）と品質の凸な効かせ方は採用、
   防衛系の鑑定投資は生存・scoreに出ないため本命へ持ち込まない（持ち込むならフィールド側の生存・帰還に効く品質公開へ移す）。
   詳細は「過去のサイクル26」節とreviews/020-flagship-linkmark-final.md
-- 検証環境メモ: 020のsimulateには戦略`scatter`/`linker`/`smith`（pusher系）、`wall`/`mason`/`ranger`（cautious系）、`p01n`（撤退HP35%のP01）がある。
-  **効果の比較は120シード（例: `seq -s, 101 220`）で行う**（40シードでは標準誤差±4%）。simulateは決定論のため、コード無変更なら数値は完全一致する
-- **【最優先・33回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜020finalを含め直近33回連続で未実施。サイクル26・4回目でも`preview_start`（`linkmark`、port 5189）を試みたが
+- 検証環境メモ: 021-combat-duskrunのsimulateには戦略`push-forever`/`cautious-daylight`/`cautious-no-daylight`/
+  `direct-always`/`detour-always`/`adaptive-route`/`decoy-heavy`/`no-decoy`/`p01`/`p02`がある。
+  **効果の比較は120シード（例: `--seeds 1..120`）で行う**。simulateは決定論のため、コード無変更なら数値は完全一致する
+- **【最優先・34回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜021v1を含め直近34回連続で未実施。サイクル27・1回目でも`preview_start`（`duskrun`、port 5190）を試みたが
   「無人セッション（スケジュールタスク実行）からは開発サーバを起動できない」と即座に拒否された。人間の対話セッションでこのリポジトリを
-  扱う機会があれば最優先で実施すること（特にロット品質UIの分かりやすさ・日没に間に合わない帰還の体感は画面上でしか確認できない）**
+  扱う機会があれば最優先で実施すること（特に帰還マージン・夜の危険のHUD伝達は画面上でしか確認できない）**
 
 ## 過去のサイクル26（完了・アーカイブ）
 
@@ -925,6 +929,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-21 | 26 | 2（FIX+REVIEW） | 020-flagship-linkmarkのv1重大バグ2件・中2件・軽微1件に対応しreviews/020-flagship-linkmark-v2.mdを作成（判定FIX）。調査で**真因は「タレットが拠点自動迎撃（拠点圏内の全レイダーへ3+2Lv/tick）の1/10以下の火力しかなく装飾に近い」こと**と判明し、`TURRET_DMG`を10→24へ引き上げ、タレット攻撃を品質の2乗（凸）に変更、バリケードの品質の効きを0.8〜1.2倍へ圧縮（純損失: pusher 120シードで-13.6%→-0.2%）、タレット攻撃強化の条件を「隣接にバリケードがある盾持ち」へ変更（クラスタ=BDT152 vs 分散ranger=BDT230だがturretKills18.6・死亡10/120の二択が成立）、`tickStuckIncome`から`appraisal`を除外（v1バグ#5）、選別配置加点をタレットのみに限定（バリケード投棄で機械的に+約100点入っていたため）。120シードで攻勢系smith vs linkerはavgScore+8.6%・BDT-15%・turretDmg+35%と成立、防衛系mason vs wallはturretDmg+21%・BDT-11%だがscore+0.5%（撃破数の飽和で検出限界内）。headlessに`ranger`（分散＋盾）・`p01n`（夜まで到達するP01系）を追加、p02は無回帰（avgScore 4051.8 vs 018の4061.7）。ブラウザAIP実プレイは31サイクル連続で未実施。npm run build / simulateとも正常終了・決定論確認済み。games/README.mdの索引・spec.mdの「v2 FIX内容」節を更新し、routine-state.mdをサイクル26・run3（FIX only）へ進めた | #103 |
 | 2026-09-22 | 26 | 3（FIX only） | 020-flagship-linkmarkのv2改善点3件を調査・対応（レビューは書かずPR本文に記載）。**死亡はほぼ全て夜のフィールドでのレイダー被害（拠点内は22件中1件）**、**自宅HP400・昼の回復フル（1.5×1200）で拠点被害BDTが生存/scoreに一切効いていなかった**（45000tickでranger+盾が一方的に優位）と判明。`HOME_BASE_MAX_HP`400→250・`BASE_DAY_REGEN`1.5→0.05へ変更し後半の被害が蓄積するようにした（〜30000tickの標準セッションは120シードで旧設定と一致・p02/p01n無回帰、45000tickでranger homeDestroyed 5/40 vs wall 1/40・mason 0/40）。mason vs wallの死亡差（27 vs 22）は品質を1.0へ中立化した比較（18 vs 19、28 vs 19）でも符号が揺れるノイズと結論（鑑定の購入順位変更も不変）。タレット火力過剰（#3）は45000tickでhomeDestroyed 0のため過剰ではないが長時間ではranger+盾が一方的に強い。制圧射撃（命中で敵攻撃を遅延）は1セッションのタレット発射数が約17発で遅延合計約10tickの無効果だったため撤回。simulateに死亡直前状況（deathPhase/deathAtBase/deathByRaider）を追加、spec.mdに「v3 FIX内容」を追記。ブラウザAIP実プレイは32サイクル連続で未実施。npm run build / simulate正常・決定論確認済み | #104 |
 | 2026-09-22 | 26 | 4（FINAL REVIEW） | 020-flagship-linkmarkの総括レビュー（reviews/020-flagship-linkmark-final.md）を作成し判定**FIX**（P01約3.9/5・P02約3.7/5）。120シード×8戦略（20000tick）・40シード×4戦略（45000tick）・p01n/p02（24シード×30000tick）を再検証し、コード無変更でv2と完全一致（決定論・無回帰）。**防衛系の死亡80件中75件（94%）が夜のフィールド、拠点内は6件（7.5%）**で、拠点設備（タレット・壁・鑑定）が死ぬ場面に届かない構造を特定（防衛系の鑑定ROIはタレット与ダメ+21〜74%にしか出ずscore/生存には出ない、mason vs wall 45000tickもscore-2.6%）。長時間はranger（分散＋盾）がwall比score+22%と一方的に優位。死ぬとp01nのscoreが約43%減。採用: 盾持ち連携・品質の凸な効かせ方・寄与比チェック・死亡直前メトリクス。持ち込まない: 防衛系の鑑定。次サイクル(27)は戦闘単体「日没の撤退戦」を提案。routine-stateを次サイクルへ進行、games/README索引を更新。`preview_start`を再試行したが無人セッション制約で拒否（ブラウザAIPは33回連続で未実施）。npm run build正常 | #106 |
+| 2026-09-22 | 27 | 1（BUILD+REVIEW） | cycle26-finalの提案(1)を受け、009-combat-ironmarch以来の戦闘単体プロトタイプ`021-combat-duskrun`（「日没の撤退戦」）を新規実装。拠点からの距離（distance）1本の数直線ワールドで、前進して稼ぐ→帰還マージン（残り日照-距離）を見て退却判断→帰路（direct=近道・危険/detour=遠回り・安全）を選択→ダッシュ・囮で離脱しつつ帰投、を1日単位で15日繰り返す構成。死亡直前状況メトリクス（`deathPhase`=push/retreat-day/retreat-night）を初版から標準搭載（020-finalの教訓を踏襲）。BUILD直後のsimulateで敵密度・攻撃頻度が過剰で複数戦略が85〜95%死亡し、しかも死因が狙っていた「夜」ではなく「日中の複数体包囲」に偏っていることを発見し、その場でスポーン間隔・上限・敵atk係数を調整し、ボットにも「複数に囲まれたら打ち合わず離脱」ロジックを追加して解消。120シード×10戦略で再検証した結果、**コアファン仮説の前半（帰還判断がスキルとして機能するか）は成立**（帰還判断を一切しないpush-forever=120/120死亡 vs 適切な戦略=95%以上生存）が、**後半（退路投資=daylight強化の悩ましさ）は不成立**（daylight投資の有無で結果が変わらず、適度な戦略はnightEntries=0のまま夜が実質発生しない）という重大な構造課題を発見。ルート選択のEVヒントが常にdetourを推奨し続ける課題、囮への投資が score に見合わない課題も発見。reviews/021-combat-duskrun-v1.md作成、判定**FIX**。ブラウザAIP実プレイは34サイクル連続で未実施（`.claude/launch.json`にport 5190で`duskrun`設定済み）。npm run build / npm run simulateとも正常終了・ソフトロック0件確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run2（FIX+REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
