@@ -13,21 +13,33 @@
   悩ましい選択になるか。単体で確立できたら、サイクル28以降で本命ゲームの拠点防衛へ「帰還ルートの安全度に効く設備」として統合する
   （017/019で単体→flagship統合の順が成功した手順と同じ）。次点提案（019finalからの持ち越し）は「多脚・分岐構造の建築単体プロトタイプ」
 - 対象ゲーム番号: **021-combat-duskrun**（サイクル27・1回目で新規実装＋v1レビュー完了・判定FIX、
-  specs/021-combat-duskrun/spec.md、games/021-combat-duskrun/）
-- 次に行う回: **2回目（FIX+REVIEW）**。reviews/021-combat-duskrun-v1.mdの改善点（優先度順、致命・重大は必須）を修正し、
-  再プレイして reviews/021-combat-duskrun-v2.md を書く。**最優先の重大課題は「daylight（帰路投資）が生存・scoreに
-  全く反映されず、適度な帰還判断さえあれば夜(night)が事実上発生しない」こと**（daylightMaxの初期値引き下げ、
-  もしくは移動距離の伸びに対する相対的な余裕を締める調整を検討）。次点は「ルート選択(direct/detour)のEVヒントが
-  常にdetourを推奨し続けadaptive-routeがdetour-alwaysと完全一致してしまう」「囮(decoy)がscoreに見合わない」の2件。
-  修正後は120シード以上・複数指標（score・生存率・deathPhase内訳・nightEntries）が同じ向きに揃うかで判定する
+  2回目でFIX+REVIEW完了・v2レビュー判定FIX、specs/021-combat-duskrun/spec.md、games/021-combat-duskrun/）
+- 次に行う回: **3回目（FIX only）**。reviews/021-combat-duskrun-v2.mdの残課題（レビューは書かず、修正内容はPR本文に記載）:
+  **囮(decoy)のROIが依然としてno-decoyを下回る**（v2でDECOY_STUN_TICKS 50→80・DECOY_RADIUS12→16・コスト引き下げを
+  実施し発動回数は1.7→3.7回/セッションへ増えたが、decoy-heavy avgScoreはno-decoy比-4.0%とむしろ悪化した）。
+  v2調査での判明事項: 原因は囮メカニクス単体の弱さではなく、`decoy-heavy`戦略（headless/simulate.ts）の購入順
+  （maxFlareを2連続最優先→atk/maxHpが遅れる）が、v2のルート修正でdirect（高密度戦闘）を選ぶ頻度が増えたことで
+  相対的に不利化したこと。次回は「decoy購入順を変えたらROIがどう変わるか」の購入順依存性を検証してから対応方針
+  （囮に複数体を巻き込んだ時の超過ボーナスを足す、または既存の購入順設定自体を見直す）を決めること
+- サイクル27・2回目（reviews/021-combat-duskrun-v2.md）の要点: v1の重大1件・中2件に対応し判定FIX。
+  **daylightMax260→180**でdaylight投資有無がavgMaxDistance+27.5%・avgScore+1.8%の有意差を持つようになった
+  （ただしnightEntries自体は依然0のままで、margin計算式が正確すぎる限り閾値順守プレイはほぼ確実に夜を回避できる
+  構造は変わらず。「夜に飲まれる危険」は主にretreat-day死という別の形で表出している）。ルート選択は
+  `DETOUR_DISTANCE_DELTA`15→22・`DIRECT_DISTANCE_DELTA`-10→-14・新設`ROUTE_SAFETY_BUFFER=32`で
+  「detour後も十分な余裕が残る場合のみdetour推奨」に変更し、adaptive-routeがdirect-always/detour-alwaysの
+  どちらとも完全一致しなくなった。擬似実プレイでP01（薄マージン）がdirect優勢・P02（厚マージン）がdetour一貫という
+  ペルソナごとの自然な分岐が確認できた（P01はv1で死亡していたセッションがv2では15日完走）。
+  調査中に`DETOUR_DISTANCE_DELTA`を28まで大きくして最初にテストした際、退却時の一括distance加算が
+  `ENEMY_DESPAWN_BEHIND`(20)を超えて追跡中の敵を一瞬でdespawnさせる副作用バグを発見（全戦略のavgDash/avgDecoyが
+  不自然に0.0へ落ち込んだことで気づいた）、`ENEMY_DESPAWN_BEHIND`20→35で解消した
 - サイクル26（020-flagship-linkmark）の結論: 判定FIX（P01約3.9/5、P02約3.7/5）。連携共鳴（盾持ちタレット）と品質の凸な効かせ方は採用、
   防衛系の鑑定投資は生存・scoreに出ないため本命へ持ち込まない（持ち込むならフィールド側の生存・帰還に効く品質公開へ移す）。
   詳細は「過去のサイクル26」節とreviews/020-flagship-linkmark-final.md
 - 検証環境メモ: 021-combat-duskrunのsimulateには戦略`push-forever`/`cautious-daylight`/`cautious-no-daylight`/
   `direct-always`/`detour-always`/`adaptive-route`/`decoy-heavy`/`no-decoy`/`p01`/`p02`がある。
   **効果の比較は120シード（例: `--seeds 1..120`）で行う**。simulateは決定論のため、コード無変更なら数値は完全一致する
-- **【最優先・34回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜021v1を含め直近34回連続で未実施。サイクル27・1回目でも`preview_start`（`duskrun`、port 5190）を試みたが
+- **【最優先・35回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜021v2を含め直近35回連続で未実施。サイクル27・1〜2回目とも`preview_start`は
   「無人セッション（スケジュールタスク実行）からは開発サーバを起動できない」と即座に拒否された。人間の対話セッションでこのリポジトリを
   扱う機会があれば最優先で実施すること（特に帰還マージン・夜の危険のHUD伝達は画面上でしか確認できない）**
 
@@ -930,6 +942,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-22 | 26 | 3（FIX only） | 020-flagship-linkmarkのv2改善点3件を調査・対応（レビューは書かずPR本文に記載）。**死亡はほぼ全て夜のフィールドでのレイダー被害（拠点内は22件中1件）**、**自宅HP400・昼の回復フル（1.5×1200）で拠点被害BDTが生存/scoreに一切効いていなかった**（45000tickでranger+盾が一方的に優位）と判明。`HOME_BASE_MAX_HP`400→250・`BASE_DAY_REGEN`1.5→0.05へ変更し後半の被害が蓄積するようにした（〜30000tickの標準セッションは120シードで旧設定と一致・p02/p01n無回帰、45000tickでranger homeDestroyed 5/40 vs wall 1/40・mason 0/40）。mason vs wallの死亡差（27 vs 22）は品質を1.0へ中立化した比較（18 vs 19、28 vs 19）でも符号が揺れるノイズと結論（鑑定の購入順位変更も不変）。タレット火力過剰（#3）は45000tickでhomeDestroyed 0のため過剰ではないが長時間ではranger+盾が一方的に強い。制圧射撃（命中で敵攻撃を遅延）は1セッションのタレット発射数が約17発で遅延合計約10tickの無効果だったため撤回。simulateに死亡直前状況（deathPhase/deathAtBase/deathByRaider）を追加、spec.mdに「v3 FIX内容」を追記。ブラウザAIP実プレイは32サイクル連続で未実施。npm run build / simulate正常・決定論確認済み | #104 |
 | 2026-09-22 | 26 | 4（FINAL REVIEW） | 020-flagship-linkmarkの総括レビュー（reviews/020-flagship-linkmark-final.md）を作成し判定**FIX**（P01約3.9/5・P02約3.7/5）。120シード×8戦略（20000tick）・40シード×4戦略（45000tick）・p01n/p02（24シード×30000tick）を再検証し、コード無変更でv2と完全一致（決定論・無回帰）。**防衛系の死亡80件中75件（94%）が夜のフィールド、拠点内は6件（7.5%）**で、拠点設備（タレット・壁・鑑定）が死ぬ場面に届かない構造を特定（防衛系の鑑定ROIはタレット与ダメ+21〜74%にしか出ずscore/生存には出ない、mason vs wall 45000tickもscore-2.6%）。長時間はranger（分散＋盾）がwall比score+22%と一方的に優位。死ぬとp01nのscoreが約43%減。採用: 盾持ち連携・品質の凸な効かせ方・寄与比チェック・死亡直前メトリクス。持ち込まない: 防衛系の鑑定。次サイクル(27)は戦闘単体「日没の撤退戦」を提案。routine-stateを次サイクルへ進行、games/README索引を更新。`preview_start`を再試行したが無人セッション制約で拒否（ブラウザAIPは33回連続で未実施）。npm run build正常 | #106 |
 | 2026-09-22 | 27 | 1（BUILD+REVIEW） | cycle26-finalの提案(1)を受け、009-combat-ironmarch以来の戦闘単体プロトタイプ`021-combat-duskrun`（「日没の撤退戦」）を新規実装。拠点からの距離（distance）1本の数直線ワールドで、前進して稼ぐ→帰還マージン（残り日照-距離）を見て退却判断→帰路（direct=近道・危険/detour=遠回り・安全）を選択→ダッシュ・囮で離脱しつつ帰投、を1日単位で15日繰り返す構成。死亡直前状況メトリクス（`deathPhase`=push/retreat-day/retreat-night）を初版から標準搭載（020-finalの教訓を踏襲）。BUILD直後のsimulateで敵密度・攻撃頻度が過剰で複数戦略が85〜95%死亡し、しかも死因が狙っていた「夜」ではなく「日中の複数体包囲」に偏っていることを発見し、その場でスポーン間隔・上限・敵atk係数を調整し、ボットにも「複数に囲まれたら打ち合わず離脱」ロジックを追加して解消。120シード×10戦略で再検証した結果、**コアファン仮説の前半（帰還判断がスキルとして機能するか）は成立**（帰還判断を一切しないpush-forever=120/120死亡 vs 適切な戦略=95%以上生存）が、**後半（退路投資=daylight強化の悩ましさ）は不成立**（daylight投資の有無で結果が変わらず、適度な戦略はnightEntries=0のまま夜が実質発生しない）という重大な構造課題を発見。ルート選択のEVヒントが常にdetourを推奨し続ける課題、囮への投資が score に見合わない課題も発見。reviews/021-combat-duskrun-v1.md作成、判定**FIX**。ブラウザAIP実プレイは34サイクル連続で未実施（`.claude/launch.json`にport 5190で`duskrun`設定済み）。npm run build / npm run simulateとも正常終了・ソフトロック0件確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-09-22 | 27 | 2（FIX+REVIEW） | 021-combat-duskrunのv1重大1件・中2件に対応しreviews/021-combat-duskrun-v2.mdを作成（判定FIX）。**最優先の重大課題「daylight投資が生存・scoreに反映されない」に対応**: `daylightMax`初期値260→180へ引き下げ、daylight投資有無でavgMaxDistance+27.5%（104.4 vs 81.9）・avgScore+1.8%（3219.8 vs 3163.7）の有意差を確認（120シード）。**中課題「ルート選択のEVヒントが常にdetourを推奨」に対応**: `DETOUR_DISTANCE_DELTA`15→22・`DIRECT_DISTANCE_DELTA`-10→-14へ拡大し、`routeRecommended()`を「detour後も0以上の余裕」から新設`ROUTE_SAFETY_BUFFER=32`（detour後も十分な余裕が残る場合のみ推奨）へ変更。adaptive-route（avgDirect13.2/avgDetour1.8）がdirect-always・detour-alwaysのどちらとも完全一致しなくなり、擬似実プレイではP01（薄マージン）がdirect優勢・P02（厚マージン）がdetour一貫という望ましいペルソナ分岐も確認（P01はv1で死亡していたセッションがv2では15日完走）。副作用として`DETOUR_DISTANCE_DELTA`を一時的に28まで拡大した際、退却時の一括distance加算が`ENEMY_DESPAWN_BEHIND`(20)を超えて追跡中の敵を一瞬でdespawnさせるバグ（全戦略のavgDash/avgDecoyが0.0に落ち込む異常値で発見）を発見し、`ENEMY_DESPAWN_BEHIND`20→35で解消した。**中課題「囮(decoy)のROI」は部分改善に留まった**: `DECOY_STUN_TICKS`50→80・`DECOY_RADIUS`12→16・コスト引き下げで発動回数は1.7→3.7回/セッションへ増加したが、decoy-heavy avgScoreはno-decoy比-4.0%とv1（-2.8%）よりむしろ悪化（route修正でdirect選択が増えatk/hp投資が遅れる`decoy-heavy`の購入順の弱さがより露呈したため）。中課題のため必須対応ではなく3回目へ持ち越し。120シード×10戦略で決定論・ソフトロック0件を確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
