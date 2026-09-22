@@ -8,14 +8,14 @@ export const DASH_BONUS = 3;
 export const DASH_REGEN_INTERVAL = 120;
 export const ATK_RANGE = 3;
 export const ATK_CD_MAX = 4;
-export const DECOY_RADIUS = 12;
-export const DECOY_STUN_TICKS = 50;
+export const DECOY_RADIUS = 16;
+export const DECOY_STUN_TICKS = 80;
 export const DAYS_GOAL = 15;
 
 // --- 帰路（ルート選択）定数 ---
-const DIRECT_DISTANCE_DELTA = -10;
-const DETOUR_DISTANCE_DELTA = 15;
-const DIRECT_SPAWN_INTERVAL_MULT = 0.6;
+const DIRECT_DISTANCE_DELTA = -14;
+const DETOUR_DISTANCE_DELTA = 22;
+const DIRECT_SPAWN_INTERVAL_MULT = 0.75;
 const DETOUR_SPAWN_INTERVAL_MULT = 1.6;
 const DETOUR_ENEMY_SPEED_MULT = 0.85;
 
@@ -28,10 +28,11 @@ const NIGHT_SPAWN_INTERVAL_MULT = 0.6;
 const BASE_SPAWN_INTERVAL = 30;
 const BASE_SPAWN_CHANCE = 0.5;
 const ENEMY_ATK_CD_MAX = 9;
-const ENEMY_DESPAWN_BEHIND = 20;
+const ENEMY_DESPAWN_BEHIND = 35;
 
 // --- リスクヒント閾値 ---
 const RISK_SAFE_MARGIN = 40;
+const ROUTE_SAFETY_BUFFER = 32;
 
 // --- 強化コスト・効果（008系「常設ショップ・複数の使い道」パターンを踏襲） ---
 function atkCost(lv: number): number {
@@ -44,7 +45,7 @@ function maxDashCost(lv: number): number {
   return 20 + lv * 15;
 }
 function maxFlareCost(lv: number): number {
-  return 20 + lv * 15;
+  return 15 + lv * 10;
 }
 function daylightCost(lv: number): number {
   return 25 + lv * 18;
@@ -118,8 +119,8 @@ export class Game {
       dashRegenCounter: 0,
       flareCharges: 1,
       maxFlareCharges: 1,
-      daylightMax: 260,
-      daylightRemaining: 260,
+      daylightMax: 180,
+      daylightRemaining: 180,
       intent: 'push',
       routeLocked: null,
       atkLv: 0,
@@ -314,7 +315,7 @@ export class Game {
     } else if (which === 'restockFlare') {
       const missing = p.maxFlareCharges - p.flareCharges;
       if (missing <= 0) return;
-      const cost = missing * (8 + this.day);
+      const cost = missing * (3 + this.day);
       if (p.money < cost) return;
       p.money -= cost;
       p.flareCharges = p.maxFlareCharges;
@@ -370,9 +371,12 @@ export class Game {
   }
 
   private routeRecommended(): Route {
+    // detourは敵密度・速度で安全だが距離が伸びる分だけ日照を消費する。
+    // 「行った後も一定の余裕(ROUTE_SAFETY_BUFFER)が残る」場合のみ安全策のdetourを勧め、
+    // 際どいマージンでは短距離のdirectを勧める（feasibleというだけでdetourが常に支配的にならないようにする）
     const detourAfter = Math.min(MAX_DISTANCE + 40, this.player.distance + DETOUR_DISTANCE_DELTA);
     const marginDetour = this.player.daylightRemaining - detourAfter / MOVE_SPEED;
-    return marginDetour >= 0 ? 'detour' : 'direct';
+    return marginDetour >= ROUTE_SAFETY_BUFFER ? 'detour' : 'direct';
   }
 
   step(action: Action): GameState {
@@ -467,7 +471,7 @@ export class Game {
           maxDash: maxDashCost(p.dashLv),
           maxFlare: maxFlareCost(p.flareLv),
           daylight: daylightCost(p.daylightLv),
-          restockFlare: Math.max(0, p.maxFlareCharges - p.flareCharges) * (8 + this.day),
+          restockFlare: Math.max(0, p.maxFlareCharges - p.flareCharges) * (3 + this.day),
         },
       },
       enemies: this.enemies.map((e) => ({ ...e })),
