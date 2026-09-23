@@ -6,21 +6,28 @@
 
 - サイクル: 28
 - 要素: **本命ゲーム統合フェーズ（flagship）: 021-combat-duskrunの帰還マージン・daylight投資・ルート選択を
-  拠点防衛パートへ統合**。021final（reviews/021-combat-duskrun-final.md）の提案(1)を採用する。
+  拠点防衛パートへ統合**。021final（reviews/021-combat-duskrun-final.md）の提案(1)を採用した。
   020-finalが発見した「防衛系の死亡の94%は夜のフィールドで起き、拠点内の死亡は7.5%。拠点のタレット・壁・鑑定は
-  実際に死ぬ場面に届かない」という構造課題に対し、021は単体検証で「daylight投資（帰路への恒久投資）が
-  avgMaxDistance+27.5%・avgScore+1.8%と到達距離・scoreに明確に効く」という解決策を確立した。020-flagship-linkmark
-  をベースに、**拠点の防衛投資（タレット・鑑定・共鳴）の一部を「フィールドでの帰還マージン・視界・帰還速度」に
-  効かせる形へ組み替える**（例: タレットの索敵範囲を"帰路"として扱い帰路上で移動速度/視界にボーナス、鑑定投資が
-  帰還マージンの精度＝不確実性の低減に効く、等）ことで、投資が死ぬ場面（夜のフィールド）に届く構造を作る。
-  017/019で確立した「単体プロトタイプ→flagship統合」の手順を踏襲する。統合時の注意点（021finalより）:
-  `returnMargin`計算式の"正確さ"をそのまま持ち込むと計画通り動けば絶対安全という構造になり夜の危険が再現され
-  ないため、意図的な不確実性（視界外の敵密度・戦闘停滞等）を組み込むことを最初から検討する。成功指標は
-  `deathPhase`内訳（夜のフィールド死/日中包囲死/拠点内死）が拠点投資の有無でどう変わるかを主指標にする。
-  次点提案（019finalから持ち越し、022が統合フェーズで手一杯なら別サイクルへ）は「多脚・分岐構造の建築単体プロトタイプ」
-- 対象ゲーム番号: **未定（022-flagship-\<name\>）**。1回目でspecs/022-flagship-\<name\>/spec.mdとgames/022-flagship-\<name\>/を新規作成する
-- 次に行う回: **1回目（BUILD+REVIEW）**。reviews/の全Learningsとpersonas/を読み、020-flagship-linkmarkをベースに
-  021の帰還マージン・daylight投資・ルート選択を拠点防衛へ統合したゲームを実装し、両ペルソナでv1レビューを書く
+  実際に死ぬ場面に届かない」という構造課題に対し、拠点の防衛投資（タレット品質・連携、鑑定）自体を
+  「フィールドでの帰還マージン・帰還速度」に効かせる形へ組み替えた（タレットに同レーン上のパトロール圏を
+  追加＋鑑定投資が帰還危険度ヒントの表示精度に効く）。次点提案（019finalから持ち越し、022が統合フェーズで
+  手一杯なら別サイクルへ）は「多脚・分岐構造の建築単体プロトタイプ」
+- 対象ゲーム番号: **022-flagship-hearthline**（specs/022-flagship-hearthline/spec.md、games/022-flagship-hearthline/）
+- 次に行う回: **2回目（FIX+REVIEW）**。v1レビュー（reviews/022-flagship-hearthline-v1.md）の課題2件に対応する:
+  (1)【中】パトロール圏の効果が強すぎ、意図的に活用する`patroller`戦略が標準セッション長(20000tick)で
+  0/20死亡になっている。`PATROL_FUEL_DRAIN_MULT`(現0.5)または`PATROL_RANGE_*`をやや弱めるか、
+  `computeTrueReturnRisk`の危険判定閾値を厳しくして再検証する。(2)【軽微】鑑定投資(`appraisal`)の
+  "見えるだけ"の効能はボット側の行動判断に反映されないため、mason（鑑定Lv3、returnRiskLevel可視だが
+  無反応）がwall（鑑定なし）より死亡数が悪化する。他のcautious/wall系ボットにも`returnRiskLevel`に
+  基づく行動判断を追加できるか検討する（020以来の既知パターンの再確認）
+- サイクル28・1回目（BUILD+REVIEW）の結果: 020-flagship-linkmarkをベースに`022-flagship-hearthline`を
+  新規実装し判定**FIX**。検証用に`patroller`（mason同等の投資＋帰還時にパトロール圏のレーンへ意図的に
+  寄る）と`bare`（タレット投資ゼロの対照群）を新設し、20シードでpatroller **0/20死亡**・同投資のmason
+  **5/20死亡（全てnight-field）**という劇的な差を確認し、「投資の存在ではなく実際にヒントに基づいて
+  行動するかが生死を分ける」ことを示せた。60000tickの長時間検証ではpatrollerも死亡が復活（in-base死も
+  新規発生）し、021-finalの注意点（マージン計算式が正確すぎると危険が消える）通り危険自体は消していない
+  ことも確認。`deathPhase`（'night-field'/'day-siege'/'in-base'/'none'）を021に続きcore Metricsへ
+  標準搭載。詳細はreviews/022-flagship-hearthline-v1.md
 - サイクル27（021-combat-duskrun）の結論: 判定FIX。コアファン仮説の前半（帰還判断のスキル性）はpush-forever
   0%生存 vs 適切な戦略95%以上生存で4回通じて一貫して成立。後半（退路投資の悩ましさ）はdaylight投資
   （avgMaxDistance+27.5%・avgScore+1.8%）とルート選択（ペルソナごとに自然分岐）の2系統で成立、囮(decoy)は
@@ -28,14 +35,15 @@
   `returnMargin`計算式が正確すぎるため`nightEntries`は全戦略で0のまま最後まで残り、「夜のフィールド死」の
   再現という当初目的は未達（代わりに「日中の退却判断ミスによる包囲死」が主要な危険構造になった）。
   詳細は「過去のサイクル27」節とreviews/021-combat-duskrun-final.md
-- 検証環境メモ（021から継続、022でも参考にする）: 021-combat-duskrunのsimulateには戦略`push-forever`/
-  `cautious-daylight`/`cautious-no-daylight`/`direct-always`/`detour-always`/`adaptive-route`/`decoy-heavy`/
-  `no-decoy`/`p01`/`p02`がある。**効果の比較は120シード（例: `--seeds 1..120`）で行う**。simulateは決定論のため、
-  コード無変更なら数値は完全一致する
-- **【最優先・37回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜021finalを含め直近37回連続で未実施。サイクル27・全4回とも`preview_start`は
+- 検証環境メモ（022で新設）: 022-flagship-hearthlineのsimulateは020の全戦略（cautious/pusher/p01/p02/
+  planner/blind/scatter/linker/smith/wall/mason/ranger/p01n）に加え、`patroller`（mason同等の投資＋
+  帰還時にパトロール圏のレーンへ意図的に寄る）・`bare`（タレット投資ゼロの対照群）が022新規。
+  出力JSONの`deathPhaseCore`（'night-field'/'day-siege'/'in-base'/'none'、core Metrics.deathPhase由来）が
+  022の主指標。simulateは決定論のため、コード無変更なら数値は完全一致する
+- **【最優先・38回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜022v1を含め直近38回連続で未実施。サイクル28・1回目も`preview_start`は
   「無人セッション（スケジュールタスク実行）からは開発サーバを起動できない」と即座に拒否された。人間の対話セッションでこのリポジトリを
-  扱う機会があれば最優先で実施すること（特に帰還マージン・夜の危険のHUD伝達は画面上でしか確認できない）**
+  扱う機会があれば最優先で実施すること（特にパトロール圏・帰還危険度ヒントのHUD伝達は画面上でしか確認できない）**
 
 ## 過去のサイクル27（完了・アーカイブ）
 
@@ -973,6 +981,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-22 | 27 | 1（BUILD+REVIEW） | cycle26-finalの提案(1)を受け、009-combat-ironmarch以来の戦闘単体プロトタイプ`021-combat-duskrun`（「日没の撤退戦」）を新規実装。拠点からの距離（distance）1本の数直線ワールドで、前進して稼ぐ→帰還マージン（残り日照-距離）を見て退却判断→帰路（direct=近道・危険/detour=遠回り・安全）を選択→ダッシュ・囮で離脱しつつ帰投、を1日単位で15日繰り返す構成。死亡直前状況メトリクス（`deathPhase`=push/retreat-day/retreat-night）を初版から標準搭載（020-finalの教訓を踏襲）。BUILD直後のsimulateで敵密度・攻撃頻度が過剰で複数戦略が85〜95%死亡し、しかも死因が狙っていた「夜」ではなく「日中の複数体包囲」に偏っていることを発見し、その場でスポーン間隔・上限・敵atk係数を調整し、ボットにも「複数に囲まれたら打ち合わず離脱」ロジックを追加して解消。120シード×10戦略で再検証した結果、**コアファン仮説の前半（帰還判断がスキルとして機能するか）は成立**（帰還判断を一切しないpush-forever=120/120死亡 vs 適切な戦略=95%以上生存）が、**後半（退路投資=daylight強化の悩ましさ）は不成立**（daylight投資の有無で結果が変わらず、適度な戦略はnightEntries=0のまま夜が実質発生しない）という重大な構造課題を発見。ルート選択のEVヒントが常にdetourを推奨し続ける課題、囮への投資が score に見合わない課題も発見。reviews/021-combat-duskrun-v1.md作成、判定**FIX**。ブラウザAIP実プレイは34サイクル連続で未実施（`.claude/launch.json`にport 5190で`duskrun`設定済み）。npm run build / npm run simulateとも正常終了・ソフトロック0件確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-09-22 | 27 | 2（FIX+REVIEW） | 021-combat-duskrunのv1重大1件・中2件に対応しreviews/021-combat-duskrun-v2.mdを作成（判定FIX）。**最優先の重大課題「daylight投資が生存・scoreに反映されない」に対応**: `daylightMax`初期値260→180へ引き下げ、daylight投資有無でavgMaxDistance+27.5%（104.4 vs 81.9）・avgScore+1.8%（3219.8 vs 3163.7）の有意差を確認（120シード）。**中課題「ルート選択のEVヒントが常にdetourを推奨」に対応**: `DETOUR_DISTANCE_DELTA`15→22・`DIRECT_DISTANCE_DELTA`-10→-14へ拡大し、`routeRecommended()`を「detour後も0以上の余裕」から新設`ROUTE_SAFETY_BUFFER=32`（detour後も十分な余裕が残る場合のみ推奨）へ変更。adaptive-route（avgDirect13.2/avgDetour1.8）がdirect-always・detour-alwaysのどちらとも完全一致しなくなり、擬似実プレイではP01（薄マージン）がdirect優勢・P02（厚マージン）がdetour一貫という望ましいペルソナ分岐も確認（P01はv1で死亡していたセッションがv2では15日完走）。副作用として`DETOUR_DISTANCE_DELTA`を一時的に28まで拡大した際、退却時の一括distance加算が`ENEMY_DESPAWN_BEHIND`(20)を超えて追跡中の敵を一瞬でdespawnさせるバグ（全戦略のavgDash/avgDecoyが0.0に落ち込む異常値で発見）を発見し、`ENEMY_DESPAWN_BEHIND`20→35で解消した。**中課題「囮(decoy)のROI」は部分改善に留まった**: `DECOY_STUN_TICKS`50→80・`DECOY_RADIUS`12→16・コスト引き下げで発動回数は1.7→3.7回/セッションへ増加したが、decoy-heavy avgScoreはno-decoy比-4.0%とv1（-2.8%）よりむしろ悪化（route修正でdirect選択が増えatk/hp投資が遅れる`decoy-heavy`の購入順の弱さがより露呈したため）。中課題のため必須対応ではなく3回目へ持ち越し。120シード×10戦略で決定論・ソフトロック0件を確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run3（FIX only）へ進めた | (本PR) |
 | 2026-09-23 | 27 | 3（FIX only） | v2からの持ち越し課題「囮(decoy)のROI」の購入順依存性を検証（レビューは書かずPR本文に記載）。`headless/simulate.ts`の`decoy-heavy`戦略の購入順を`['maxFlare','maxFlare','atk','maxHp','maxDash','daylight']`から`['atk','maxHp','maxFlare','maxFlare','maxDash','daylight']`（atk/maxHpを先に確保してから囮投資へ進む）へ変更。120シード再検証でavgScoreのno-decoy比が-4.0%→**-2.0%**（3161.5→3228.1）、deathsが13/120→**4/120**（adaptive-route・no-decoyと同水準）に改善し、v1〜v2で観測された囮ROIの大きな逆転は囮メカニクス自体の弱さではなく検証bot側の不自然な購入順（機会費用）が支配的要因だったことを確定させた。ゲーム本体（`src/core/game.ts`）は無変更、`decoy-heavy`の購入順のみ修正。120シード×10戦略で決定論・ソフトロック0件を再確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run4（FINAL REVIEW）へ進めた | (本PR) |
+| 2026-09-23 | 28 | 1（BUILD+REVIEW） | 020-flagship-linkmarkをベースに、021-final提案(1)「拠点防衛投資（タレット品質・連携、鑑定）をフィールドでの帰還マージン・帰還速度に効かせる」を統合した`022-flagship-hearthline`を新規実装。新規ショップ項目は追加せず、タレットに同レーン上の**パトロール圏**（品質・連携が広さに効く、圏内で受動燃料消費0.5倍）を追加し、鑑定投資を建材ロット品質だけでなく夜間の帰還危険度ヒント`returnRiskLevel`の表示精度（Lv0=非表示、Lv1/2=確率的に1段階ずれる、Lv3=正確）にも効かせた。021-finalの注意点（マージン計算式が正確すぎると危険が消える）を踏まえ、`returnRiskLevel`の実体（燃料マージン＋帰路の夜間レイダー数）自体は鑑定Lvに関係なく変わらない設計にした。検証用に`patroller`（mason同等の投資＋帰還時に`recommendedReturnLane`へ意図的に寄る）と`bare`（タレット投資ゼロの対照群）を新設し、20シードでpatroller**0/20死亡**・同投資のmason**5/20死亡（全てnight-field）**という劇的な差を確認し、「投資の存在ではなく実際にヒントに基づいて行動するかが生死を分ける」ことを示せた。60000tickの長時間検証ではpatrollerも死亡が復活（in-base死も新規発生）し危険自体は消していないことも確認。`deathPhase`（'night-field'/'day-siege'/'in-base'/'none'）を021に続きcore Metricsへ標準搭載（020まではheadless側の後付け集計だった）。020までの全13戦略（10シード）でクラッシュ・回帰なし、決定論を確認。reviews/022-flagship-hearthline-v1.md作成、判定**FIX**。中課題2件（パトロール圏の効果がやや強すぎる可能性／鑑定投資単体の"知るだけ"のROIがボット行動なしには測れない）は次回へ持ち越し。ブラウザAIP実プレイは38サイクル連続で未実施（`.claude/launch.json`にport 5191で`hearthline`設定済み）。npm run build / npm run simulateとも正常終了・ソフトロック0件確認。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run2（FIX+REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 

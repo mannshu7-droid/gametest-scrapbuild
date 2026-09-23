@@ -108,6 +108,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/021-combat-duskrun", "run", "dev", "--", "--port", "5190"],
       "port": 5190
+    },
+    {
+      "name": "hearthline",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/022-flagship-hearthline", "run", "dev", "--", "--port", "5191"],
+      "port": 5191
     }
   ]
 }
