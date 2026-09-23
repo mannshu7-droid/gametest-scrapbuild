@@ -13,13 +13,17 @@
   追加＋鑑定投資が帰還危険度ヒントの表示精度に効く）。次点提案（019finalから持ち越し、022が統合フェーズで
   手一杯なら別サイクルへ）は「多脚・分岐構造の建築単体プロトタイプ」
 - 対象ゲーム番号: **022-flagship-hearthline**（specs/022-flagship-hearthline/spec.md、games/022-flagship-hearthline/）
-- 次に行う回: **2回目（FIX+REVIEW）**。v1レビュー（reviews/022-flagship-hearthline-v1.md）の課題2件に対応する:
-  (1)【中】パトロール圏の効果が強すぎ、意図的に活用する`patroller`戦略が標準セッション長(20000tick)で
-  0/20死亡になっている。`PATROL_FUEL_DRAIN_MULT`(現0.5)または`PATROL_RANGE_*`をやや弱めるか、
-  `computeTrueReturnRisk`の危険判定閾値を厳しくして再検証する。(2)【軽微】鑑定投資(`appraisal`)の
-  "見えるだけ"の効能はボット側の行動判断に反映されないため、mason（鑑定Lv3、returnRiskLevel可視だが
-  無反応）がwall（鑑定なし）より死亡数が悪化する。他のcautious/wall系ボットにも`returnRiskLevel`に
-  基づく行動判断を追加できるか検討する（020以来の既知パターンの再確認）
+- 次に行う回: **3回目（FIX only）**。v2レビュー（reviews/022-flagship-hearthline-v2.md）の残課題（いずれも軽微、
+  レビューは書かず修正のみ・PR本文に記載）: (1)mason（ダッシュ反応）とpatroller（レーン誘導）の優劣が
+  標準tick(20000)/長時間tick(60000)で逆転する（標準: mason1<patroller4、長時間: mason4<patroller5）。
+  なぜ逆転するかを分析し、必要なら調整する。(2)グローバル定数調整がpatrol機構を使わない戦略
+  （scatter/p01等）にも決定論シミュレーションの燃料タイミング連鎖で副作用を及ぼす件は、次回以降の
+  数値調整で対象外戦略への影響も毎回確認する運用を徹底する（対応必須ではなく運用メモ）
+- サイクル28・2回目（FIX+REVIEW）の結果: v1課題2件を修正。パトロール圏を弱体化（PATROL_RANGE_BASE
+  5→4・PATROL_RANGE_QUALITY_MULT 4→2・PATROL_RANGE_LINK_BONUS 3→2・PATROL_FUEL_DRAIN_MULT 0.5→0.65）
+  しpatroller死亡数0→4/20に変化、mason専用に`usesReturnRiskCaution`（returnRiskLevel danger時に
+  ダッシュで帰還）を追加しmason死亡数5→1/20に改善（wall以上の安全性）。判定FIX。詳細は
+  reviews/022-flagship-hearthline-v2.md
 - サイクル28・1回目（BUILD+REVIEW）の結果: 020-flagship-linkmarkをベースに`022-flagship-hearthline`を
   新規実装し判定**FIX**。検証用に`patroller`（mason同等の投資＋帰還時にパトロール圏のレーンへ意図的に
   寄る）と`bare`（タレット投資ゼロの対照群）を新設し、20シードでpatroller **0/20死亡**・同投資のmason
@@ -40,9 +44,9 @@
   帰還時にパトロール圏のレーンへ意図的に寄る）・`bare`（タレット投資ゼロの対照群）が022新規。
   出力JSONの`deathPhaseCore`（'night-field'/'day-siege'/'in-base'/'none'、core Metrics.deathPhase由来）が
   022の主指標。simulateは決定論のため、コード無変更なら数値は完全一致する
-- **【最優先・38回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜022v1を含め直近38回連続で未実施。サイクル28・1回目も`preview_start`は
-  「無人セッション（スケジュールタスク実行）からは開発サーバを起動できない」と即座に拒否された。人間の対話セッションでこのリポジトリを
+- **【最優先・39回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜022v2を含め直近39回連続で未実施。サイクル28・2回目も無人スケジュール
+  実行のため開発サーバを起動できない構造的制約は変わらず。人間の対話セッションでこのリポジトリを
   扱う機会があれば最優先で実施すること（特にパトロール圏・帰還危険度ヒントのHUD伝達は画面上でしか確認できない）**
 
 ## 過去のサイクル27（完了・アーカイブ）
@@ -982,6 +986,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-22 | 27 | 2（FIX+REVIEW） | 021-combat-duskrunのv1重大1件・中2件に対応しreviews/021-combat-duskrun-v2.mdを作成（判定FIX）。**最優先の重大課題「daylight投資が生存・scoreに反映されない」に対応**: `daylightMax`初期値260→180へ引き下げ、daylight投資有無でavgMaxDistance+27.5%（104.4 vs 81.9）・avgScore+1.8%（3219.8 vs 3163.7）の有意差を確認（120シード）。**中課題「ルート選択のEVヒントが常にdetourを推奨」に対応**: `DETOUR_DISTANCE_DELTA`15→22・`DIRECT_DISTANCE_DELTA`-10→-14へ拡大し、`routeRecommended()`を「detour後も0以上の余裕」から新設`ROUTE_SAFETY_BUFFER=32`（detour後も十分な余裕が残る場合のみ推奨）へ変更。adaptive-route（avgDirect13.2/avgDetour1.8）がdirect-always・detour-alwaysのどちらとも完全一致しなくなり、擬似実プレイではP01（薄マージン）がdirect優勢・P02（厚マージン）がdetour一貫という望ましいペルソナ分岐も確認（P01はv1で死亡していたセッションがv2では15日完走）。副作用として`DETOUR_DISTANCE_DELTA`を一時的に28まで拡大した際、退却時の一括distance加算が`ENEMY_DESPAWN_BEHIND`(20)を超えて追跡中の敵を一瞬でdespawnさせるバグ（全戦略のavgDash/avgDecoyが0.0に落ち込む異常値で発見）を発見し、`ENEMY_DESPAWN_BEHIND`20→35で解消した。**中課題「囮(decoy)のROI」は部分改善に留まった**: `DECOY_STUN_TICKS`50→80・`DECOY_RADIUS`12→16・コスト引き下げで発動回数は1.7→3.7回/セッションへ増加したが、decoy-heavy avgScoreはno-decoy比-4.0%とv1（-2.8%）よりむしろ悪化（route修正でdirect選択が増えatk/hp投資が遅れる`decoy-heavy`の購入順の弱さがより露呈したため）。中課題のため必須対応ではなく3回目へ持ち越し。120シード×10戦略で決定論・ソフトロック0件を確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run3（FIX only）へ進めた | (本PR) |
 | 2026-09-23 | 27 | 3（FIX only） | v2からの持ち越し課題「囮(decoy)のROI」の購入順依存性を検証（レビューは書かずPR本文に記載）。`headless/simulate.ts`の`decoy-heavy`戦略の購入順を`['maxFlare','maxFlare','atk','maxHp','maxDash','daylight']`から`['atk','maxHp','maxFlare','maxFlare','maxDash','daylight']`（atk/maxHpを先に確保してから囮投資へ進む）へ変更。120シード再検証でavgScoreのno-decoy比が-4.0%→**-2.0%**（3161.5→3228.1）、deathsが13/120→**4/120**（adaptive-route・no-decoyと同水準）に改善し、v1〜v2で観測された囮ROIの大きな逆転は囮メカニクス自体の弱さではなく検証bot側の不自然な購入順（機会費用）が支配的要因だったことを確定させた。ゲーム本体（`src/core/game.ts`）は無変更、`decoy-heavy`の購入順のみ修正。120シード×10戦略で決定論・ソフトロック0件を再確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-09-23 | 28 | 1（BUILD+REVIEW） | 020-flagship-linkmarkをベースに、021-final提案(1)「拠点防衛投資（タレット品質・連携、鑑定）をフィールドでの帰還マージン・帰還速度に効かせる」を統合した`022-flagship-hearthline`を新規実装。新規ショップ項目は追加せず、タレットに同レーン上の**パトロール圏**（品質・連携が広さに効く、圏内で受動燃料消費0.5倍）を追加し、鑑定投資を建材ロット品質だけでなく夜間の帰還危険度ヒント`returnRiskLevel`の表示精度（Lv0=非表示、Lv1/2=確率的に1段階ずれる、Lv3=正確）にも効かせた。021-finalの注意点（マージン計算式が正確すぎると危険が消える）を踏まえ、`returnRiskLevel`の実体（燃料マージン＋帰路の夜間レイダー数）自体は鑑定Lvに関係なく変わらない設計にした。検証用に`patroller`（mason同等の投資＋帰還時に`recommendedReturnLane`へ意図的に寄る）と`bare`（タレット投資ゼロの対照群）を新設し、20シードでpatroller**0/20死亡**・同投資のmason**5/20死亡（全てnight-field）**という劇的な差を確認し、「投資の存在ではなく実際にヒントに基づいて行動するかが生死を分ける」ことを示せた。60000tickの長時間検証ではpatrollerも死亡が復活（in-base死も新規発生）し危険自体は消していないことも確認。`deathPhase`（'night-field'/'day-siege'/'in-base'/'none'）を021に続きcore Metricsへ標準搭載（020まではheadless側の後付け集計だった）。020までの全13戦略（10シード）でクラッシュ・回帰なし、決定論を確認。reviews/022-flagship-hearthline-v1.md作成、判定**FIX**。中課題2件（パトロール圏の効果がやや強すぎる可能性／鑑定投資単体の"知るだけ"のROIがボット行動なしには測れない）は次回へ持ち越し。ブラウザAIP実プレイは38サイクル連続で未実施（`.claude/launch.json`にport 5191で`hearthline`設定済み）。npm run build / npm run simulateとも正常終了・ソフトロック0件確認。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-09-23 | 28 | 2（FIX+REVIEW） | 022-flagship-hearthlineのv1指摘2件を修正しreviews/022-flagship-hearthline-v2.mdを作成（判定FIX）。**中課題「パトロール圏が強すぎる」に対応**: `PATROL_RANGE_BASE`(5→4)・`PATROL_RANGE_QUALITY_MULT`(4→2)・`PATROL_RANGE_LINK_BONUS`(3→2)で範囲を縮小し`PATROL_FUEL_DRAIN_MULT`(0.5→0.65)で燃料節約幅も緩和、patrollerの死亡数が0/20→4/20へ変化し「危険が事実上消える」状態を脱した。**軽微課題「鑑定投資が見えるだけでwallより悪化」に対応**: `usesReturnRiskCaution`を新設しmason専用に「returnRiskLevelが'danger'に見えたら隣接敵なしでダッシュにより距離を詰めて帰還する」行動を追加（patrollerのレーン誘導とは異なる即応的な反応にして両者を区別）、mason死亡数が5/20→1/20に改善しwall(2/20)以上の安全性を達成。標準tick(20000)では新たにmason(1)<patroller(4)、長時間tick(60000)ではmason(4)<patroller(5)というダッシュ反応とレーン誘導の優劣逆転を発見（軽微、v3以降で分析）。またグローバル定数変更がpatrol機構を使わない戦略（scatter 10→14死亡、p01のseed302が死亡→生存等）にも決定論シミュレーションの燃料タイミング連鎖で予期しない副作用を及ぼすことを確認（クラッシュ等ではなく数値の連鎖変化、022固有の欠陥ではない）。020までの全13戦略（10シード）でクラッシュ・回帰なし、決定論を再確認。npm run build正常終了。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 

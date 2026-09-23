@@ -223,14 +223,19 @@ const INFORMED_PLACEMENT_SCORE_BONUS = 1.5;
 // 「帰還マージン→撤退判断→生死」を既存の拠点防衛投資（タレット品質・連携、鑑定）から辿れる形へ
 // 組み替える。020-finalが発見した「防衛系の死亡94%は夜のフィールド、拠点内は7.5%」という
 // 構造課題への対応。新規ショップ項目は追加せず、既存投資（タレット・鑑定）の効能を拡張する ----
-/** タレットのパトロール圏（同じレーン上、x方向のチェビシェフ距離）の基礎範囲 */
-const PATROL_RANGE_BASE = 5;
-/** 品質(0.5〜1.5)がパトロール圏に与える倍率。品質が高いほど遠くまで帰路を支援できる */
-const PATROL_RANGE_QUALITY_MULT = 4;
-/** 連携中（隣接obstacleあり）タレットへの追加パトロール範囲ボーナス */
-const PATROL_RANGE_LINK_BONUS = 3;
-/** パトロール圏内での受動燃料消費倍率。021のdaylight投資（帰路への恒久投資）に相当する即時効果 */
-const PATROL_FUEL_DRAIN_MULT = 0.5;
+/** タレットのパトロール圏（同じレーン上、x方向のチェビシェフ距離）の基礎範囲。
+ * v2 FIX（バグ#1）: 020-flagship-hearthline v1でpatroller戦略が標準20000tickで0/20死亡になり
+ * 効果が強すぎたため、5→4へ縮小した */
+const PATROL_RANGE_BASE = 4;
+/** 品質(0.5〜1.5)がパトロール圏に与える倍率。品質が高いほど遠くまで帰路を支援できる。
+ * v2 FIX（バグ#1）: 4→2へ縮小（旧: 最大+6、新: 最大+3） */
+const PATROL_RANGE_QUALITY_MULT = 2;
+/** 連携中（隣接obstacleあり）タレットへの追加パトロール範囲ボーナス。v2 FIX（バグ#1）: 3→2へ縮小 */
+const PATROL_RANGE_LINK_BONUS = 2;
+/** パトロール圏内での受動燃料消費倍率。021のdaylight投資（帰路への恒久投資）に相当する即時効果。
+ * v2 FIX（バグ#1）: 0.5→0.65へ緩和（節約幅を50%→35%に縮小）。v1レビューの提案通り、
+ * 範囲・燃料節約の両方を少しずつ弱め、危険を「事実上消す」ことのないよう調整した */
+const PATROL_FUEL_DRAIN_MULT = 0.65;
 /** returnRiskLevel算出時、帰路付近の夜間レイダーを探索するx方向の距離 */
 const RETURN_RISK_SCAN_RANGE = 20;
 /**

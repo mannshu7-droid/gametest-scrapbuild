@@ -327,6 +327,13 @@ function usesAppraisal(strategy: Strategy): boolean {
 function usesPatrolRouting(strategy: Strategy): boolean {
   return strategy === 'patroller';
 }
+/** 022 v2新規（バグ#2対応）: returnRiskLevelが'danger'に見えたとき、レーン移動はせず
+ * ダッシュで即座に距離を詰める戦略か。mason専用——patrollerと同じ投資（appraisal＋クラスタ配置）
+ * だが「知ったら行動する」の中身をpatroller（レーン誘導）とは別の形（速度で稼ぐ）にすることで、
+ * v1バグ#2（鑑定投資が"見えるだけ"でwallより死亡数が悪化する）を、patrollerと同一化させずに解消する */
+function usesReturnRiskCaution(strategy: Strategy): boolean {
+  return strategy === 'mason';
+}
 /** 022新規: タレットを一切設置しない戦略か（パトロール圏投資ゼロの対照群） */
 function neverBuildsTurrets(strategy: Strategy): boolean {
   return strategy === 'bare';
@@ -596,6 +603,12 @@ class Bot {
       }
       const target = pickDefenseTarget(s);
       const dir = bfsToTargetX(s, target.x);
+      // 022 v2新規（バグ#2対応）: masonはreturnRiskLevelが'danger'に見えたら、レーン誘導ではなく
+      // ダッシュで距離を詰めて帰る（"知ったら行動する"の中身をpatrollerとは別の形にする）。
+      // 隣接敵がいない安全なタイミングでのみ発動し、隣接時は通常通り応戦を優先する
+      if (usesReturnRiskCaution(this.strategy) && p.returnRiskLevel === 'danger' && dir && p.dashCd === 0 && (!nearest || nearest.dist > 1)) {
+        return { type: 'dash', dir };
+      }
       if (dir) return { type: 'move', dir };
       if (p.teleportUnlocked && p.fuel >= 25) return { type: 'teleport' };
       return { type: 'wait' };
