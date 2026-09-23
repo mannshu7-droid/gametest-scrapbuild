@@ -1,7 +1,7 @@
 # 仕様書: 022-flagship-hearthline（拠点防衛投資の帰路への接続）
 
 - 作成日: 2026-09-23
-- ステータス: DRAFT
+- ステータス: PLAYABLE（final総括で判定FIX。reviews/022-flagship-hearthline-final.md参照）
 - 元になったレビュー: [reviews/020-flagship-linkmark-final.md](../../reviews/020-flagship-linkmark-final.md)（提案(1)、死亡内訳データ）、
   [reviews/021-combat-duskrun-final.md](../../reviews/021-combat-duskrun-final.md)（提案(1)・帰還マージン/ルート選択/daylight投資の実装知見、
   および「マージン計算式に意図的な不確実性を組み込む」という注意点）、routine-state.md「現在位置」（サイクル28の引き継ぎ事項）
