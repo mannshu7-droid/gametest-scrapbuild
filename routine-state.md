@@ -13,12 +13,19 @@
   追加＋鑑定投資が帰還危険度ヒントの表示精度に効く）。次点提案（019finalから持ち越し、022が統合フェーズで
   手一杯なら別サイクルへ）は「多脚・分岐構造の建築単体プロトタイプ」
 - 対象ゲーム番号: **022-flagship-hearthline**（specs/022-flagship-hearthline/spec.md、games/022-flagship-hearthline/）
-- 次に行う回: **3回目（FIX only）**。v2レビュー（reviews/022-flagship-hearthline-v2.md）の残課題（いずれも軽微、
-  レビューは書かず修正のみ・PR本文に記載）: (1)mason（ダッシュ反応）とpatroller（レーン誘導）の優劣が
-  標準tick(20000)/長時間tick(60000)で逆転する（標準: mason1<patroller4、長時間: mason4<patroller5）。
-  なぜ逆転するかを分析し、必要なら調整する。(2)グローバル定数調整がpatrol機構を使わない戦略
-  （scatter/p01等）にも決定論シミュレーションの燃料タイミング連鎖で副作用を及ぼす件は、次回以降の
-  数値調整で対象外戦略への影響も毎回確認する運用を徹底する（対応必須ではなく運用メモ）
+- 次に行う回: **4回目（FINAL REVIEW）**。両ペルソナで総括レビュー（reviews/022-flagship-hearthline-final.md）を
+  作成し、本命ゲームに採用すべきシステム・次に作るべきゲームの提案を行い、routine-state.mdを次サイクル
+  （サイクル29・run1）へ進めること。3回目の申し送り: mason（ダッシュ反応、即応的）とpatroller（レーン誘導、
+  予防的・燃料効率重視）は異なるリスク/リターンのトレードオフを意図通り体現しており、patroller側を
+  mason寄りに安全側へ倒す3種の調整案はいずれも逆効果と実証済み（詳細はspec.mdの「3回目で実施した修正内容」
+  節）。本命ゲームへ統合する際にどちらか一方に絞るか、両方を活かす設計（プレイヤーが選べる形等）が
+  あり得るかをfinalで検討すること。グローバル定数調整の運用メモ（対象外戦略への副作用を毎回確認する）は
+  引き続き今後の数値調整全般に適用すること
+- サイクル28・3回目（FIX only）の結果: v2バグ#1「mason/patrollerの優劣が標準/長時間tickで逆転する」を
+  分析した結果、実際には逆転しておらず（標準・長時間ともmasonが一貫して安全）、v1→v2の変化を逆転と
+  誤記していたと判明。原因はpatrollerのレーン誘導がx軸に進まず帰還を遅らせること（avgRaidRiskEsc等で
+  裏付け）と特定したが、安全側への3種の調整案はいずれもpatrollerを悪化させたため却下しコード無変更。
+  詳細はspec.md「3回目で実施した修正内容」節
 - サイクル28・2回目（FIX+REVIEW）の結果: v1課題2件を修正。パトロール圏を弱体化（PATROL_RANGE_BASE
   5→4・PATROL_RANGE_QUALITY_MULT 4→2・PATROL_RANGE_LINK_BONUS 3→2・PATROL_FUEL_DRAIN_MULT 0.5→0.65）
   しpatroller死亡数0→4/20に変化、mason専用に`usesReturnRiskCaution`（returnRiskLevel danger時に
@@ -987,6 +994,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-23 | 27 | 3（FIX only） | v2からの持ち越し課題「囮(decoy)のROI」の購入順依存性を検証（レビューは書かずPR本文に記載）。`headless/simulate.ts`の`decoy-heavy`戦略の購入順を`['maxFlare','maxFlare','atk','maxHp','maxDash','daylight']`から`['atk','maxHp','maxFlare','maxFlare','maxDash','daylight']`（atk/maxHpを先に確保してから囮投資へ進む）へ変更。120シード再検証でavgScoreのno-decoy比が-4.0%→**-2.0%**（3161.5→3228.1）、deathsが13/120→**4/120**（adaptive-route・no-decoyと同水準）に改善し、v1〜v2で観測された囮ROIの大きな逆転は囮メカニクス自体の弱さではなく検証bot側の不自然な購入順（機会費用）が支配的要因だったことを確定させた。ゲーム本体（`src/core/game.ts`）は無変更、`decoy-heavy`の購入順のみ修正。120シード×10戦略で決定論・ソフトロック0件を再確認。games/README.mdの索引を更新し、routine-state.mdをサイクル27・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-09-23 | 28 | 1（BUILD+REVIEW） | 020-flagship-linkmarkをベースに、021-final提案(1)「拠点防衛投資（タレット品質・連携、鑑定）をフィールドでの帰還マージン・帰還速度に効かせる」を統合した`022-flagship-hearthline`を新規実装。新規ショップ項目は追加せず、タレットに同レーン上の**パトロール圏**（品質・連携が広さに効く、圏内で受動燃料消費0.5倍）を追加し、鑑定投資を建材ロット品質だけでなく夜間の帰還危険度ヒント`returnRiskLevel`の表示精度（Lv0=非表示、Lv1/2=確率的に1段階ずれる、Lv3=正確）にも効かせた。021-finalの注意点（マージン計算式が正確すぎると危険が消える）を踏まえ、`returnRiskLevel`の実体（燃料マージン＋帰路の夜間レイダー数）自体は鑑定Lvに関係なく変わらない設計にした。検証用に`patroller`（mason同等の投資＋帰還時に`recommendedReturnLane`へ意図的に寄る）と`bare`（タレット投資ゼロの対照群）を新設し、20シードでpatroller**0/20死亡**・同投資のmason**5/20死亡（全てnight-field）**という劇的な差を確認し、「投資の存在ではなく実際にヒントに基づいて行動するかが生死を分ける」ことを示せた。60000tickの長時間検証ではpatrollerも死亡が復活（in-base死も新規発生）し危険自体は消していないことも確認。`deathPhase`（'night-field'/'day-siege'/'in-base'/'none'）を021に続きcore Metricsへ標準搭載（020まではheadless側の後付け集計だった）。020までの全13戦略（10シード）でクラッシュ・回帰なし、決定論を確認。reviews/022-flagship-hearthline-v1.md作成、判定**FIX**。中課題2件（パトロール圏の効果がやや強すぎる可能性／鑑定投資単体の"知るだけ"のROIがボット行動なしには測れない）は次回へ持ち越し。ブラウザAIP実プレイは38サイクル連続で未実施（`.claude/launch.json`にport 5191で`hearthline`設定済み）。npm run build / npm run simulateとも正常終了・ソフトロック0件確認。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run2（FIX+REVIEW）へ進めた | (本PR) |
 | 2026-09-23 | 28 | 2（FIX+REVIEW） | 022-flagship-hearthlineのv1指摘2件を修正しreviews/022-flagship-hearthline-v2.mdを作成（判定FIX）。**中課題「パトロール圏が強すぎる」に対応**: `PATROL_RANGE_BASE`(5→4)・`PATROL_RANGE_QUALITY_MULT`(4→2)・`PATROL_RANGE_LINK_BONUS`(3→2)で範囲を縮小し`PATROL_FUEL_DRAIN_MULT`(0.5→0.65)で燃料節約幅も緩和、patrollerの死亡数が0/20→4/20へ変化し「危険が事実上消える」状態を脱した。**軽微課題「鑑定投資が見えるだけでwallより悪化」に対応**: `usesReturnRiskCaution`を新設しmason専用に「returnRiskLevelが'danger'に見えたら隣接敵なしでダッシュにより距離を詰めて帰還する」行動を追加（patrollerのレーン誘導とは異なる即応的な反応にして両者を区別）、mason死亡数が5/20→1/20に改善しwall(2/20)以上の安全性を達成。標準tick(20000)では新たにmason(1)<patroller(4)、長時間tick(60000)ではmason(4)<patroller(5)というダッシュ反応とレーン誘導の優劣逆転を発見（軽微、v3以降で分析）。またグローバル定数変更がpatrol機構を使わない戦略（scatter 10→14死亡、p01のseed302が死亡→生存等）にも決定論シミュレーションの燃料タイミング連鎖で予期しない副作用を及ぼすことを確認（クラッシュ等ではなく数値の連鎖変化、022固有の欠陥ではない）。020までの全13戦略（10シード）でクラッシュ・回帰なし、決定論を再確認。npm run build正常終了。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run3（FIX only）へ進めた | (本PR) |
+| 2026-09-24 | 28 | 3（FIX only） | v2バグ#1「mason/patrollerの優劣が標準/長時間tickで逆転する」を分析（レビューは書かずspec.md「3回目で実施した修正内容」節に記載）。再現の結果、**実際には標準/長時間の間で優劣は逆転していなかった**（標準: mason1/20<patroller4/20、長時間: mason4/5<patroller5/5、いずれもmasonが安全）。routine-state.mdの「逆転」はv1（長時間はpatrollerが安全）とv2（ダッシュ反応追加後は標準・長時間ともmasonが安全）の比較を指していたと判明。内訳指標（`avgRaidRiskEsc`がpatroller170.1 vs mason100.3、長時間776.0 vs 132.8）から、patrollerの`recommendedReturnLane`への寄り道がy軸移動のみでx軸（帰還）に進まず夜のフィールド滞在時間を延ばすことが死亡数の多さの原因と特定した。「returnRiskLevel=dangerなら寄り道せず直進」「safeの時だけ寄り道」「patrollerにもダッシュ反応を追加」の3案を実装・計測したが、いずれもpatrollerの死亡数を4/20→5〜6/20へ悪化させたため**すべて却下し`headless/simulate.ts`はv2から無変更**とした。patrollerの弱さは実装漏れではなく「燃料効率優先の寄り道」という設計が内包するリスクで、mason（即応・寄り道なし）とpatroller（予防的・燃料効率重視）の異なるトレードオフを意図通り体現していると結論。npm run build正常終了、bare/mason/patroller/wall/scatterの標準20シード結果がv2と完全一致（無回帰）。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run4（FINAL REVIEW）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
