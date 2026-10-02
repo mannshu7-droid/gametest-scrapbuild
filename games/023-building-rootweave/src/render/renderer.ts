@@ -142,7 +142,7 @@ export class Renderer {
       hudY + 28,
     );
     ctx.fillText(
-      `鑑定Lv${s.shop.appraisalLevel}(${s.shop.appraisalPrecision}) 次${s.shop.appraisalNextCost ?? '-'}  接続コスト${s.shop.connectCost}`,
+      `鑑定Lv${s.shop.appraisalLevel}(${s.shop.appraisalPrecision}) 次${s.shop.appraisalNextCost ?? '-'}  接続コスト${s.shop.connectCost}${s.player.busyTicks > 0 ? `  梁を架設中…残り${s.player.busyTicks}` : ''}`,
       6,
       hudY + 42,
     );

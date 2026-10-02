@@ -71,6 +71,8 @@ export interface Metrics {
   connectEvents: number;
   /** セッション中に同時接続していた脚本数の最大値（中央含まず、左右のみ） */
   maxLegsConnected: number;
+  /** v3: 左右の脚のマイルストーン報酬の累計（moneyEarnedの内数）。スコアの収入項からは除外する */
+  legMilestoneEarned: number;
   score: number;
 }
 
@@ -87,6 +89,8 @@ export interface GameState {
     /** 手持ち個数（brace/stabilizerも含む）。構造材の内訳はqualityQueueの長さと一致する */
     inventory: Record<Material, number>;
     fallStreak: number;
+    /** v3: 梁の架設作業の残りtick。0より大きい間は行動できない（送った行動はwait扱い） */
+    busyTicks: number;
     grounded: boolean;
   };
   /** 未設置の構造材ロットの品質。鑑定Lvに応じて丸められる。Lv0（未鑑定）はnull */
