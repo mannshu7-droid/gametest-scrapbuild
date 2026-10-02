@@ -57,6 +57,27 @@ export const INFORMED_PLACEMENT_SCORE_BONUS = 1.5;
 /** 左右の脚を中央トランクへ接続する梁（rung）1本あたりのコスト（v2: 25→8、多段の梁を前提に引き下げ） */
 export const BEAM_COST = 8;
 /**
+ * v3新規: 脚1本あたりのマイルストーン報酬の上限。v2は脚にも中央と同額の報酬を払ったため高所ほど
+ * 3列分の報酬が膨らみ、tripodCarefulの収入がsoloBracedの2.6倍・最終所持金平均3143まで余った。
+ * 脚1段（3高さ）分の資材費（鋼材3本≒54）を賄う60で頭打ちにする（低高度＝立ち上げ期は中央と同額のまま）。
+ * 40〜50の間に崖があり、それより下げると脚の立ち上げ資金が足りず多脚が伸びなくなる
+ */
+export const LEG_REWARD_CAP = 60;
+/**
+ * v3新規: 梁1本の架設に要する作業時間（tick）。架設中は行動できない。v2までは梁の手間が実質ゼロで
+ * 「早く・密に編む」が時間面でも損をしない唯一の正解になっていた
+ */
+export const BEAM_BUILD_TICKS = 16;
+/**
+ * v3新規: 細長さ（自由長）による負荷増。各列のブロックは「直下の梁（中央はどちらかの脚の梁）からの高さ」
+ * ＝自由長がSLENDER_STARTを超えた分だけ、1マスごとにSLENDER_Kずつ負荷倍率が増える。
+ * v2までは中央の列が風オフセット0で風の影響を一切受けず、braceの肩代わりが段ごとに複利で効くため、
+ * 単一柱に実質的な上限が無かった（ボット修正後のsoloBracedは20/20シードでワールドの天井89に到達）
+ */
+export const SLENDER_START = 15;
+export const SLENDER_K = 0.15;
+
+/**
  * v2新規: 左右の脚それぞれの高さマイルストーン報酬の倍率（中央の報酬式×この倍率）。
  * v1では脚を建てても所持金が一切増えず（収入は中央の到達高度のみ）、脚の建設コストが
  * まるごと持ち出しになっていた（v1バグ#1の主因の一つ）
@@ -151,6 +172,7 @@ export class Game {
     maxHp: 100,
     money: 90,
     fallStreak: 0,
+    busyTicks: 0,
   };
 
   private braceCount = 0;
@@ -208,6 +230,7 @@ export class Game {
     avgPlacedQuality: 0,
     connectEvents: 0,
     maxLegsConnected: 0,
+    legMilestoneEarned: 0,
     score: 0,
   };
 
@@ -350,6 +373,14 @@ export class Game {
     return false;
   }
 
+  /** その列のその高さの直下にある梁の高さ（無ければ0）。中央はどちらかの脚の梁 */
+  private anchorBelow(leg: LegId, y: number): number {
+    const sides = leg === 'center' ? SIDE_LEGS : [leg];
+    let a = 0;
+    for (const side of sides) for (const h of this.rungs[side]) if (h <= y && h > a) a = h;
+    return a;
+  }
+
   /** 左右の脚の最も高い梁（梁より下の脚は横揺れが抑えられ風オフセットが消える） */
   private highestRung(leg: 'left' | 'right'): number {
     let h = 0;
@@ -399,7 +430,10 @@ export class Game {
         const windMult = 1 + WIND_TABLE[band] * offset;
         const damped = this.hasNearbyStabilizer(LEG_X[leg], y, 2) || this.nearRung(leg, y);
         const shakeMult = this.shakeState === 'active' ? 1 + SHAKE_TABLE[band] * (damped ? 0.5 : 1) : 1;
-        stress[leg].set(y, (raw * windMult * shakeMult) / this.capacityOf(b));
+        // v3: 自由長（直下の梁からの高さ）が長いほど細長い柱として揺れ・風を受けやすい
+        const free = y - this.anchorBelow(leg, y);
+        const slender = 1 + SLENDER_K * Math.max(0, free - SLENDER_START);
+        stress[leg].set(y, (raw * windMult * shakeMult * slender) / this.capacityOf(b));
         const selfW = MATERIAL_DEFS[b.material].weight * this.qualityWeightFactor(b);
         carried[leg] = selfW + raw;
         prevBrace[leg] = braceFactorOf(LEG_X[leg], y);
@@ -582,9 +616,10 @@ export class Game {
       const prev = this.legMaxReached[leg];
       if (top <= prev) continue;
       for (let m = Math.floor(prev / MILESTONE_STEP) * MILESTONE_STEP + MILESTONE_STEP; m <= top; m += MILESTONE_STEP) {
-        const bonus = Math.round(this.milestoneBonus(m) * LEG_MILESTONE_RATIO);
+        const bonus = Math.min(LEG_REWARD_CAP, Math.round(this.milestoneBonus(m) * LEG_MILESTONE_RATIO));
         this.player.money += bonus;
         this.metrics.moneyEarned += bonus;
+        this.metrics.legMilestoneEarned += bonus;
       }
       this.legMaxReached[leg] = top;
     }
@@ -716,6 +751,7 @@ export class Game {
         }
         this.player.money -= BEAM_COST;
         this.rungs[leg].add(y);
+        this.player.busyTicks = BEAM_BUILD_TICKS;
         this.metrics.connectEvents++;
         break;
       }
@@ -755,7 +791,9 @@ export class Game {
     if (this.over) return this.getState();
 
     this.debrisHitAppliedThisTick = false;
-    this.applyAction(action);
+    // v3: 梁の架設中は送られた行動を無視する（作業時間のコスト）
+    if (this.player.busyTicks > 0) this.player.busyTicks--;
+    else this.applyAction(action);
     this.advanceShake();
     this.resolveCollapses();
     this.applyGravity();
@@ -790,7 +828,9 @@ export class Game {
     this.metrics.score =
       this.maxHeightReached * 10 +
       (this.won ? 200 : 0) +
-      Math.round(this.metrics.moneyEarned * 0.3) -
+      // v3: 脚の報酬は列の本数に比例して増えるので、スコアの収入項からは除外する（v2はスコア差の大半が
+      // 脚の報酬で、到達高度の差とかけ離れていた）
+      Math.round((this.metrics.moneyEarned - this.metrics.legMilestoneEarned) * 0.3) -
       this.metrics.collapseEvents * 5 -
       Math.round(this.metrics.debrisDamageTaken * 0.5) +
       Math.round(this.metrics.informedPlacements * INFORMED_PLACEMENT_SCORE_BONUS) +
@@ -891,6 +931,7 @@ export class Game {
           stabilizer: this.stabilizerCount,
         },
         fallStreak: this.player.fallStreak,
+        busyTicks: this.player.busyTicks,
         grounded: this.isGrounded(this.player.x, this.player.y),
       },
       qualityQueue,

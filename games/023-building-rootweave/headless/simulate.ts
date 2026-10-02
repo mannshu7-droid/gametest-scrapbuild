@@ -1,5 +1,5 @@
 /**
- * ヘッドレスシミュレーション: 6種類のボットが自動プレイし、バランス指標をJSONで出力する。
+ * ヘッドレスシミュレーション: 9種類のボットが自動プレイし、バランス指標をJSONで出力する。
  * 実行: npm run simulate [-- --seeds 1,2,3 --maxTicks 4000]
  *
  * - solo（中央のみ・対照群）: 中央トランクだけに資材を積み続ける。019の単一柱と等価な
@@ -14,11 +14,25 @@
  *   以後は3段ごとに編む。「いつ繋ぎ始めるか」の選択をtripodと比較する
  * - tripodCareful（tripod＋brace連携＋鑑定ロット選別）: 019で確立したパターン（brace連携・鑑定投資）が
  *   多脚の梁と素直に積み重なるかを検証する（P01代替）
+ * - tripodDense（v3、tripodCarefulの梁を2段ごと）: 密に編む＝崩落は少ないが梁の架設時間がかさむ側
+ * - tripodCarefulLate（v3、tripodCarefulの最初の梁を15へ）: 中央を先に伸ばして早く稼ぎ、後から編む側
+ *
+ * 掃引: --override tripodCareful.rungSpacing=4,tripodCareful.firstRung=9 のように設定を上書きできる。
+ * lateFrom/lateSpacingを指定すると、その高さ以上で梁の間隔を切り替える
  */
 import { BEAM_COST, Game, GOAL_HEIGHT, LEG_X, TIME_LIMIT } from '../src/core/game';
 import type { Action, GameState, LegId, StructMaterial } from '../src/core/types';
 
-type Strategy = 'solo' | 'soloBraced' | 'twin' | 'tripod' | 'tripodOnce' | 'tripodLate' | 'tripodCareful';
+type Strategy =
+  | 'solo'
+  | 'soloBraced'
+  | 'twin'
+  | 'tripod'
+  | 'tripodOnce'
+  | 'tripodLate'
+  | 'tripodCareful'
+  | 'tripodDense'
+  | 'tripodCarefulLate';
 
 interface StrategyConfig {
   legsToBuild: LegId[];
@@ -28,13 +42,16 @@ interface StrategyConfig {
   rungSpacing: number;
   /** 架ける梁の段数の上限（脚1本あたり） */
   maxRungs: number;
+  /** v3: この高さ以上の梁は間隔をlateSpacingへ広げる（0なら切り替えない） */
+  lateFrom?: number;
+  lateSpacing?: number;
   usesBrace: boolean;
   usesInsight: boolean;
 }
 
 const NONE = { legsToBuild: [] as LegId[], firstRung: 0, rungSpacing: 0, maxRungs: 0 };
 const WEAVE = { firstRung: 4, rungSpacing: 2, maxRungs: 40 };
-const CONFIG: Record<Strategy, StrategyConfig> = {
+export const CONFIG: Record<Strategy, StrategyConfig> = {
   solo: { ...NONE, usesBrace: false, usesInsight: false },
   soloBraced: { ...NONE, usesBrace: true, usesInsight: false },
   twin: { legsToBuild: ['right'], ...WEAVE, usesBrace: false, usesInsight: false },
@@ -42,6 +59,9 @@ const CONFIG: Record<Strategy, StrategyConfig> = {
   tripodOnce: { legsToBuild: ['left', 'right'], firstRung: 4, rungSpacing: 2, maxRungs: 1, usesBrace: false, usesInsight: false },
   tripodLate: { legsToBuild: ['left', 'right'], firstRung: 7, rungSpacing: 2, maxRungs: 40, usesBrace: false, usesInsight: false },
   tripodCareful: { legsToBuild: ['left', 'right'], firstRung: 6, rungSpacing: 3, maxRungs: 40, usesBrace: true, usesInsight: true },
+  // v3: 「どの間隔で・いつ繋ぐか」の比較用。tripodCarefulと同じ投資で、間隔2（密）／最初の梁を15へ遅らせる
+  tripodDense: { legsToBuild: ['left', 'right'], firstRung: 6, rungSpacing: 2, maxRungs: 50, usesBrace: true, usesInsight: true },
+  tripodCarefulLate: { legsToBuild: ['left', 'right'], firstRung: 15, rungSpacing: 3, maxRungs: 40, usesBrace: true, usesInsight: true },
 };
 
 /** HPがこの割合を下回ったら登坂を中断し地上へ退避する（019から継承） */
@@ -96,7 +116,7 @@ export class Bot {
     return bestIdx >= 0 ? bestIdx : undefined;
   }
 
-  private maybeBuy(s: GameState, target: { legId: LegId; wantConnect: boolean }): Action | null {
+  private maybeBuy(s: GameState, target: { legId: LegId; targetHeight: number; wantConnect: boolean }): Action | null {
     const p = s.player;
     const wantConnect = target.wantConnect;
     // v2: 脚を建てている最中は梁1本分の資金を残す（資材を買い溜めて梁代が払えず地上で
@@ -104,6 +124,12 @@ export class Bot {
     const reserve = wantConnect ? BEAM_COST : 0;
     const hasMaterial = p.inventory.stone + p.inventory.steel > 0;
     if (wantConnect && hasMaterial) return null;
+    // v3: braceを使う戦略は、資材が尽きた時点でbraceが1本も無ければ石より先にbraceを1本確保する。
+    // v2までは「所持金24以上」でしかbraceを買わず、序盤の貧困時（所持金0〜9）は崩れる石だけを
+    // 買い続けて抜け出せなかった（最初の梁を遅らせる戦略・soloBracedの停滞シードの主因）
+    if (this.cfg.usesBrace && !hasMaterial && p.inventory.brace < 1 && p.money - reserve >= 6) {
+      return { type: 'buy', item: 'brace' };
+    }
     if (!hasMaterial && p.money >= 9) return { type: 'buy', item: 'stone' };
     const m = p.money - reserve;
     // v2: 列を複数育てる戦略は1往復で運ぶ量も列数に比例して増やす（地上との往復回数を抑える）
@@ -129,8 +155,12 @@ export class Bot {
    */
   private currentTarget(s: GameState): { legId: LegId; targetHeight: number; wantConnect: boolean } {
     const center = this.legOf(s, 'center');
+    let h = this.cfg.firstRung;
     for (let k = 0; k < this.cfg.maxRungs && this.cfg.legsToBuild.length > 0; k++) {
-      const h = this.cfg.firstRung + k * this.cfg.rungSpacing;
+      if (k > 0) {
+        const late = this.cfg.lateFrom && this.cfg.lateSpacing && h >= this.cfg.lateFrom;
+        h += late ? this.cfg.lateSpacing! : this.cfg.rungSpacing;
+      }
       if (center.topHeight < h) return { legId: 'center', targetHeight: h, wantConnect: false };
       for (const legId of this.cfg.legsToBuild) {
         const li = this.legOf(s, legId);
@@ -250,7 +280,9 @@ export class Bot {
 
     // v2: 地上で資材もbraceも無いなら、既存の柱に登っても置く物が無いので地上で稼ぎ続ける
     // （v1で直した「登って即降りる往復」が地上起点でも起きており、労働収入が半減していた）
-    if (p.y === 0 && !target.wantConnect && !this.pickMaterial(s) && !(this.cfg.usesBrace && p.inventory.brace > 0)) {
+    // v3: braceだけ持っていても登らない（石が買えない貧困時にbraceだけ持って登り降りを繰り返し、
+    // 労働収入が止まって石代9に永久に届かない膠着が起きた）
+    if (p.y === 0 && !target.wantConnect && !this.pickMaterial(s)) {
       return { type: 'wait' };
     }
 
@@ -305,15 +337,21 @@ interface RunResult {
   avgPlacedQuality: number;
   appraisalLevel: number;
   score: number;
+  /** v3: 到達高度がそれぞれ40・60・80に初めて達したtick（未達はnull）。天井89に張り付く戦略同士の比較用 */
+  tickTo40: number | null;
+  tickTo60: number | null;
+  tickTo80: number | null;
 }
 
 function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
   const game = new Game(seed);
   const bot = new Bot(strategy);
   let ticks = 0;
+  const reach: Record<number, number | null> = { 40: null, 60: null, 80: null };
   while (!game.over && ticks < maxTicks) {
     game.step(bot.decide(game.getState()));
     ticks++;
+    for (const h of [40, 60, 80]) if (reach[h] === null && game.metrics.maxHeight >= h) reach[h] = ticks;
   }
   const s = game.getState();
   const leftLeg = s.legs.find((l) => l.id === 'left')!;
@@ -343,6 +381,9 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     avgPlacedQuality: s.metrics.avgPlacedQuality,
     appraisalLevel: s.shop.appraisalLevel,
     score: s.metrics.score,
+    tickTo40: reach[40],
+    tickTo60: reach[60],
+    tickTo80: reach[80],
   };
 }
 
@@ -353,12 +394,29 @@ function argVal(name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
 }
-const seeds = (argVal('seeds') ?? '1,2,3,4,5').split(',').map(Number);
+// v3: "1..20" の範囲指定にも対応（v2レビューの再現手順が範囲指定で書かれていたがNaNになっていた）
+const seeds = (argVal('seeds') ?? '1,2,3,4,5').split(',').flatMap((tok) => {
+  const m = tok.match(/^(\d+)\.\.(\d+)$/);
+  if (!m) return [Number(tok)];
+  const out: number[] = [];
+  for (let i = Number(m[1]); i <= Number(m[2]); i++) out.push(i);
+  return out;
+});
 const maxTicks = Number(argVal('maxTicks') ?? TIME_LIMIT);
 const strategiesArg = argVal('strategies');
+// v3: 掃引用の上書き（例: --override tripodCareful.rungSpacing=4,tripodCareful.firstRung=9）
+const overrideArg = argVal('override');
+if (overrideArg) {
+  for (const kv of overrideArg.split(',')) {
+    const [path, value] = kv.split('=');
+    const [strat, field] = path.split('.') as [Strategy, keyof StrategyConfig];
+    (CONFIG[strat] as unknown as Record<string, unknown>)[field] =
+      value === 'true' ? true : value === 'false' ? false : Number(value);
+  }
+}
 const strategies: Strategy[] = strategiesArg
   ? (strategiesArg.split(',') as Strategy[])
-  : ['solo', 'soloBraced', 'twin', 'tripod', 'tripodOnce', 'tripodLate', 'tripodCareful'];
+  : ['solo', 'soloBraced', 'twin', 'tripod', 'tripodOnce', 'tripodLate', 'tripodCareful', 'tripodDense', 'tripodCarefulLate'];
 
 console.log(`# Rootweave headless simulation (goalHeight=${GOAL_HEIGHT}, timeLimit=${TIME_LIMIT}, maxTicks=${maxTicks})`);
 for (const strategy of strategies) {
@@ -370,7 +428,7 @@ for (const strategy of strategies) {
   }
   const avg = (f: (r: RunResult) => number) => (results.reduce((a, r) => a + f(r), 0) / results.length).toFixed(2);
   console.log(
-    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMaxHeight=${avg((r) => r.maxHeight)} avgCenterTop=${avg((r) => r.centerTopHeight)} avgLeftTop=${avg((r) => r.leftTopHeight)} avgRightTop=${avg((r) => r.rightTopHeight)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgBlocksPlaced=${avg((r) => r.blocksPlaced)} avgBlocksLost=${avg((r) => r.blocksLost)} avgCollapseEvents=${avg((r) => r.collapseEvents)} avgConnectEvents=${avg((r) => r.connectEvents)} avgMaxLegsConnected=${avg((r) => r.maxLegsConnected)} avgAppraisalLevel=${avg((r) => r.appraisalLevel)} avgPlacedQuality=${avg((r) => r.avgPlacedQuality)} wins=${results.filter((r) => r.won).length}/${results.length} deaths=${results.filter((r) => r.finalHp <= 0).length}/${results.length}`,
+    `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMaxHeight=${avg((r) => r.maxHeight)} avgCenterTop=${avg((r) => r.centerTopHeight)} avgLeftTop=${avg((r) => r.leftTopHeight)} avgRightTop=${avg((r) => r.rightTopHeight)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgBlocksPlaced=${avg((r) => r.blocksPlaced)} avgBlocksLost=${avg((r) => r.blocksLost)} avgCollapseEvents=${avg((r) => r.collapseEvents)} avgConnectEvents=${avg((r) => r.connectEvents)} avgMaxLegsConnected=${avg((r) => r.maxLegsConnected)} avgAppraisalLevel=${avg((r) => r.appraisalLevel)} avgPlacedQuality=${avg((r) => r.avgPlacedQuality)} avgTickTo40=${avg((r) => r.tickTo40 ?? maxTicks)} avgTickTo80=${avg((r) => r.tickTo80 ?? maxTicks)} reach80=${results.filter((r) => r.tickTo80 !== null).length}/${results.length} avgFinalMoney=${avg((r) => r.money)} wins=${results.filter((r) => r.won).length}/${results.length} deaths=${results.filter((r) => r.finalHp <= 0).length}/${results.length}`,
   );
 }
 }
