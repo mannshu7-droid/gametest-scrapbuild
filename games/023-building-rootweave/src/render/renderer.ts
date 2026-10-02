@@ -60,16 +60,18 @@ export class Renderer {
 
     // 接続済みの脚から中央トランクへ橋を描く
     for (const leg of s.legs) {
-      if (leg.id === 'center' || leg.connHeight === null) continue;
-      const row = rowOf(leg.connHeight);
-      if (row < 0 || row >= VIEW_H) continue;
+      if (leg.id === 'center') continue;
       const centerX = s.legs.find((l) => l.id === 'center')!.x;
-      ctx.strokeStyle = leg.connected ? '#ffd700' : 'rgba(255,215,0,0.3)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(leg.x * TILE_PX + TILE_PX / 2, row * TILE_PX + TILE_PX / 2);
-      ctx.lineTo(centerX * TILE_PX + TILE_PX / 2, row * TILE_PX + TILE_PX / 2);
-      ctx.stroke();
+      for (const h of leg.rungs) {
+        const row = rowOf(h);
+        if (row < 0 || row >= VIEW_H) continue;
+        ctx.strokeStyle = '#ffd700';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(leg.x * TILE_PX + TILE_PX / 2, row * TILE_PX + TILE_PX / 2);
+        ctx.lineTo(centerX * TILE_PX + TILE_PX / 2, row * TILE_PX + TILE_PX / 2);
+        ctx.stroke();
+      }
     }
 
     const braces = s.world.blocks.filter((b) => b.material === 'brace');
@@ -146,7 +148,7 @@ export class Renderer {
     );
     for (const leg of s.legs) {
       const label = leg.id === 'left' ? '左脚' : leg.id === 'right' ? '右脚' : '中央';
-      const connLabel = leg.id === 'center' ? '-' : leg.connected ? `接続@${leg.connHeight}` : '未接続';
+      const connLabel = leg.id === 'center' ? '-' : leg.connected ? `梁${leg.rungs.length}本(最高@${leg.connHeight})` : '未接続';
       ctx.fillText(
         `${label}(x${leg.x}) top${leg.topHeight} stress${leg.maxStressRatio.toFixed(2)} ${connLabel}`,
         6,

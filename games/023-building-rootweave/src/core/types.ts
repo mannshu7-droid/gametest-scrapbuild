@@ -39,10 +39,12 @@ export interface LegSummary {
   x: number;
   /** その脚の構造材の最高到達高度（0=未着手） */
   topHeight: number;
-  /** 接続済みの高さ（null=未接続）。left/rightのみ意味を持つ */
+  /** 最も高い梁の高さ（null=未接続）。left/rightのみ意味を持つ */
   connHeight: number | null;
-  /** 接続が現在も有効か（接続点の構造材がまだ崩落していないか） */
+  /** 有効な梁が1本以上あるか（接続点の構造材がまだ崩落していないか） */
   connected: boolean;
+  /** v2: 有効な梁（rung）の高さ一覧（昇順）。centerは常に空 */
+  rungs: number[];
   maxStressRatio: number;
   criticalCount: number;
   linkedBraceCount: number;
@@ -154,8 +156,9 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
     type: 'connect',
     params: {},
     description:
-      '左右どちらかの脚の、自分で設置した構造材の上に立っているとき、同じ高さに中央トランクの構造材があれば接続する。' +
-      '接続すると中央トランクのその高さより上の重量が、中央と接続中の脚の本数で分散される。既存より低い高さへの再接続はできない',
+      '左右どちらかの脚の構造材の上に立っているとき、同じ高さに中央トランクの構造材があればその高さに梁（rung）を架ける（BEAM_COST）。' +
+      '1本の脚に複数の梁を架けられる。梁の高さでは中央＋その高さに梁がある脚の上方荷重が合算されTRUSS_FACTOR倍で均等に再分配され、' +
+      '梁の上下2マスは揺れが半減する。梁の上は足場になり、脚〜中央の間を横移動できる',
   },
   { type: 'wait', params: {}, description: '何もせず1ティック経過する' },
 ];

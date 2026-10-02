@@ -15,16 +15,21 @@
   クラスタ配置という受動的投資だけで効果の大部分が出ており、鑑定+ダッシュ反応という能動的な上乗せは
   微修正に留まった）を、どの脚・どの経路を選ぶかという能動的判断の設計にも応用できるか検討すること
 - 対象ゲーム番号: **023-building-rootweave**（specs/023-building-rootweave/spec.md、
-  games/023-building-rootweave/）。1回目（BUILD+REVIEW）で仕様化・命名・実装・v1レビュー完了
-- 次に行う回: **2回目（FIX+REVIEW）**。reviews/023-building-rootweave-v1.md（判定FIX）のバグ#1
-  （最重要・重大: 多脚＋brace＋鑑定の全力投資`tripodCareful`がbrace単体のみ`soloBraced`に
-  avgCenterTopで明確に劣る、-31.2%）とバグ#2（重大: 後期接続`tripodLate`が脇脚の自壊により
-  一度も成立しない）を優先的に修正すること。脚の建設コスト・`BEAM_COST`・`BRIDGE_DISTANCE_WIND_FACTOR`・
-  `LEG_WIND_OFFSET`の数値調整が候補（Learnings参照）。修正後は再度P01/P02（tripodCareful/twin代替）
-  でプレイ評価しreviews/023-building-rootweave-v2.mdを書くこと
-- **【最優先・42回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
-  ブラウザAIP実プレイが012final〜023v1を含め直近42回連続で未実施（本v1でも`preview_start`を
-  試行し同じ拒否を再確認した）。人間の対話セッションでこのリポジトリを扱う機会があれば
+  games/023-building-rootweave/）。1回目（BUILD+REVIEW）で仕様化・命名・実装・v1レビュー完了、
+  2回目（FIX+REVIEW）で梁（rung）の多段化・トラス効果・揺れ半減・梁の足場化・脚のマイルストーン報酬・
+  TIME_LIMIT 7200化を実施しv2レビュー完了（全力投資の多脚がbrace単体を平均+8.8%・40到達17/20 vs 12/20で上回り
+  v1の逆転を解消）
+- 次に行う回: **3回目（FIX only）**。reviews/023-building-rootweave-v2.md（判定FIX）の新規課題#1
+  （重大: 「いつ・どの間隔で繋ぐか」が一方的。最初の梁を7へ遅らせるtripodLateは崩落ループで8.7どまり、
+  tripodCarefulも梁の間隔を3→4に広げると約13まで落ちる。早く・密に編むのが唯一の正解）と#2（中: 脚の
+  マイルストーンが中央と同額で、収入がsoloBracedの2.6倍に膨らみ投資判断が薄れる。ただし
+  `LEG_MILESTONE_RATIO`=0.5へ単純に下げると脚の立ち上げ資金が足りず多脚が伸びない）を修正すること。
+  候補: 脚の報酬を「梁で繋がった時点で確定」「構造全体の最高高度にだけ報酬」等の本数に比例しない形へ、
+  遅い・疎な編み方にも別の利点（梁代・移動時間の節約、梁の揺れ半減範囲の拡大など）を持たせる。
+  FIX onlyなのでレビューは書かず、修正内容はPR本文とspec.mdの「3回目で実施した修正内容」節に記載
+- **【最優先・43回連続の技術的負債、引き続きプラットフォーム側の制約として確認済み】
+  ブラウザAIP実プレイが012final〜023v2を含め直近43回連続で未実施（無人のスケジュール実行のため
+  開発サーバを起動できない）。人間の対話セッションでこのリポジトリを扱う機会があれば
   最優先で実施すること（`.claude/launch.json`にport 5192で`rootweave`設定済み）**
 
 ## 過去のサイクル28（完了・アーカイブ）
@@ -1030,6 +1035,7 @@ specs/006-combat-mining-building-ironkeep/spec.mdに「v3で検討し、変更�
 | 2026-09-23 | 28 | 2（FIX+REVIEW） | 022-flagship-hearthlineのv1指摘2件を修正しreviews/022-flagship-hearthline-v2.mdを作成（判定FIX）。**中課題「パトロール圏が強すぎる」に対応**: `PATROL_RANGE_BASE`(5→4)・`PATROL_RANGE_QUALITY_MULT`(4→2)・`PATROL_RANGE_LINK_BONUS`(3→2)で範囲を縮小し`PATROL_FUEL_DRAIN_MULT`(0.5→0.65)で燃料節約幅も緩和、patrollerの死亡数が0/20→4/20へ変化し「危険が事実上消える」状態を脱した。**軽微課題「鑑定投資が見えるだけでwallより悪化」に対応**: `usesReturnRiskCaution`を新設しmason専用に「returnRiskLevelが'danger'に見えたら隣接敵なしでダッシュにより距離を詰めて帰還する」行動を追加（patrollerのレーン誘導とは異なる即応的な反応にして両者を区別）、mason死亡数が5/20→1/20に改善しwall(2/20)以上の安全性を達成。標準tick(20000)では新たにmason(1)<patroller(4)、長時間tick(60000)ではmason(4)<patroller(5)というダッシュ反応とレーン誘導の優劣逆転を発見（軽微、v3以降で分析）。またグローバル定数変更がpatrol機構を使わない戦略（scatter 10→14死亡、p01のseed302が死亡→生存等）にも決定論シミュレーションの燃料タイミング連鎖で予期しない副作用を及ぼすことを確認（クラッシュ等ではなく数値の連鎖変化、022固有の欠陥ではない）。020までの全13戦略（10シード）でクラッシュ・回帰なし、決定論を再確認。npm run build正常終了。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run3（FIX only）へ進めた | (本PR) |
 | 2026-09-24 | 28 | 3（FIX only） | v2バグ#1「mason/patrollerの優劣が標準/長時間tickで逆転する」を分析（レビューは書かずspec.md「3回目で実施した修正内容」節に記載）。再現の結果、**実際には標準/長時間の間で優劣は逆転していなかった**（標準: mason1/20<patroller4/20、長時間: mason4/5<patroller5/5、いずれもmasonが安全）。routine-state.mdの「逆転」はv1（長時間はpatrollerが安全）とv2（ダッシュ反応追加後は標準・長時間ともmasonが安全）の比較を指していたと判明。内訳指標（`avgRaidRiskEsc`がpatroller170.1 vs mason100.3、長時間776.0 vs 132.8）から、patrollerの`recommendedReturnLane`への寄り道がy軸移動のみでx軸（帰還）に進まず夜のフィールド滞在時間を延ばすことが死亡数の多さの原因と特定した。「returnRiskLevel=dangerなら寄り道せず直進」「safeの時だけ寄り道」「patrollerにもダッシュ反応を追加」の3案を実装・計測したが、いずれもpatrollerの死亡数を4/20→5〜6/20へ悪化させたため**すべて却下し`headless/simulate.ts`はv2から無変更**とした。patrollerの弱さは実装漏れではなく「燃料効率優先の寄り道」という設計が内包するリスクで、mason（即応・寄り道なし）とpatroller（予防的・燃料効率重視）の異なるトレードオフを意図通り体現していると結論。npm run build正常終了、bare/mason/patroller/wall/scatterの標準20シード結果がv2と完全一致（無回帰）。games/README.mdの索引を更新し、routine-state.mdをサイクル28・run4（FINAL REVIEW）へ進めた | (本PR) |
 | 2026-10-02 | 29 | 1（BUILD+REVIEW） | 022-finalの提案(2)（019-finalから持ち越しの「多脚・分岐構造の建築単体プロトタイプ」）を受け、`023-building-rootweave`を新規実装。ワールドに3本の脚スロット（左x=1/中央x=6=トランク/右x=11）を新設し、各脚は019と同じ風カンチレバー・揺れ・brace連携・鑑定ロット選別の物理を独立に持つ。新規`connect`アクション: 左右の脚の上に立ち同じ高さに中央トランクの構造材があれば`BEAM_COST=25`を払って接続でき、接続高度より上の中央トランクの重量が「中央＋接続中の脚本数」で分散される（脚と中央の距離に応じた橋の風トルク`BRIDGE_DISTANCE_WIND_FACTOR`も追加）。脚の崩落で接続点の構造材が失われると接続は即座に切れ、残りへ荷重が戻る多脚特有のカスケードも実装。6戦略（solo/soloBraced/twin/tripod/tripodLate/tripodCareful）×10シードのヘッドレス検証で、コア機構自体（負荷分散・切断時再分配・連鎖崩落）はクラッシュ・理不尽な即死なしに動作する一方、**最重要の発見として多脚＋brace＋鑑定の全力投資（tripodCareful、avgCenterTop20.1）がbrace単体のみ（soloBraced、29.2）に-31.2%で明確に劣る**という、コアファン仮説と逆方向の重大な逆転を確認。後期接続（tripodLate、接続高度9）は脇脚の自壊（`LEG_WIND_OFFSET`により中央より揺れに弱い）で一度も成立せず、脚本数1本(twin)と2本(tripod)の到達高度差もほぼ付いていない。ボット実装中に「資材切れ時に既存ブロックへ登って即降りる無駄な往復で地上滞在tickが半減し資金蓄積が停滞する」「接続高度に居座ったまま`BEAM_COST`不足で`connect`を送り続け資金が増えない」の2件の検証bot側バグを発見・修正（ゲーム本体は無変更）。reviews/023-building-rootweave-v1.md作成、判定**FIX**（コア機構は健全、脚の建設コスト・接続コストの数値調整が必要）。ブラウザAIP実プレイは42サイクル連続で「無人セッションからは開発サーバを起動できない」制約により未実施（`.claude/launch.json`にport 5192で`rootweave`設定済み）。npm run build / npm run simulateとも正常終了・クラッシュ0件・死亡0/60確認。games/README.mdの索引を更新し、routine-state.mdをサイクル29・run2（FIX+REVIEW）へ進めた | (本PR) |
+| 2026-10-02 | 29 | 2（FIX+REVIEW） | 023-building-rootweaveのv1バグ#1〜#3に対応しreviews/023-building-rootweave-v2.mdを作成（判定**FIX**）。v1バグ#1（全力投資の多脚がbrace単体に-31.2%で負ける）の原因が数値ではなく構造にあると特定した: (a)接続1本では基礎保護（高さ≤3）直上の1ブロックしか楽にならない、(b)3本を同じ高さまで建てると各列が自重を背負うので本数割りだけでは単一柱の上限を越えられない、(c)脚を建てても収入ゼロ。v1の「脇脚は`LEG_WIND_OFFSET`で自壊する」という分析は誤り（バンド0の風は+5%のみ、本当の原因は素の石柱の自重上限≒7）。これを受け、`connect`を「脚ごとに梁（rung）を何段でも架けられる」へ変更し、梁の高さでのトラス効果（中央＋梁の脚の上方荷重を合算し`TRUSS_FACTOR`0.5/0.35を掛けて再分配）、梁の上下2マスの揺れ半減（`RUNG_SHAKE_RADIUS`）、梁の上を横移動できる足場化、左右の脚にも中央と同額のマイルストーン報酬（`LEG_MILESTONE_RATIO`=1.0）、`BEAM_COST`25→8を実装。`TIME_LIMIT`は10tpsで6分しかなく仕様書の想定8〜15分と食い違っていたため3600→7200へ揃えた。検証ボットでは全戦略に影響する「地上から柱に登っては降りる往復（労働収入半減）」と、tripodCarefulの「鑑定をbraceより先に買い序盤にbraceが買えない」の2バグを修正（後者はv1で多脚が負けた主因の一つ）、梁を編む戦略・梁を渡る移動・梁代の確保・列数に比例した運搬量を追加し、診断用`tripodOnce`（梁1本のみ＝v1のtripod相当）を新設。7戦略×20シード（7200tick）でtripodCareful avgMaxHeight 65.2 vs soloBraced 59.9（+8.8%）・40到達17/20 vs 12/20で逆転を解消、twin 14.9→tripod 37.0で脚本数の差も出た（v1バグ#3解消）。シード別分布から、soloBracedは「全か無か」（12シードが天井89、8シードが12〜20で停滞）、多脚は連続的で「立ち上げ失敗の保険」として効くと判明し、v1/019の「単一柱の頭打ち」の大半はボットの往復バグの影響だったことも分かった。3600tickでは多脚は損（30.4 vs 46.4）でセッション長が結論を左右する。新規課題として「早く・密に編むのが唯一の正解」（重大、tripodLateは8.7どまり）と「脚の報酬で収入がsoloBracedの2.6倍」（中）を記録。deaths 0/140。ブラウザAIP実プレイは43サイクル連続で未実施。npm run build / npm run simulateとも正常終了。spec.mdに「v2で実施した修正内容」節を追記、package.jsonを0.2.0へ、games/README.mdの索引を更新し、routine-state.mdをサイクル29・run3（FIX only）へ進めた | (本PR) |
 
 ## 備考・引き継ぎ事項
 
