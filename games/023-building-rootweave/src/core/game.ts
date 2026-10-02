@@ -17,7 +17,8 @@ import type {
 export const W = 13;
 export const H = 90;
 export const GOAL_HEIGHT = 40;
-export const TIME_LIMIT = 3600;
+/** v2: 3600→7200（10tps換算で6分→12分。仕様書の想定セッション8〜15分に合わせた） */
+export const TIME_LIMIT = 7200;
 
 export const LEG_X: Record<LegId, number> = { left: 1, center: 6, right: 11 };
 export const LEG_WIND_OFFSET: Record<LegId, number> = { left: 1, center: 0, right: 1 };
@@ -53,8 +54,22 @@ export const MILESTONE_TAPER_HEIGHT = 60;
 /** lotIndexを明示指定して構造材を設置するたびに得られる少額のスコアボーナス（019から継承） */
 export const INFORMED_PLACEMENT_SCORE_BONUS = 1.5;
 
-/** 左右の脚を中央トランクへ接続する一回あたりのコスト */
-export const BEAM_COST = 25;
+/** 左右の脚を中央トランクへ接続する梁（rung）1本あたりのコスト（v2: 25→8、多段の梁を前提に引き下げ） */
+export const BEAM_COST = 8;
+/**
+ * v2新規: 左右の脚それぞれの高さマイルストーン報酬の倍率（中央の報酬式×この倍率）。
+ * v1では脚を建てても所持金が一切増えず（収入は中央の到達高度のみ）、脚の建設コストが
+ * まるごと持ち出しになっていた（v1バグ#1の主因の一つ）
+ */
+export const LEG_MILESTONE_RATIO = 1;
+/** v2新規: 梁から上下この距離以内の、梁で繋がった列のブロックは揺れ倍率が半減する（梁が横揺れを止める） */
+export const RUNG_SHAKE_RADIUS = 2;
+/**
+ * v2新規: 梁の高さでのトラス効果。その高さで梁が繋ぐ列（中央＋接続脚）の上方荷重を合算し、
+ * この係数を掛けてから均等に再分配する（斜めの力の流れで地面へ逃がす分）。
+ * 接続脚の本数ごとの係数（index=脚本数）。脚を増やすほど三角形が増えて効く
+ */
+export const TRUSS_FACTOR = [1, 0.5, 0.35];
 /** 脚と中央の距離1マスあたり、分担荷重に追加でかかる風トルク係数 */
 export const BRIDGE_DISTANCE_WIND_FACTOR = 0.03;
 
@@ -119,8 +134,6 @@ function nearestLeg(x: number): LegId {
 interface StressResult {
   /** 脚ごとの高さ→負荷率 */
   stress: Record<LegId, Map<number, number>>;
-  /** 左右の脚ごとの現在有効な接続（null=未接続/切断） */
-  aliveConn: Record<'left' | 'right', number | null>;
 }
 
 export class Game {
@@ -154,13 +167,16 @@ export class Game {
   /** 補強材・安定化装置（脚に隣接するマスに設置）。key="x,y" */
   private decor = new Map<string, Block>();
 
-  private connHeight: Record<'left' | 'right', number | null> = { left: null, right: null };
+  /** v2: 脚ごとの梁（rung）の高さ集合。1本の脚に複数の梁を架けられる */
+  private rungs: Record<'left' | 'right', Set<number>> = { left: new Set(), right: new Set() };
 
   private groundScrap = new Map<number, number>();
   private stabilizerRemaining = 3;
   private maxHeightReached = 0;
   private foundationHeight = 0;
   private maxLegsConnectedSoFar = 0;
+  /** v2: 左右の脚ごとの到達済み最高高度（脚マイルストーン報酬の判定用） */
+  private legMaxReached: Record<'left' | 'right', number> = { left: 0, right: 0 };
 
   private shakeState: ShakeState = 'idle';
   private shakeTimer: number;
@@ -310,89 +326,87 @@ export class Game {
     }
   }
 
-  /** 接続がまだ物理的に有効か（両端のブロックが現存するか）を確認し、無効なら切断する */
+  /** 梁がまだ物理的に有効か（両端のブロックが現存するか）を確認し、無効な梁を撤去する */
   private pruneDeadConnections(): void {
     for (const leg of SIDE_LEGS) {
-      const h = this.connHeight[leg];
-      if (h === null) continue;
-      if (!this.legColumns[leg].has(h) || !this.legColumns.center.has(h)) {
-        this.connHeight[leg] = null;
+      for (const h of [...this.rungs[leg]]) {
+        if (!this.legColumns[leg].has(h) || !this.legColumns.center.has(h)) this.rungs[leg].delete(h);
       }
     }
   }
 
-  /** 中央トランク＋左右の脚、1本ずつの負荷率を計算する（分散された共有荷重も反映） */
+  private topOf(leg: LegId): number {
+    let top = 0;
+    for (const y of this.legColumns[leg].keys()) if (y > top) top = y;
+    return top;
+  }
+
+  /** その列のその高さが、梁（rung）から上下RUNG_SHAKE_RADIUS以内か。中央はどちらかの脚の梁が対象 */
+  private nearRung(leg: LegId, y: number): boolean {
+    const sides = leg === 'center' ? SIDE_LEGS : [leg];
+    for (const side of sides) {
+      for (const h of this.rungs[side]) if (Math.abs(h - y) <= RUNG_SHAKE_RADIUS) return true;
+    }
+    return false;
+  }
+
+  /** 左右の脚の最も高い梁（梁より下の脚は横揺れが抑えられ風オフセットが消える） */
+  private highestRung(leg: 'left' | 'right'): number {
+    let h = 0;
+    for (const y of this.rungs[leg]) if (y > h) h = y;
+    return h;
+  }
+
+  /**
+   * 3本の列を上から同時にたどり、負荷率を計算する。
+   * v2: 梁の高さでは「中央＋その高さに梁がある脚」の上方荷重を合算し、TRUSS_FACTORを掛けて
+   * 均等に再分配する（脚側の取り分には距離に応じた橋の風トルクが乗る）
+   */
   private computeStress(): StressResult {
     this.pruneDeadConnections();
     const braceFactorOf = this.buildBraceFactorLookup();
     const stress: Record<LegId, Map<number, number>> = { left: new Map(), center: new Map(), right: new Map() };
+    const carried: Record<LegId, number> = { left: 0, center: 0, right: 0 };
+    const prevBrace: Record<LegId, number> = { left: 1, center: 1, right: 1 };
+    const tops: Record<LegId, number> = { left: this.topOf('left'), center: this.topOf('center'), right: this.topOf('right') };
+    const maxTop = Math.max(tops.left, tops.center, tops.right);
 
-    // 1. 中央トランクをtopから下へたどり、接続点で共有荷重を分配する
-    const centerCol = this.legColumns.center;
-    let centerTop = 0;
-    for (const y of centerCol.keys()) if (y > centerTop) centerTop = y;
+    for (let y = maxTop; y >= 1; y--) {
+      const loadAbove: Partial<Record<LegId, number>> = {};
+      for (const leg of LEG_IDS) {
+        if (y > tops[leg] || !this.legColumns[leg].has(y)) continue;
+        loadAbove[leg] = carried[leg] * prevBrace[leg];
+      }
 
-    const injection: Record<'left' | 'right', { height: number; amount: number } | null> = {
-      left: null,
-      right: null,
-    };
-
-    let carried = 0;
-    let prevBraceFactor = 1;
-    let activeLegCount = 1;
-    for (let y = centerTop; y >= 1; y--) {
-      const b = centerCol.get(y);
-      if (!b) break;
-      let loadAboveRaw = carried * prevBraceFactor;
-
-      const connsHere = SIDE_LEGS.filter((leg) => this.connHeight[leg] === y);
-      if (connsHere.length > 0) {
-        const newLegCount = activeLegCount + connsHere.length;
-        const share = loadAboveRaw / newLegCount;
-        for (const leg of connsHere) {
+      const rungLegs = SIDE_LEGS.filter((leg) => this.rungs[leg].has(y));
+      if (rungLegs.length > 0 && loadAbove.center !== undefined) {
+        let pool = loadAbove.center;
+        for (const leg of rungLegs) pool += loadAbove[leg] ?? 0;
+        const share = (pool * TRUSS_FACTOR[rungLegs.length]) / (1 + rungLegs.length);
+        loadAbove.center = share;
+        for (const leg of rungLegs) {
           const dist = Math.abs(LEG_X[leg] - LEG_X.center);
-          injection[leg] = { height: y, amount: share * (1 + BRIDGE_DISTANCE_WIND_FACTOR * dist) };
+          loadAbove[leg] = share * (1 + BRIDGE_DISTANCE_WIND_FACTOR * dist);
         }
-        loadAboveRaw = share;
-        activeLegCount = newLegCount;
       }
 
       const band = bandOf(y);
-      const windMult = 1 + WIND_TABLE[band] * LEG_WIND_OFFSET.center;
-      const shakeMult =
-        this.shakeState === 'active' ? 1 + SHAKE_TABLE[band] * (this.hasNearbyStabilizer(LEG_X.center, y, 2) ? 0.5 : 1) : 1;
-      stress.center.set(y, (loadAboveRaw * windMult * shakeMult) / this.capacityOf(b));
-
-      const selfW = MATERIAL_DEFS[b.material].weight * this.qualityWeightFactor(b);
-      carried = selfW + loadAboveRaw;
-      prevBraceFactor = braceFactorOf(LEG_X.center, y);
-    }
-
-    // 2. 左右の脚を同じ要領でたどり、接続点があれば共有荷重を注入する
-    for (const leg of SIDE_LEGS) {
-      const col = this.legColumns[leg];
-      let top = 0;
-      for (const y of col.keys()) if (y > top) top = y;
-      let legCarried = 0;
-      let legPrevBraceFactor = 1;
-      const inj = injection[leg];
-      for (let y = top; y >= 1; y--) {
-        const b = col.get(y);
-        if (!b) break;
-        let loadAboveRaw = legCarried * legPrevBraceFactor;
-        if (inj && inj.height === y) loadAboveRaw += inj.amount;
-        const band = bandOf(y);
-        const windMult = 1 + WIND_TABLE[band] * LEG_WIND_OFFSET[leg];
-        const shakeMult =
-          this.shakeState === 'active' ? 1 + SHAKE_TABLE[band] * (this.hasNearbyStabilizer(LEG_X[leg], y, 2) ? 0.5 : 1) : 1;
-        stress[leg].set(y, (loadAboveRaw * windMult * shakeMult) / this.capacityOf(b));
+      for (const leg of LEG_IDS) {
+        const raw = loadAbove[leg];
+        if (raw === undefined) continue;
+        const b = this.legColumns[leg].get(y)!;
+        const offset = leg !== 'center' && y <= this.highestRung(leg) ? 0 : LEG_WIND_OFFSET[leg];
+        const windMult = 1 + WIND_TABLE[band] * offset;
+        const damped = this.hasNearbyStabilizer(LEG_X[leg], y, 2) || this.nearRung(leg, y);
+        const shakeMult = this.shakeState === 'active' ? 1 + SHAKE_TABLE[band] * (damped ? 0.5 : 1) : 1;
+        stress[leg].set(y, (raw * windMult * shakeMult) / this.capacityOf(b));
         const selfW = MATERIAL_DEFS[b.material].weight * this.qualityWeightFactor(b);
-        legCarried = selfW + loadAboveRaw;
-        legPrevBraceFactor = braceFactorOf(LEG_X[leg], y);
+        carried[leg] = selfW + raw;
+        prevBrace[leg] = braceFactorOf(LEG_X[leg], y);
       }
     }
 
-    return { stress, aliveConn: { ...this.connHeight } };
+    return { stress };
   }
 
   private collapseFrom(leg: LegId, failY: number): void {
@@ -481,7 +495,7 @@ export class Game {
   }
 
   private applyGravity(): void {
-    const grounded = this.player.y === 0 || this.blockAt(this.player.x, this.player.y) !== undefined;
+    const grounded = this.isGrounded(this.player.x, this.player.y);
     if (!grounded) {
       this.player.y -= 1;
       this.player.fallStreak++;
@@ -545,6 +559,37 @@ export class Game {
     }
   }
 
+  /** v2: 梁の上（脚〜中央の間の同じ高さ）か。梁の上は足場として立てて横移動できる */
+  private onBeam(x: number, y: number): boolean {
+    if (y < 1) return false;
+    for (const leg of SIDE_LEGS) {
+      if (!this.rungs[leg].has(y)) continue;
+      const lo = Math.min(LEG_X[leg], LEG_X.center);
+      const hi = Math.max(LEG_X[leg], LEG_X.center);
+      if (x >= lo && x <= hi) return true;
+    }
+    return false;
+  }
+
+  private isGrounded(x: number, y: number): boolean {
+    return y === 0 || this.blockAt(x, y) !== undefined || this.onBeam(x, y);
+  }
+
+  /** v2: 左右の脚の高さが新たに3の倍数を超えたら、中央の報酬×LEG_MILESTONE_RATIOを支払う */
+  private applyLegMilestones(): void {
+    for (const leg of SIDE_LEGS) {
+      const top = this.topOf(leg);
+      const prev = this.legMaxReached[leg];
+      if (top <= prev) continue;
+      for (let m = Math.floor(prev / MILESTONE_STEP) * MILESTONE_STEP + MILESTONE_STEP; m <= top; m += MILESTONE_STEP) {
+        const bonus = Math.round(this.milestoneBonus(m) * LEG_MILESTONE_RATIO);
+        this.player.money += bonus;
+        this.metrics.moneyEarned += bonus;
+      }
+      this.legMaxReached[leg] = top;
+    }
+  }
+
   private canPlaceStruct(tx: number, ty: number): LegId | null {
     const leg = this.legIdAt(tx);
     if (!leg || ty < 1 || ty >= H) return null;
@@ -574,7 +619,9 @@ export class Game {
           break;
         }
         const horizontal = action.dir === 'left' || action.dir === 'right';
-        if (horizontal && this.blockAt(nx, ny) !== undefined) {
+        // 梁の上の横移動は列・補強材の位置も通り抜けられる（梁が足場になる）
+        const alongBeam = this.onBeam(this.player.x, this.player.y) && this.onBeam(nx, ny);
+        if (horizontal && !alongBeam && this.blockAt(nx, ny) !== undefined) {
           this.metrics.invalidActions++;
           break;
         }
@@ -659,8 +706,7 @@ export class Game {
           this.metrics.invalidActions++;
           break;
         }
-        const current = this.connHeight[leg];
-        if (current !== null && y <= current) {
+        if (this.rungs[leg].has(y)) {
           this.metrics.invalidActions++;
           break;
         }
@@ -669,7 +715,7 @@ export class Game {
           break;
         }
         this.player.money -= BEAM_COST;
-        this.connHeight[leg] = y;
+        this.rungs[leg].add(y);
         this.metrics.connectEvents++;
         break;
       }
@@ -720,12 +766,13 @@ export class Game {
     const prevMax = this.maxHeightReached;
     const newMax = Math.max(prevMax, this.player.y);
     if (newMax > prevMax) this.applyMilestones(prevMax, newMax);
+    this.applyLegMilestones();
     this.maxHeightReached = newMax;
     this.metrics.maxHeight = newMax;
     if (this.maxHeightReached >= MILESTONE_STEP) this.foundationHeight = MILESTONE_STEP;
     if (this.maxHeightReached >= GOAL_HEIGHT) this.won = true;
 
-    const connectedSides = SIDE_LEGS.filter((leg) => this.connHeight[leg] !== null).length;
+    const connectedSides = SIDE_LEGS.filter((leg) => this.rungs[leg].size > 0).length;
     if (connectedSides > this.maxLegsConnectedSoFar) this.maxLegsConnectedSoFar = connectedSides;
     this.metrics.maxLegsConnected = this.maxLegsConnectedSoFar;
 
@@ -800,8 +847,9 @@ export class Game {
         id: legId,
         x: LEG_X[legId],
         topHeight,
-        connHeight: legId === 'center' ? null : this.connHeight[legId as 'left' | 'right'],
-        connected: legId === 'center' ? false : this.connHeight[legId as 'left' | 'right'] !== null,
+        connHeight: legId === 'center' ? null : this.highestRung(legId as 'left' | 'right') || null,
+        connected: legId === 'center' ? false : this.rungs[legId as 'left' | 'right'].size > 0,
+        rungs: legId === 'center' ? [] : [...this.rungs[legId as 'left' | 'right']].sort((a, b) => a - b),
         maxStressRatio,
         criticalCount,
         linkedBraceCount,
@@ -843,7 +891,7 @@ export class Game {
           stabilizer: this.stabilizerCount,
         },
         fallStreak: this.player.fallStreak,
-        grounded: this.player.y === 0 || this.blockAt(this.player.x, this.player.y) !== undefined,
+        grounded: this.isGrounded(this.player.x, this.player.y),
       },
       qualityQueue,
       world: {
