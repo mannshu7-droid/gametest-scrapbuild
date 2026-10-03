@@ -76,6 +76,8 @@ export interface Enemy {
   isRaider: boolean;
   /** isRaider時の目標拠点x座標（0=ホーム） */
   targetBaseX: number;
+  /** v3新規: 高い塔の誘引で増えた襲撃か（倒した時の報酬がLURED_REWARD_MULT倍） */
+  lured?: boolean;
 }
 
 export interface Barricade {
@@ -130,6 +132,8 @@ export interface Turret {
   corridorLanes?: [number, number];
   /** 次の1段の積み増し費用（024新規） */
   raiseCost?: number;
+  /** v3新規: 孤塔か（拠点圏内で高さ1以上の塔が自分1本だけ・梁なし）。孤塔は援護半径+loneCoverRadiusBonus */
+  lone?: boolean;
 }
 
 /** 塔と塔を繋ぐ梁（024新規、023の梁(rung)を拠点の塔へ移植）。架けた高さで両塔の自由長をリセットする */
@@ -389,6 +393,10 @@ export interface GameState {
     attractPerHeight: number;
     lureRaidStep: number;
     coverRadiusBase: number;
+    /** v3新規: 梁なしの塔の援護が届く上下のレーン数（見張り台）、孤塔の援護半径ボーナス、呼び寄せた敵の報酬倍率 */
+    watchLanes: number;
+    loneCoverRadiusBonus: number;
+    luredRewardMult: number;
   };
   /** 次の夜（夜中は今夜）に塔が呼び寄せる追加の襲撃者数（v2新規、拠点ごとの塔の高さ合計÷lureRaidStepの和） */
   lureRaidCount: number;
@@ -466,7 +474,9 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
       '崩落すると「最高の梁＋slenderLimit」より上が折れ、隣接していると落下物でダメージを受ける。' +
       'v2: 夜、高さ1以上の塔はパトロール圏（回廊含む）にいるプレイヤーの近く（towerRules.coverRadiusBase＋高さ由来の射程延長）の敵を優先して援護射撃する。' +
       '一方で高い塔は敵を呼ぶ: 拠点ごとの塔の高さ合計÷towerRules.lureRaidStepだけ夜の襲撃が増え（lureRaidCountで予告）、' +
-      '塔からx方向に高さ×attractPerHeight以内のレイダーは拠点ではなく最も高い塔を狙う',
+      '塔からx方向に高さ×attractPerHeight以内のレイダーは拠点ではなく最も高い塔を狙う。' +
+      'v3: 梁の無い塔は上下towerRules.watchLanesレーンまで援護する（見張り台）。拠点に塔が1本だけなら援護半径+loneCoverRadiusBonus（孤塔）。' +
+      '誘引で増えた敵（enemies[].lured）の報酬はluredRewardMult倍',
   },
   {
     type: 'beam',
