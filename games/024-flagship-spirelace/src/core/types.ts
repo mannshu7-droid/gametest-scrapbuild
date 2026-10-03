@@ -138,6 +138,9 @@ export interface Beam {
   aId: number;
   bId: number;
   level: number;
+  /** 梁の耐久（v2新規）。夜、塔に引き付けられたレイダーに狙われ、0で落ちる */
+  hp: number;
+  maxHp: number;
 }
 
 export interface Base {
@@ -252,6 +255,25 @@ export interface Metrics {
   maxTowerHeight: number;
   /** 塔の射程拡張（高さ由来の射程>1）で発生した迎撃の回数（024新規、高さの効き目の指標） */
   tallShots: number;
+  /** 援護射撃（v2新規）: 夜、パトロール圏内のプレイヤーに迫る敵を塔が撃った回数・倒した数 */
+  coverShots: number;
+  coverKills: number;
+  /** 誘引（v2新規）: 高い塔に引き付けられたレイダーが塔を攻撃した回数 */
+  lureHits: number;
+  /** レイダーに落とされた梁の数（v2新規） */
+  beamsLost: number;
+  /** 高い塔に呼び寄せられた追加の襲撃者の累計（v2新規） */
+  luredRaiders: number;
+  /** 夜・拠点圏外でプレイヤーが敵から受けたダメージの累計（v2新規。死亡数が少なく揺らぎに埋もれる領域で、
+   * 夜のフィールドの危険を連続量で測る。v1 Learnings） */
+  nightFieldDamage: number;
+  /** 高さ1以上の塔が破壊された数と、その時に失われた高さの累計（v2新規、高く積むことの代償の指標） */
+  towersLost: number;
+  heightLostToRaids: number;
+  /** 初めて高さ4・8・12の塔ができたtick（v2新規、v1バグ#6。未到達は-1） */
+  tickToH4: number;
+  tickToH8: number;
+  tickToH12: number;
   score: number;
 }
 
@@ -333,6 +355,8 @@ export interface GameState {
     buildLots: (number | null)[];
     /** 進行中の塔作業（024新規）。raise=積み増し、beam=梁の架設。無ければnull */
     towerWork: { kind: 'raise' | 'beam'; turretId: number; progress: number; total: number } | null;
+    /** 今プレイヤーを援護射撃の対象にしている塔の数（v2新規。夜・高さ1以上の塔のパトロール圏/回廊の中にいる時のみ>0） */
+    coveringTowers: number;
   };
   map: {
     width: number;
@@ -359,7 +383,15 @@ export interface GameState {
     beamSpan: number;
     rangeStep: number;
     patrolHeightMult: number;
+    /** v2新規: 梁の耐久、誘引の倍率（x方向に高さ×これ以内のレイダーを引き付ける）、
+     * 追加襲撃の刻み（拠点ごとの塔の高さ合計÷これ）、援護射撃の基礎半径 */
+    beamHp: number;
+    attractPerHeight: number;
+    lureRaidStep: number;
+    coverRadiusBase: number;
   };
+  /** 次の夜（夜中は今夜）に塔が呼び寄せる追加の襲撃者数（v2新規、拠点ごとの塔の高さ合計÷lureRaidStepの和） */
+  lureRaidCount: number;
   /** プレイヤーが建てた前線拠点のx座標一覧（ホームのx=0は含まない、破壊された拠点は除去済み） */
   outposts: number[];
   /** ホーム+全前線拠点のHP状態（破壊された拠点は含まない） */
@@ -431,7 +463,10 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
       '024新規: 隣接(dir)するタレットを1段積み増す（塔化）。開始時に費用（turrets[].raiseCost）を払い、RAISE_TICKS(towerRules.raiseTicks)の間' +
       '毎tick同じアクションを送り続けると高さ+1。高さで迎撃射程（rangeStepごとに+1）とパトロール圏（1段あたり+patrolHeightMult）が伸びる。' +
       '自由長（高さ−その塔に架かる最高の梁の高さ）がslenderLimitを超えると、超過分に比例して毎tick崩落しうる（夜と被弾時は特に危険）。' +
-      '崩落すると「最高の梁＋slenderLimit」より上が折れ、隣接していると落下物でダメージを受ける',
+      '崩落すると「最高の梁＋slenderLimit」より上が折れ、隣接していると落下物でダメージを受ける。' +
+      'v2: 夜、高さ1以上の塔はパトロール圏（回廊含む）にいるプレイヤーの近く（towerRules.coverRadiusBase＋高さ由来の射程延長）の敵を優先して援護射撃する。' +
+      '一方で高い塔は敵を呼ぶ: 拠点ごとの塔の高さ合計÷towerRules.lureRaidStepだけ夜の襲撃が増え（lureRaidCountで予告）、' +
+      '塔からx方向に高さ×attractPerHeight以内のレイダーは拠点ではなく最も高い塔を狙う',
   },
   {
     type: 'beam',
@@ -440,7 +475,8 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
       '024新規: 隣接(dir)するタレットから、towerRules.beamSpan以内（チェビシェフ距離）の別のタレットへ梁を架ける。梁の高さは2塔の低い方の高さで、' +
       'その2塔の間の既存の梁より高い必要がある（何段でも架けられる）。開始時に費用を払い、beamTicksの間毎tick送り続けると完成。' +
       '梁は両塔の自由長をその高さでリセットし（天井を越えられる）、梁で繋がった塔のパトロール圏は繋がった塔のレーン全体を覆う回廊になり燃料消費がさらに軽くなる。' +
-      'どちらかの塔が壊れると梁は落ち、残った塔は自由長が伸びて連鎖崩落しうる',
+      'どちらかの塔が壊れると梁は落ち、残った塔は自由長が伸びて連鎖崩落しうる。' +
+      'v2: 梁は耐久(beams[].hp、towerRules.beamHp)を持ち、塔に引き付けられたレイダーは射程内から塔本体ではなく最も高い梁を狙う。梁が落ちると同じく連鎖崩落しうる',
   },
   { type: 'wait', params: {}, description: '何もせず1ティック経過（燃料は消費される）' },
 ];

@@ -271,6 +271,25 @@ const OVERSTRESS_HIT_CHANCE = 0.25;
 const COLLAPSE_HP_FRAC = 0.25;
 /** 崩落時、塔に隣接（チェビシェフ1）しているプレイヤーが受ける1段あたりの落下物ダメージ */
 const FALL_DMG_PER_SEGMENT = 8;
+// ---- v2 FIX（v1バグ#1・#2・#3）: 塔の効果を「死ぬ場面」へ届け、高い塔に代償を与える ----
+// v1の診断: 夜のフィールド死はすべて拠点から3〜4マス（拠点圏のすぐ外、パトロール圏内）でレイダーに倒されていた。
+// 燃料切れは0。塔の燃料軽減は死因に届いていなかった
+/** 援護射撃（v2新規）: 夜、プレイヤーが高さ1以上の塔のパトロール圏（梁の回廊を含む）にいる間、その塔は
+ * プレイヤーからこの半径＋高さ由来の射程延長（turretRange-1）以内にいる敵を、拠点の防衛より優先して撃つ。
+ * 高さが援護の届く範囲に効く（h0は援護しない＝022のwall/masonは変わらない） */
+const COVER_RADIUS_BASE = 1;
+/** 誘引（v2新規）: 夜、高さ1以上の塔からx方向に「高さ×この倍率」以内に入ったレイダーは、拠点ではなく最も高い塔を
+ * 襲いに行く（高い塔ほど遠くの敵を呼ぶ）。塔は修理できないため、高く積んだ投資が夜ごとに削られうる。
+ * 梁で編んだ塔が壊されると梁が落ち、相方の塔が連鎖崩落しうる（v1バグ#3: 編むことのリスクが発生しない） */
+const ATTRACT_PER_HEIGHT = 2;
+/** 梁の耐久（v2新規）。引き付けられたレイダーは、塔に梁が架かっていれば射程内から塔本体ではなく最も高い梁を狙う
+ * （梁は網の弱点）。梁が落ちると両塔の自由長が伸び、超過した塔はその場で折れうる（被弾時と同じ判定） */
+export const BEAM_HP = 20;
+/** 高い塔は遠くから見える（v2新規）: 拠点ごとに「その拠点の塔の高さの合計÷この値（切り捨て）」体だけ、夜の襲撃が増える。
+ * 合計で数えるため、1本だけの低い塔（h4）は目立たず、編んだ網（3基×h12=36→+6体）は遠くから敵を呼ぶ。
+ * 呼び寄せた敵も倒せば報酬になる（高さは「危険と稼ぎの両方を上げるダイヤル」）。掃引: 最高値で数える案(÷4)と
+ * 合計÷4/6/8を40シードで比較し、weaveの夜のフィールド被害がspireAllと同水準になる÷6を採用（v2レビュー参照） */
+const LURE_RAID_STEP = 6;
 
 /** returnRiskLevel算出時、帰路付近の夜間レイダーを探索するx方向の距離 */
 const RETURN_RISK_SCAN_RANGE = 20;
@@ -664,6 +683,17 @@ export class Game {
     fallDamage: 0,
     maxTowerHeight: 0,
     tallShots: 0,
+    coverShots: 0,
+    coverKills: 0,
+    lureHits: 0,
+    beamsLost: 0,
+    luredRaiders: 0,
+    nightFieldDamage: 0,
+    towersLost: 0,
+    heightLostToRaids: 0,
+    tickToH4: -1,
+    tickToH8: -1,
+    tickToH12: -1,
     score: 0,
   };
 
@@ -1179,6 +1209,10 @@ export class Game {
     if (!this.turrets.includes(t)) return;
     this.turrets = this.turrets.filter((o) => o.id !== t.id);
     this.metrics.turretsLost++;
+    if (t.height > 0) {
+      this.metrics.towersLost++;
+      this.metrics.heightLostToRaids += t.height;
+    }
     this.linkedCache = null;
     this.shieldedCache = null;
     const partners: number[] = [];
@@ -1190,6 +1224,35 @@ export class Game {
     for (const id of partners) {
       const o = this.turretById(id);
       if (o && this.overstressOf(o) > 0) this.collapseTower(o, true);
+    }
+  }
+  /** v2新規: 高い塔が呼び寄せる追加の襲撃数（拠点ごとの塔の高さの合計÷LURE_RAID_STEP、切り捨て） */
+  private lureRaidCount(): number {
+    let n = 0;
+    for (const base of this.allBases()) {
+      let total = 0;
+      for (const t of this.turrets) if (Math.abs(t.x - base.x) <= this.radiusFor(base)) total += t.height;
+      n += Math.floor(total / LURE_RAID_STEP);
+    }
+    return n;
+  }
+  /** v2新規: この塔に架かる最も高い梁（無ければnull） */
+  private topBeamOf(t: Turret): Beam | null {
+    let best: Beam | null = null;
+    for (const b of this.beams) if ((b.aId === t.id || b.bId === t.id) && (!best || b.level > best.level)) best = b;
+    return best;
+  }
+  /** v2新規: 梁への攻撃。耐久が尽きると梁が落ち、両塔は自由長が伸びて超過分に応じその場で折れうる（連鎖崩落として数える） */
+  private damageBeam(b: Beam, dmg: number): void {
+    b.hp -= dmg;
+    if (b.hp > 0) return;
+    this.beams = this.beams.filter((o) => o.id !== b.id);
+    this.metrics.beamsLost++;
+    for (const id of [b.aId, b.bId]) {
+      const t = this.turretById(id);
+      if (!t) continue;
+      const over = this.overstressOf(t);
+      if (over > 0 && this.towerRng() < OVERSTRESS_HIT_CHANCE * over) this.collapseTower(t, true);
     }
   }
   /** 毎tick: 自由長を超えた塔は超過分に比例して崩落しうる（夜は揺れが強い） */
@@ -1227,6 +1290,9 @@ export class Game {
       t.height++;
       this.metrics.raiseLevels++;
       this.metrics.maxTowerHeight = Math.max(this.metrics.maxTowerHeight, t.height);
+      if (t.height >= 4 && this.metrics.tickToH4 < 0) this.metrics.tickToH4 = this.tick;
+      if (t.height >= 8 && this.metrics.tickToH8 < 0) this.metrics.tickToH8 = this.tick;
+      if (t.height >= 12 && this.metrics.tickToH12 < 0) this.metrics.tickToH12 = this.tick;
     }
   }
   /** 梁を架ける相手の塔を選ぶ: 架設中のものを優先、次に架けられる高さが最大、同点は近い方・id順 */
@@ -1273,7 +1339,7 @@ export class Game {
     // 架設中に塔が崩れて低くなっていれば、梁はその時点の低い方の高さに架かる（それでも既存の梁以下なら無駄になる）
     const level = Math.min(entry.level, a.height, pick.b.height);
     if (level < 1 || level <= this.pairLevel(a.id, pick.b.id)) return;
-    this.beams.push({ id: this.nextBeamId++, aId: a.id, bId: pick.b.id, level });
+    this.beams.push({ id: this.nextBeamId++, aId: a.id, bId: pick.b.id, level, hp: BEAM_HP, maxHp: BEAM_HP });
     this.metrics.beamsBuilt++;
     if (this.metrics.firstBeamTick < 0) this.metrics.firstBeamTick = this.tick;
   }
@@ -1531,7 +1597,11 @@ export class Game {
    */
   private spawnRaidWave(): void {
     const bases = this.allBases();
-    const count = Math.min(RAID_MAX_COUNT, RAID_BASE_COUNT + Math.floor(this.metrics.nightsSurvived / RAID_PER_NIGHT_DIV));
+    let count = Math.min(RAID_MAX_COUNT, RAID_BASE_COUNT + Math.floor(this.metrics.nightsSurvived / RAID_PER_NIGHT_DIV));
+    // v2新規: 高い塔は遠くから見え、その分だけ襲撃を呼ぶ（塔の無い022の戦略では0）
+    const lured = this.lureRaidCount();
+    count += lured;
+    this.metrics.luredRaiders += lured;
     if (count <= 0) return;
 
     const candidates: { x: number; y: number; w: number }[] = [];
@@ -1624,6 +1694,33 @@ export class Game {
       }
       let target: Enemy | null = null;
       let bestDist = Infinity;
+      // v2新規: 援護射撃。夜、プレイヤーがこの塔の圏内にいれば、プレイヤーに迫る敵（昼の敵も含む）を最優先で撃つ
+      if (this.coversPlayer(t)) {
+        const radius = COVER_RADIUS_BASE + this.turretRange(t) - TURRET_RANGE;
+        let bestToPlayer = Infinity;
+        for (const e of this.enemies) {
+          if (e.hp <= 0) continue;
+          const dp = chebyshev(e.x, e.y, this.player.x, this.player.y);
+          if (dp <= radius && dp < bestToPlayer) {
+            bestToPlayer = dp;
+            target = e;
+          }
+        }
+      }
+      if (target) {
+        t.atkCd = TURRET_ATK_CD_MAX;
+        const shot = this.turretShot(t);
+        target.hp -= shot;
+        this.metrics.turretShots++;
+        this.metrics.coverShots++;
+        this.metrics.turretDamageDealt += shot;
+        if (target.hp <= 0) {
+          this.killEnemy(target);
+          this.metrics.turretKills++;
+          this.metrics.coverKills++;
+        }
+        continue;
+      }
       for (const e of this.enemies) {
         if (!e.isRaider) continue;
         const d = chebyshev(e.x, e.y, t.x, t.y);
@@ -1637,7 +1734,7 @@ export class Game {
       if (bestDist > TURRET_RANGE) this.metrics.tallShots++;
       // 品質倍率（020新規）と連携ボーナス（隣接obstacleがあれば強化）が攻撃ダメージに乗る
       const shielded = this.isShielded(t.x, t.y);
-      const shot = TURRET_DMG * Math.pow(t.quality, TURRET_QUALITY_DMG_EXP) * (shielded ? TURRET_LINK_DMG_MULT : 1);
+      const shot = this.turretShot(t);
       target.hp -= shot;
       this.metrics.turretShots++;
       if (shielded) this.metrics.turretShieldedShots++;
@@ -1648,6 +1745,32 @@ export class Game {
       }
     }
     this.enemies = this.enemies.filter((e) => e.hp > 0);
+  }
+
+  /** タレット1発のダメージ: 品質倍率（020新規）と盾持ちボーナス（隣接バリケードがあれば強化） */
+  private turretShot(t: Turret): number {
+    return TURRET_DMG * Math.pow(t.quality, TURRET_QUALITY_DMG_EXP) * (this.isShielded(t.x, t.y) ? TURRET_LINK_DMG_MULT : 1);
+  }
+  /** v2新規: 夜、プレイヤーがこの塔（高さ1以上）のパトロール圏・梁の回廊の中にいるか（援護射撃の条件） */
+  private coversPlayer(t: Turret): boolean {
+    if (this.phase !== 'night' || t.height <= 0) return false;
+    const p = this.player;
+    if (Math.abs(p.x - t.x) > this.turretPatrolRange(t)) return false;
+    if (p.y === t.y) return true;
+    if (this.topBeamLevel(t) <= 0) return false;
+    const [lo, hi] = this.corridorLanes(t);
+    return p.y >= lo && p.y <= hi;
+  }
+  /** v2新規: このレイダーを引き付けている塔（x方向に高さ×ATTRACT_PER_HEIGHT以内で最も高い塔）。夜のみ */
+  private attractingTower(e: Enemy): Turret | null {
+    if (this.phase !== 'night' || !e.isRaider) return null;
+    let best: Turret | null = null;
+    for (const t of this.turrets) {
+      if (t.height <= 0) continue;
+      if (Math.abs(e.x - t.x) > t.height * ATTRACT_PER_HEIGHT) continue;
+      if (!best || t.height > best.height || (t.height === best.height && chebyshev(e.x, e.y, t.x, t.y) < chebyshev(e.x, e.y, best.x, best.y))) best = t;
+    }
+    return best;
   }
 
   private killEnemy(e: Enemy): void {
@@ -1731,14 +1854,24 @@ export class Game {
       if (!this.enemies.includes(e)) continue;
 
       let blockedBy: Obstacle | null = null;
+      let lure: Turret | null = null;
+      let beamTarget: Beam | null = null;
 
       if (e.isRaider) {
         // 夜間レイダー: 目標拠点のx座標だけを目指す。拠点圏内は昼間敵と違い保護対象外（侵入できる）
         const distToTarget = Math.abs(e.x - e.targetBaseX);
-        if (e.moveCd > 0) e.moveCd--;
+        // v2新規: 高い塔に引き付けられたレイダーは、拠点ではなくその塔を目指して襲う
+        lure = this.attractingTower(e);
+        // 塔に梁が架かっていて射程内に入っていれば、立ち止まって梁を狙う（移動しない）
+        if (lure && chebyshev(e.x, e.y, lure.x, lure.y) <= e.range) beamTarget = this.topBeamOf(lure);
+        if (beamTarget) {
+          if (e.moveCd > 0) e.moveCd--;
+        } else if (e.moveCd > 0) e.moveCd--;
         else {
           e.moveCd = ENEMY_DEFS[e.type].moveCdMax;
-          if (distToTarget > 0) blockedBy = this.stepRaiderTowardBlocked(e, e.targetBaseX);
+          if (lure) {
+            blockedBy = this.stepTowardBlocked(e, lure.x, lure.y);
+          } else if (distToTarget > 0) blockedBy = this.stepRaiderTowardBlocked(e, e.targetBaseX);
         }
       } else {
         if (this.inBaseRadius(e.x)) continue; // 固定範囲の保護装置（008パターン#3、昼間の通常敵のみ）
@@ -1759,6 +1892,7 @@ export class Game {
       if (blockedBy) {
         if (e.atkCd <= 0) {
           e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          if (lure) this.metrics.lureHits++;
           this.damageObstacle(blockedBy, e.atk);
         }
         continue;
@@ -1774,6 +1908,16 @@ export class Game {
         } else {
           e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
           if (this.player.dashInvulnTicks <= 0) this.player.hp -= e.atk;
+        }
+        continue;
+      }
+
+      // v2新規: 塔に引き付けられたレイダーは、プレイヤーが射程外なら梁を攻撃する
+      if (beamTarget) {
+        if (e.atkCd <= 0) {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          this.metrics.lureHits++;
+          this.damageBeam(beamTarget, e.atk);
         }
         continue;
       }
@@ -2297,7 +2441,9 @@ export class Game {
 
     if (!this.over) {
       if (this.phase === 'day') this.spawnEnemies();
+      const hpBeforeEnemies = this.player.hp;
       this.stepEnemies();
+      if (this.phase === 'night' && !this.inBaseRadius(this.player.x)) this.metrics.nightFieldDamage += Math.max(0, hpBeforeEnemies - this.player.hp);
       this.applyBaseAutoDefense();
       this.applyTurretDefense();
       this.tickTowers();
@@ -2389,6 +2535,7 @@ export class Game {
         returnRiskBanner: this.returnRiskBanner ? { ...this.returnRiskBanner } : null,
         recommendedReturnLane: this.recommendedReturnLane(),
         towerWork: this.towerWork ? { ...this.towerWork } : null,
+        coveringTowers: this.turrets.filter((t) => this.coversPlayer(t)).length,
       },
       map: {
         width: FIELD_WIDTH,
@@ -2423,7 +2570,12 @@ export class Game {
         beamSpan: BEAM_SPAN,
         rangeStep: TOWER_RANGE_STEP,
         patrolHeightMult: PATROL_HEIGHT_MULT,
+        beamHp: BEAM_HP,
+        attractPerHeight: ATTRACT_PER_HEIGHT,
+        lureRaidStep: LURE_RAID_STEP,
+        coverRadiusBase: COVER_RADIUS_BASE,
       },
+      lureRaidCount: this.lureRaidCount(),
       outposts: this.outposts.map((o) => o.x),
       bases: this.allBases().map((b) => ({ ...b })),
       baseForecasts: this.baseForecasts.map((f) => ({ ...f })),
