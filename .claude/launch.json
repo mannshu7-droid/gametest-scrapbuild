@@ -120,6 +120,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/023-building-rootweave", "run", "dev", "--", "--port", "5192"],
       "port": 5192
+    },
+    {
+      "name": "spirelace",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/024-flagship-spirelace", "run", "dev", "--", "--port", "5193"],
+      "port": 5193
     }
   ]
 }
