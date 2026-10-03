@@ -248,16 +248,20 @@ function canAdvance(s: GameState, dir: Dir): boolean {
  * - spireAll: 全基を4まで積むが梁は架けない（weaveと同じ塔の本数・配置で、梁の効果だけを除いた対照）
  * - weave: 全基を4まで積み、隣の塔と梁で編んでから8→12と天井を越えていく（低めの塔を編んで回廊）
  * - weaveLate: weaveと同じだが、梁を架けるのは3夜を越えてから（それまではspireAllと同じ。梁の"いつ"の効果）
+ * - weaveEarly（v2新規、v1バグ#4）: 全基を2段にそろえた時点で梁を架け、以降はweaveと同じ（2→梁→6→梁→10→梁→12）。
+ *   梁を早く架ける（低い網を早く張る）ことの効果をweave/weaveLateと比較する
  */
-type TowerPlan = 'spire' | 'spireRisky' | 'spireAll' | 'weave' | 'weaveLate';
+type TowerPlan = 'spire' | 'spireRisky' | 'spireAll' | 'weave' | 'weaveLate' | 'weaveEarly';
 type Strategy = 'cautious' | 'pusher' | 'p01' | 'p02' | 'planner' | 'blind' | 'scatter' | 'linker' | 'smith' | 'wall' | 'mason' | 'ranger' | 'p01n' | 'patroller' | 'bare' | TowerPlan;
-const ALL_STRATEGIES: Strategy[] = ['cautious', 'pusher', 'p01', 'p02', 'planner', 'blind', 'scatter', 'linker', 'smith', 'wall', 'mason', 'ranger', 'p01n', 'patroller', 'bare', 'spire', 'spireRisky', 'spireAll', 'weave', 'weaveLate'];
-const TOWER_PLANS: Strategy[] = ['spire', 'spireRisky', 'spireAll', 'weave', 'weaveLate'];
+const ALL_STRATEGIES: Strategy[] = ['cautious', 'pusher', 'p01', 'p02', 'planner', 'blind', 'scatter', 'linker', 'smith', 'wall', 'mason', 'ranger', 'p01n', 'patroller', 'bare', 'spire', 'spireRisky', 'spireAll', 'weave', 'weaveLate', 'weaveEarly'];
+const TOWER_PLANS: Strategy[] = ['spire', 'spireRisky', 'spireAll', 'weave', 'weaveLate', 'weaveEarly'];
 function isTowerPlan(strategy: Strategy): strategy is TowerPlan {
   return TOWER_PLANS.includes(strategy);
 }
 /** 塔作業を始める資金の余力（作業費用の何倍の所持金があれば始めるか）。wallのタレット設置余力と同じ1.3 */
 const TOWER_BUDGET_MULT = 1.3;
+/** weaveEarlyが最初の梁を架ける高さ */
+const WEAVE_EARLY_FIRST = 2;
 /** weaveLateが梁を架け始める夜数 */
 const WEAVE_LATE_NIGHTS = 3;
 /** 塔戦略の行動パラメータはwallと同一にする（比較で塔の方針だけを変えるため） */
@@ -283,18 +287,18 @@ const DRIFT_CAP = 80;
 function isP01(strategy: Strategy): boolean {
   return strategy === 'p01' || strategy === 'p01n';
 }
-const TOWER_HP = { spire: WALL_LIKE.hp, spireRisky: WALL_LIKE.hp, spireAll: WALL_LIKE.hp, weave: WALL_LIKE.hp, weaveLate: WALL_LIKE.hp };
+const TOWER_HP = { spire: WALL_LIKE.hp, spireRisky: WALL_LIKE.hp, spireAll: WALL_LIKE.hp, weave: WALL_LIKE.hp, weaveLate: WALL_LIKE.hp, weaveEarly: WALL_LIKE.hp };
 const HP_RETREAT_THRESHOLD: Record<Strategy, number> = { cautious: 0.3, pusher: 0.25, p01: 0.15, p02: 0.45, planner: 0.25, blind: 0.25, scatter: 0.25, linker: 0.25, smith: 0.25, wall: 0.3, mason: 0.3, ranger: 0.3, p01n: 0.35, patroller: 0.3, bare: 0.25, ...TOWER_HP };
 /** 交戦域（隣接超の敵をどこまで追って戦うか）。cautious/pusherは従来のswitch式を維持し、p01/p02はレビュー記載値を使う */
-const ENGAGE_RANGE: Record<Strategy, number> = { cautious: 2, pusher: 5, p01: 6, p02: 2, planner: 5, blind: 5, scatter: 5, linker: 5, smith: 5, wall: 2, mason: 2, ranger: 2, p01n: 6, patroller: 2, bare: 5, spire: 2, spireRisky: 2, spireAll: 2, weave: 2, weaveLate: 2 };
+const ENGAGE_RANGE: Record<Strategy, number> = { cautious: 2, pusher: 5, p01: 6, p02: 2, planner: 5, blind: 5, scatter: 5, linker: 5, smith: 5, wall: 2, mason: 2, ranger: 2, p01n: 6, patroller: 2, bare: 5, spire: 2, spireRisky: 2, spireAll: 2, weave: 2, weaveLate: 2, weaveEarly: 2 };
 /** 前線拠点の建設余力（購入コストの何倍の所持金があれば建てるか） */
-const OUTPOST_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.6, pusher: 1.2, p01: 1.2, p02: 1.6, planner: 1.2, blind: 1.2, scatter: 1.2, linker: 1.2, smith: 1.2, wall: 1.6, mason: 1.6, ranger: 1.6, p01n: 1.2, patroller: 1.6, bare: 1.2, spire: 1.6, spireRisky: 1.6, spireAll: 1.6, weave: 1.6, weaveLate: 1.6 };
+const OUTPOST_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.6, pusher: 1.2, p01: 1.2, p02: 1.6, planner: 1.2, blind: 1.2, scatter: 1.2, linker: 1.2, smith: 1.2, wall: 1.6, mason: 1.6, ranger: 1.6, p01n: 1.2, patroller: 1.6, bare: 1.2, spire: 1.6, spireRisky: 1.6, spireAll: 1.6, weave: 1.6, weaveLate: 1.6, weaveEarly: 1.6 };
 // 016新規: 拠点防衛タレットの設置余力。防衛志向のcautious/p02（あき型・慎重寄り）は低めの
 // マージンで早めに投資し、攻勢志向のpusher/p01（野望型・効率重視）は高めのマージンで
 // ドリル・攻撃力等の前進投資を優先してから余剰資金で投資する非対称な優先度を設定する
 // 022新規: patrollerはmasonと同じ設置余力（クラスタ配置＋鑑定の投資先そのものは同一で、
 // 帰還時のレーン追従の有無だけを比較する）。bareはタレットを一切建てないため値自体は使われない
-const TURRET_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.3, pusher: 1.8, p01: 1.8, p02: 1.3, planner: 1.8, blind: 1.8, scatter: 1.8, linker: 1.8, smith: 1.8, wall: 1.3, mason: 1.3, ranger: 1.3, p01n: 1.8, patroller: 1.3, bare: 1.8, spire: 1.3, spireRisky: 1.3, spireAll: 1.3, weave: 1.3, weaveLate: 1.3 };
+const TURRET_BUDGET_MULT: Record<Strategy, number> = { cautious: 1.3, pusher: 1.8, p01: 1.8, p02: 1.3, planner: 1.8, blind: 1.8, scatter: 1.8, linker: 1.8, smith: 1.8, wall: 1.3, mason: 1.3, ranger: 1.3, p01n: 1.8, patroller: 1.3, bare: 1.8, spire: 1.3, spireRisky: 1.3, spireAll: 1.3, weave: 1.3, weaveLate: 1.3, weaveEarly: 1.3 };
 
 function clampLane(y: number): number {
   return Math.max(0, Math.min(LANE_COUNT - 1, y));
@@ -570,7 +574,8 @@ function nextTowerJob(s: GameState, plan: TowerPlan, base: { x: number; radius: 
   // 全基を「最高の梁＋自由長上限」まで均等に積む（低い塔から）
   const sorted = [...towers].sort((a, b) => a.height - b.height || a.id - b.id);
   for (const t of sorted) {
-    const ceiling = Math.min(maxH, (t.topBeamLevel ?? 0) + limit);
+    const top = t.topBeamLevel ?? 0;
+    const ceiling = plan === 'weaveEarly' && top === 0 ? WEAVE_EARLY_FIRST : Math.min(maxH, top + limit);
     const job = raiseIf(t, plan === 'spireAll' ? limit : ceiling);
     if (job) return job;
     if (t.height < (plan === 'spireAll' ? limit : ceiling)) return null; // 資金待ち（他の塔を先に積まない）
@@ -873,6 +878,9 @@ interface RunResult {
   linkedPlacements: number;
   linkSavedDamage: number;
   loseReason: 'playerHp' | 'homeDestroyed' | null;
+  /** 024 v2新規: 死亡時の最寄り拠点からの距離（-1=死亡なし）と、死亡時にパトロール圏内にいたか */
+  deathBaseDist: number;
+  deathInPatrol: boolean;
   /** 024新規: 塔・梁の指標 */
   raiseLevels: number;
   beamsBuilt: number;
@@ -885,6 +893,18 @@ interface RunResult {
   maxTowerHeight: number;
   tallShots: number;
   wovenCorridorTicks: number;
+  /** v2新規: 援護射撃・誘引・塔の喪失・到達時刻 */
+  coverShots: number;
+  coverKills: number;
+  lureHits: number;
+  beamsLost: number;
+  luredRaiders: number;
+  nightFieldDamage: number;
+  towersLost: number;
+  heightLostToRaids: number;
+  tickToH4: number;
+  tickToH8: number;
+  tickToH12: number;
   score: number;
 }
 
@@ -896,6 +916,8 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
   let deathPhase: 'day' | 'night' | null = null;
   let deathAtBase = false;
   let deathByRaider = false;
+  let deathBaseDist = -1;
+  let deathInPatrol = false;
   while (!game.over && ticks < maxTicks) {
     const before = game.getState();
     game.step(bot.decide(before));
@@ -905,6 +927,8 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
       deathAtBase = inBaseRadius(before);
       const near = (before.enemies ?? []).filter((e: { x: number; y: number }) => Math.max(Math.abs(e.x - before.player.x), Math.abs(e.y - before.player.y)) <= 3);
       deathByRaider = near.some((e: { isRaider?: boolean }) => e.isRaider);
+      deathBaseDist = Math.min(...before.bases.map((b) => Math.abs(b.x - before.player.x)));
+      deathInPatrol = before.player.inPatrolCorridor;
     }
   }
   const s = game.getState();
@@ -912,6 +936,8 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     deathPhase,
     deathAtBase,
     deathByRaider,
+    deathBaseDist,
+    deathInPatrol,
     deathPhaseCore: s.metrics.deathPhase,
     returnRiskEscalations: s.metrics.returnRiskEscalations,
     patrolFuelSavedTicks: s.metrics.patrolFuelSavedTicks,
@@ -974,6 +1000,17 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     maxTowerHeight: s.metrics.maxTowerHeight,
     tallShots: s.metrics.tallShots,
     wovenCorridorTicks: s.metrics.wovenCorridorTicks,
+    coverShots: s.metrics.coverShots,
+    coverKills: s.metrics.coverKills,
+    lureHits: s.metrics.lureHits,
+    beamsLost: s.metrics.beamsLost,
+    luredRaiders: s.metrics.luredRaiders,
+    nightFieldDamage: s.metrics.nightFieldDamage,
+    towersLost: s.metrics.towersLost,
+    heightLostToRaids: s.metrics.heightLostToRaids,
+    tickToH4: s.metrics.tickToH4,
+    tickToH8: s.metrics.tickToH8,
+    tickToH12: s.metrics.tickToH12,
     score: s.metrics.score,
   };
 }
@@ -1018,7 +1055,14 @@ for (const strategy of strategies) {
   console.log(
     `# ${strategy} tower: avgRaiseLevels=${avg((r) => r.raiseLevels)} avgMaxTowerHeight=${avg((r) => r.maxTowerHeight)} avgBeams=${avg((r) => r.beamsBuilt)} avgFirstBeamTick=${avg((r) => (r.firstBeamTick < 0 ? 0 : r.firstBeamTick))} beamedRuns=${results.filter((r) => r.beamsBuilt > 0).length} avgTowerWorkTicks=${avg((r) => r.towerWorkTicks)} avgCollapses=${avg((r) => r.towerCollapses)} avgCascade=${avg((r) => r.cascadeCollapses)} avgSegmentsLost=${avg((r) => r.segmentsLost)} avgFallDamage=${avg((r) => r.fallDamage)} avgTallShots=${avg((r) => r.tallShots)} avgWovenTicks=${avg((r) => r.wovenCorridorTicks)}`,
     );
-    console.log(
+  const reach = (f: (r: RunResult) => number) => {
+    const hit = results.filter((r) => f(r) >= 0);
+    return hit.length === 0 ? '-' : `${(hit.reduce((a, r) => a + f(r), 0) / hit.length).toFixed(0)}(${hit.length})`;
+  };
+  console.log(
+    `# ${strategy} v2: avgCoverShots=${avg((r) => r.coverShots)} avgCoverKills=${avg((r) => r.coverKills)} avgLureHits=${avg((r) => r.lureHits)} avgBeamsLost=${avg((r) => r.beamsLost)} avgLuredRaiders=${avg((r) => r.luredRaiders)} avgNightFieldDamage=${avg((r) => r.nightFieldDamage)} avgTowersLost=${avg((r) => r.towersLost)} avgHeightLost=${avg((r) => r.heightLostToRaids)} tickToH4=${reach((r) => r.tickToH4)} tickToH8=${reach((r) => r.tickToH8)} tickToH12=${reach((r) => r.tickToH12)} deadSeeds=[${results.filter((r) => r.over && !r.won).map((r) => r.seed).join(',')}]`,
+  );
+  console.log(
     `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDistance=${avg((r) => r.maxDistance)} avgOreMined=${avg((r) => r.oreMined)} avgKills=${avg((r) => r.kills)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgOutposts=${avg((r) => r.outpostsBuilt)} avgBarricadesBuilt=${avg((r) => r.barricadesBuilt)} avgTurretsBuilt=${avg((r) => r.turretsBuilt)} avgTurretsLost=${avg((r) => r.turretsLost)} avgTurretKills=${avg((r) => r.turretKills)} avgTurretDmg=${avg((r) => r.turretDamageDealt)} shieldedShotRatio=${(results.reduce((a, r) => a + r.turretShieldedShots, 0) / Math.max(1, results.reduce((a, r) => a + r.turretShots, 0))).toFixed(3)} turretLossRate=${(results.reduce((a, r) => a + r.turretsLost, 0) / Math.max(1, results.reduce((a, r) => a + r.turretsBuilt, 0))).toFixed(3)} avgTrips=${avg((r) => r.tripsToHome)} avgNightsSurvived=${avg((r) => r.nightsSurvived)} avgOutpostsLost=${avg((r) => r.outpostsLost)} avgRaidersKilled=${avg((r) => r.raidersKilled)} avgBaseDamageTaken=${avg((r) => r.baseDamageTaken)} avgBasedefenseLv=${avg((r) => r.basedefenseLv)} avgScannerLv=${avg((r) => r.scannerLv)} avgChargeLv=${avg((r) => r.chargeLv)} avgResonanceTriggers=${avg((r) => r.resonanceTriggers)} avgResonanceBonusOre=${avg((r) => r.resonanceBonusOre)} avgAppraisalLv=${avg((r) => r.appraisalLv)} avgObstaclesBuilt=${avg((r) => r.obstaclesBuilt)} avgQuality=${(results.reduce((a, r) => a + r.avgQuality, 0) / results.length).toFixed(3)} avgTurretQuality=${(results.filter((r) => r.turretsBuilt > 0).reduce((a, r) => a + r.avgTurretQuality, 0) / Math.max(1, results.filter((r) => r.turretsBuilt > 0).length)).toFixed(3)} avgInformedPlacements=${avg((r) => r.informedPlacements)} avgLinkedPlacements=${avg((r) => r.linkedPlacements)} avgLinkSavedDamage=${avg((r) => r.linkSavedDamage)} avgBarricadesLost=${avg((r) => r.barricadesLost)} avgCombatRiskEsc=${avg((r) => r.combatRiskEscalations)} avgMiningRiskEsc=${avg((r) => r.miningRiskEscalations)} avgRaidRiskEsc=${avg((r) => r.raidRiskEscalations)} avgForecastRiskEsc=${avg((r) => r.forecastRiskEscalations)} avgReturnRiskEsc=${avg((r) => r.returnRiskEscalations)} avgPatrolFuelSavedTicks=${avg((r) => r.patrolFuelSavedTicks)} deaths=${results.filter((r) => r.over && !r.won).length}/${results.length}(hp:${hpDeaths}/home:${homeDeaths}) deathPhase(nightField:${phaseCount('night-field')}/daySiege:${phaseCount('day-siege')}/inBase:${phaseCount('in-base')} of ${deadResults.length}) wins=${results.filter((r) => r.won).length}/${results.length}`,
   );
 }

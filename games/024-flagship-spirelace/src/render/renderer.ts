@@ -3,7 +3,7 @@ import { TILE, type GameState } from '../core/types';
 
 const TILE_PX = 28;
 const VIEW_W = 20;
-const HUD_PX = 290;
+const HUD_PX = 306;
 const PHASE_BAR_PX = 8;
 
 const TILE_COLOR: Record<number, string> = {
@@ -204,15 +204,17 @@ export class Renderer {
       const ay = fieldTop + a.y * TILE_PX + TILE_PX / 2;
       const cx = (c.x - camLeft) * TILE_PX + TILE_PX / 2;
       const cy = fieldTop + c.y * TILE_PX + TILE_PX / 2;
-      ctx.strokeStyle = '#e67e22';
-      ctx.lineWidth = 3;
+      // v2: 梁はレイダーに狙われる弱点。耐久が減るほど赤く、細くなる
+      const ratio = Math.max(0, b.hp / b.maxHp);
+      ctx.strokeStyle = ratio > 0.6 ? '#e67e22' : ratio > 0.3 ? '#e74c3c' : '#ff2d2d';
+      ctx.lineWidth = 1 + 2 * ratio;
       ctx.beginPath();
       ctx.moveTo(ax, ay);
       ctx.lineTo(cx, cy);
       ctx.stroke();
       ctx.fillStyle = '#ffd59a';
       ctx.font = 'bold 10px monospace';
-      ctx.fillText(`梁${b.level}`, (ax + cx) / 2 - 8, (ay + cy) / 2 - 2);
+      ctx.fillText(`梁${b.level}${b.hp < b.maxHp ? ` ${Math.ceil(b.hp)}/${b.maxHp}` : ''}`, (ax + cx) / 2 - 8, (ay + cy) / 2 - 2);
     }
 
     // 敵（夜間レイダーは赤い外枠で通常の前線敵と区別する）
@@ -350,12 +352,19 @@ export class Renderer {
       6,
       hudY + 242,
     );
+    // v2新規: 塔の両面（援護射撃と誘引）を常時表示する。高さは「夜の援護」と「呼び寄せる敵」の両方を増やす
+    ctx.fillStyle = s.player.coveringTowers > 0 ? '#7dffb0' : s.lureRaidCount > 0 ? '#ffb27d' : '#aaa';
+    ctx.fillText(
+      `${s.player.coveringTowers > 0 ? `援護射撃中: 塔${s.player.coveringTowers}基  ` : ''}塔の誘引: ${s.phase === 'night' ? '今夜' : '次の夜'} +${s.lureRaidCount}体（拠点ごとの塔の高さ合計÷${s.towerRules.lureRaidStep}）  夜は高い塔の圏内で援護、敵は梁(耐久${s.towerRules.beamHp})を狙う  落ちた梁${s.metrics.beamsLost}`,
+      6,
+      hudY + 258,
+    );
     ctx.font = '10px monospace';
     ctx.fillStyle = '#fff';
     ctx.fillText(
       '1攻撃 2機動 3耐久 4ドリル 5燃料 6採掘速度 7ランタン 8危険耐性 9積載 0テレポート解禁 Q拠点防衛 Eスキャナ Cチャージ Pタレット設置',
       6,
-      hudY + 258,
+      hudY + 274,
     );
 
     if (s.over) {
