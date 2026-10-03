@@ -282,14 +282,25 @@ const COVER_RADIUS_BASE = 1;
  * 襲いに行く（高い塔ほど遠くの敵を呼ぶ）。塔は修理できないため、高く積んだ投資が夜ごとに削られうる。
  * 梁で編んだ塔が壊されると梁が落ち、相方の塔が連鎖崩落しうる（v1バグ#3: 編むことのリスクが発生しない） */
 const ATTRACT_PER_HEIGHT = 2;
-/** 梁の耐久（v2新規）。引き付けられたレイダーは、塔に梁が架かっていれば射程内から塔本体ではなく最も高い梁を狙う
+/** 梁の耐久（v2新規、v3で20→12: 標準セッションでも梁が落ちる。掃引で12/20を比較）。引き付けられたレイダーは、塔に梁が架かっていれば射程内から塔本体ではなく最も高い梁を狙う
  * （梁は網の弱点）。梁が落ちると両塔の自由長が伸び、超過した塔はその場で折れうる（被弾時と同じ判定） */
-export const BEAM_HP = 20;
+export const BEAM_HP = 12;
 /** 高い塔は遠くから見える（v2新規）: 拠点ごとに「その拠点の塔の高さの合計÷この値（切り捨て）」体だけ、夜の襲撃が増える。
  * 合計で数えるため、1本だけの低い塔（h4）は目立たず、編んだ網（3基×h12=36→+6体）は遠くから敵を呼ぶ。
  * 呼び寄せた敵も倒せば報酬になる（高さは「危険と稼ぎの両方を上げるダイヤル」）。掃引: 最高値で数える案(÷4)と
  * 合計÷4/6/8を40シードで比較し、weaveの夜のフィールド被害がspireAllと同水準になる÷6を採用（v2レビュー参照） */
 const LURE_RAID_STEP = 6;
+// ---- v3 FIX（v2バグ#1〜#3） ----
+/** 見張り台（v3新規、v2バグ#1）: 梁の架かっていない塔（高さ1以上）は、援護射撃を自分のレーンの上下この数のレーンまで広げる。
+ * 梁を架けると援護は回廊（繋がった塔のレーン）に沿う形へ変わり、燃料の軽い回廊を得る代わりに見張りの広さを失う。
+ * spireAll（梁なし多塔）を「夜のフィールドで最も守られる網」にし、weave（拠点が最も守られる網）と性格を分ける */
+const WATCH_LANES = 1;
+/** 孤塔（v3新規、v2バグ#1）: 拠点圏内で高さ1以上の塔が自分1本だけ（梁なし）なら、援護半径をこの値だけ伸ばす。
+ * 1本に絞ると誘引（高さ合計÷6）を呼ばず、作業も短い。spireAllを弱めずspire固有の長所を足す（掃引: +1/+2） */
+const LONE_COVER_RADIUS_BONUS = 1;
+/** 呼び寄せた敵の報酬倍率（v3新規、v2バグ#3）。誘引で増えた襲撃（lured）を倒した時の報酬をこの倍率にする。
+ * 0にすると「呼ぶと損をするだけ」になるので避けた。掃引: 1/0.5/0.25（scoreの順位はほぼ変わらず、稼ぎの膨張だけ抑える） */
+const LURED_REWARD_MULT = 0.5;
 
 /** returnRiskLevel算出時、帰路付近の夜間レイダーを探索するx方向の距離 */
 const RETURN_RISK_SCAN_RANGE = 20;
@@ -1659,6 +1670,7 @@ export class Game {
         range: def.range,
         isRaider: true,
         targetBaseX: target.x,
+        lured: i >= count - lured,
       });
     }
   }
@@ -1696,7 +1708,7 @@ export class Game {
       let bestDist = Infinity;
       // v2新規: 援護射撃。夜、プレイヤーがこの塔の圏内にいれば、プレイヤーに迫る敵（昼の敵も含む）を最優先で撃つ
       if (this.coversPlayer(t)) {
-        const radius = COVER_RADIUS_BASE + this.turretRange(t) - TURRET_RANGE;
+        const radius = COVER_RADIUS_BASE + this.turretRange(t) - TURRET_RANGE + (this.isLoneTower(t) ? LONE_COVER_RADIUS_BONUS : 0);
         let bestToPlayer = Infinity;
         for (const e of this.enemies) {
           if (e.hp <= 0) continue;
@@ -1757,9 +1769,16 @@ export class Game {
     const p = this.player;
     if (Math.abs(p.x - t.x) > this.turretPatrolRange(t)) return false;
     if (p.y === t.y) return true;
-    if (this.topBeamLevel(t) <= 0) return false;
+    if (this.topBeamLevel(t) <= 0) return Math.abs(p.y - t.y) <= WATCH_LANES;
     const [lo, hi] = this.corridorLanes(t);
     return p.y >= lo && p.y <= hi;
+  }
+  /** v3新規: 孤塔か（高さ1以上・梁なしで、同じ拠点圏内に高さ1以上の塔が他に無い）。拠点圏外の塔は孤塔にならない */
+  isLoneTower(t: Turret): boolean {
+    if (t.height <= 0 || this.topBeamLevel(t) > 0) return false;
+    const base = this.allBases().find((b) => Math.abs(t.x - b.x) <= this.radiusFor(b));
+    if (!base) return false;
+    return !this.turrets.some((o) => o !== t && o.height > 0 && Math.abs(o.x - base.x) <= this.radiusFor(base));
   }
   /** v2新規: このレイダーを引き付けている塔（x方向に高さ×ATTRACT_PER_HEIGHT以内で最も高い塔）。夜のみ */
   private attractingTower(e: Enemy): Turret | null {
@@ -1776,7 +1795,7 @@ export class Game {
   private killEnemy(e: Enemy): void {
     this.metrics.kills++;
     if (e.isRaider) this.metrics.raidersKilled++;
-    const reward = ENEMY_DEFS[e.type].value;
+    const reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
     this.player.money += reward;
     this.metrics.moneyEarned += reward;
   }
@@ -2559,6 +2578,7 @@ export class Game {
         range: this.turretRange(t),
         patrolRange: Math.round(this.turretPatrolRange(t) * 10) / 10,
         corridorLanes: this.topBeamLevel(t) > 0 ? this.corridorLanes(t) : ([t.y, t.y] as [number, number]),
+        lone: this.isLoneTower(t),
         raiseCost: this.raiseCostOf(t),
       })),
       beams: this.beams.map((b) => ({ ...b })),
@@ -2574,6 +2594,9 @@ export class Game {
         attractPerHeight: ATTRACT_PER_HEIGHT,
         lureRaidStep: LURE_RAID_STEP,
         coverRadiusBase: COVER_RADIUS_BASE,
+        watchLanes: WATCH_LANES,
+        loneCoverRadiusBonus: LONE_COVER_RADIUS_BONUS,
+        luredRewardMult: LURED_REWARD_MULT,
       },
       lureRaidCount: this.lureRaidCount(),
       outposts: this.outposts.map((o) => o.x),

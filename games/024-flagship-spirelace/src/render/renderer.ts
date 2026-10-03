@@ -341,7 +341,7 @@ export class Renderer {
     // 塔の一覧（024新規）: 高さ・自由長/上限・射程・パトロール圏・回廊。自由長が上限を超えた塔は赤で警告
     const towers = [...s.turrets].sort((a, b) => Math.abs(a.x - s.player.x) - Math.abs(b.x - s.player.x)).slice(0, 4);
     const towerText = towers
-      .map((t) => `#${t.id}(x${t.x},y${t.y}) h${t.height} 自由長${t.freeLength}/${t.slenderLimit} 射程${t.range} 圏${t.patrolRange}${t.topBeamLevel ? ` 梁${t.topBeamLevel}` : ''}`)
+      .map((t) => `#${t.id}(x${t.x},y${t.y}) h${t.height} 自由長${t.freeLength}/${t.slenderLimit} 射程${t.range} 圏${t.patrolRange}${t.topBeamLevel ? ` 梁${t.topBeamLevel}` : t.height > 0 ? (t.lone ? ' 孤塔' : ' 見張り') : ''}`)
       .join('  ');
     ctx.fillStyle = towers.some((t) => (t.overstress ?? 0) > 0) ? '#ff6b6b' : '#9fd3ff';
     ctx.fillText(`塔: ${towerText || '（タレット無し）'}`, 6, hudY + 226);
@@ -355,7 +355,7 @@ export class Renderer {
     // v2新規: 塔の両面（援護射撃と誘引）を常時表示する。高さは「夜の援護」と「呼び寄せる敵」の両方を増やす
     ctx.fillStyle = s.player.coveringTowers > 0 ? '#7dffb0' : s.lureRaidCount > 0 ? '#ffb27d' : '#aaa';
     ctx.fillText(
-      `${s.player.coveringTowers > 0 ? `援護射撃中: 塔${s.player.coveringTowers}基  ` : ''}塔の誘引: ${s.phase === 'night' ? '今夜' : '次の夜'} +${s.lureRaidCount}体（拠点ごとの塔の高さ合計÷${s.towerRules.lureRaidStep}）  夜は高い塔の圏内で援護、敵は梁(耐久${s.towerRules.beamHp})を狙う  落ちた梁${s.metrics.beamsLost}`,
+      `${s.player.coveringTowers > 0 ? `援護射撃中: 塔${s.player.coveringTowers}基  ` : ''}塔の誘引: ${s.phase === 'night' ? '今夜' : '次の夜'} +${s.lureRaidCount}体（拠点ごとの塔の高さ合計÷${s.towerRules.lureRaidStep}）  夜は高い塔の圏内で援護（梁なし=上下${s.towerRules.watchLanes}レーンも見張る）、呼んだ敵の報酬×${s.towerRules.luredRewardMult}、敵は梁(耐久${s.towerRules.beamHp})を狙う  落ちた梁${s.metrics.beamsLost}`,
       6,
       hudY + 258,
     );
