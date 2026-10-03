@@ -1,7 +1,7 @@
 # 仕様書: 024-flagship-spirelace（拠点の塔を梁で編む）
 
 - 作成日: 2026-10-03
-- ステータス: PLAYABLE（v1レビュー済み、判定FIX。reviews/024-flagship-spirelace-v1.md参照）
+- ステータス: COMPLETE（サイクル30総括済み、判定FIX。reviews/024-flagship-spirelace-final.md参照。v1〜v2も判定FIX）
 - 元になったレビュー: [reviews/023-building-rootweave-final.md](../../reviews/023-building-rootweave-final.md)（提案(2)、
   採用すべき部分#1〜#4、捨てる部分#1〜#3、バグ#2・#3）、
   [reviews/022-flagship-hearthline-final.md](../../reviews/022-flagship-hearthline-final.md)（ベース。パトロール圏、
