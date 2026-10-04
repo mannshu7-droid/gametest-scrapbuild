@@ -72,3 +72,15 @@ interface AIP {
 3. `javascript_tool` で `__AIP__.takeControl()` → `reset(seed)` → ペルソナの方針をページ内のJSにして `step()`/`run()` で進める
 4. スクリーンショットで描画を確認する（ペインの表示が小さいときは、canvasの一部を別canvasへ拡大コピーして表示すると読める）
 5. 終わったら `release()`
+
+### 検証ボットをそのままブラウザで動かす（サイクル31・2回目で追加）
+
+ページ内でボットをJSで書き直す代わりに、`headless/simulate.ts` の `Bot` をバンドルして単一HTMLへ埋め込むと、
+ヘッドレスと同じボットが `__AIP__` 越しに動き、結果の完全一致でブラウザ側の決定論も確かめられる。
+simulate.ts のCLI部分は `typeof process !== 'undefined'` で守っておくこと。
+
+1. `node tools/single-html.mjs games/NNN-<名前>`
+2. ゲームのディレクトリで `npx esbuild headless/simulate.ts --bundle --format=iife --global-name=__BOTLIB__ --outfile=dist/bot.js`
+3. `dist/single.html` の `</body>` の直前に `<script>`＋`dist/bot.js`の中身＋`</script>` を足して `dist/single-bot.html` として保存
+4. ページで `const b = new __BOTLIB__.Bot(__BOTLIB__.PERSONAS[0]); let s = __AIP__.reset(seed); while (!s.over) s = __AIP__.step(b.decide(s));`
+

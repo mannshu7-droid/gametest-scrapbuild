@@ -1,4 +1,4 @@
-import { DEPTH, TREMOR_BONUS_FULL_AT, TREMOR_CAP, WIDTH, caveInChanceOver } from '../core/game';
+import { DEPTH, SCAFFOLD_RELIEF, TREMOR_BONUS_FULL_AT, TREMOR_CAP, WIDTH, caveInChanceOver } from '../core/game';
 import { TILE, type GameState } from '../core/types';
 
 const TILE_PX = 32;
@@ -103,6 +103,16 @@ export class Renderer {
     ctx.font = '10px monospace';
     ctx.fillText(`${p.cargoUnits}/${p.maxCapacity}`, Math.min(px + TILE_PX + 2, this.shaftW - 30), py + 12);
 
+    // 足場（踊り場）: 床の上に板を渡した絵（主人公の足元に見えるよう、主人公の後に描く）
+    for (const sc of s.map.scaffolds) {
+      const row = sc.y - camTop;
+      if (row < 0 || row >= VIEW_H) continue;
+      ctx.fillStyle = '#b8863b';
+      ctx.fillRect(sc.x * TILE_PX + 1, row * TILE_PX + TILE_PX - 7, TILE_PX - 2, 5);
+      ctx.fillRect(sc.x * TILE_PX + 3, row * TILE_PX + 4, 3, TILE_PX - 8);
+      ctx.fillRect(sc.x * TILE_PX + TILE_PX - 6, row * TILE_PX + 4, 3, TILE_PX - 8);
+    }
+
     if (sinceCaveIn < 25 && s.lastCaveIn) {
       const c = s.lastCaveIn;
       ctx.fillStyle = `rgba(200,40,40,${0.35 * (1 - sinceCaveIn / 25)})`;
@@ -129,8 +139,9 @@ export class Renderer {
       hudY + 18,
     );
     const baskets = '■'.repeat(p.basketsLeft) + '□'.repeat(Math.max(0, p.basketsMax - p.basketsLeft));
+    const scaf = s.map.scaffolds.length + p.scaffoldsHeld > 0 ? `  足場 ${s.map.scaffolds.map((sc) => sc.y).join('/') || '-'}${p.scaffoldsHeld > 0 ? `（手持ち${p.scaffoldsHeld}・Pで据える）` : ''}` : '';
     ctx.fillText(
-      `送り籠 ${p.basketsMax > 0 ? baskets : 'なし'}  救助 ${s.metrics.rescues}回  ${p.hasCore ? '核石を持っている！地上へ！' : '目標: 深さ120の核石を持ち帰る'}`,
+      `送り籠 ${p.basketsMax > 0 ? baskets : 'なし'}${scaf}  救助 ${s.metrics.rescues}回  ${p.hasCore ? '核石を持って地上へ！' : '目標: 深さ120の核石'}`,
       6,
       hudY + 36,
     );
@@ -160,6 +171,9 @@ export class Renderer {
     ctx.fillStyle = '#ddd';
     ctx.font = 'bold 12px monospace';
     ctx.fillText('揺れ', gx, 16);
+    ctx.font = '9px monospace';
+    ctx.fillStyle = '#999';
+    ctx.fillText('割れ目が開き良い面が出る', gx + 30, 15);
     // 背景の帯: 色の段階＋ボーナス上限の線
     for (let t = 0; t < TREMOR_CAP; t += 5) {
       ctx.fillStyle = tremorColor(t);
@@ -180,7 +194,7 @@ export class Renderer {
       const chance = Math.round(caveInChanceOver(t, 100) * 100);
       const bonus = Math.round((Math.min(t, TREMOR_BONUS_FULL_AT) / TREMOR_BONUS_FULL_AT) * 60);
       ctx.fillStyle = '#999';
-      ctx.fillText(`${t} +${bonus}% 落${chance}%`, gx + gw + 6, yy + 3);
+      ctx.fillText(`${t} +${bonus}% 100tで${chance}%`, gx + gw + 6, yy + 3);
     }
     // 帰着時の見積もり（今の揺れ＋帰り道の揺れ）をゴーストの線で
     if (p.estReturnTremor !== null) {
@@ -196,6 +210,19 @@ export class Renderer {
       ctx.fillStyle = '#fff';
       ctx.fillText('帰着', gx - 2, yy - 3);
     }
+    // 足場が帰り道より近いなら、足場に着いたときの見積もりも黄色の線で（そこで休めば下がる）
+    if (p.estScaffoldTremor !== null && !p.onScaffold && (p.estReturnTremor === null || p.estScaffoldTremor < p.estReturnTremor - 0.5)) {
+      const yy2 = toY(p.tremor + p.estScaffoldTremor);
+      ctx.strokeStyle = '#d9a441';
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(gx - 6, yy2);
+      ctx.lineTo(gx + gw + 2, yy2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#d9a441';
+      ctx.fillText('足場', gx - 2, yy2 + 11);
+    }
     // 今の値の読み
     const yy = toY(p.tremor);
     ctx.fillStyle = '#fff';
@@ -203,7 +230,12 @@ export class Renderer {
     ctx.fillText(`${Math.round(p.tremor)}`, gx + 2, Math.max(gy + 10, yy - 3));
     ctx.font = '11px monospace';
     ctx.fillText(`売値+${Math.round(p.tremorBonus * 100)}%`, gx, gy + gh + 14);
-    ctx.fillText(`落盤${Math.round(p.caveInChance100 * 100)}%/100t`, gx, gy + gh + 26);
+    if (p.onScaffold && !p.digging) {
+      ctx.fillStyle = '#d9a441';
+      ctx.fillText(`足場で休憩 揺れ-${SCAFFOLD_RELIEF}/t`, gx, gy + gh + 26);
+    } else {
+      ctx.fillText(`落盤 100tで${Math.round(p.caveInChance100 * 100)}%`, gx, gy + gh + 26);
+    }
   }
 
   private drawShop(s: GameState): void {
@@ -213,7 +245,7 @@ export class Renderer {
     ctx.fillRect(0, TILE_PX, this.shaftW, s.shop.length * 34 + 30);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 13px monospace';
-    ctx.fillText('地上（1〜6で購入／↓で潜る）', 8, TILE_PX + 18);
+    ctx.fillText('地上（1〜7で購入／↓で潜る）', 8, TILE_PX + 18);
     ctx.font = '11px monospace';
     s.shop.forEach((item, i) => {
       const y = TILE_PX + 28 + i * 34;
