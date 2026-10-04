@@ -126,6 +126,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "games/024-flagship-spirelace", "run", "dev", "--", "--port", "5193"],
       "port": 5193
+    },
+    {
+      "name": "tremorvein",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "games/025-mining-tremorvein", "run", "dev", "--", "--port", "5194"],
+      "port": 5194
     }
   ]
 }

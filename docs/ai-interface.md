@@ -59,3 +59,16 @@ interface AIP {
 3. ループ: `getState()` → 意思決定 → `step(action)` または `run(actions)`
 4. 適宜 `preview_screenshot` で見た目も確認（描画バグの検出）
 5. 終了後 `release()` して人間が触れる状態に戻す
+
+## 無人実行（スケジュールタスク）でのブラウザプレイ手順
+
+無人のセッションでは `preview_start`（開発サーバ起動）が「承認する人がいない」ため拒否される（012final〜024finalで49回連続）。
+代わりに、ビルド済みのJSをHTMLへ埋め込んだ単一ファイルを作ると、ブラウザペインで `window.__AIP__` を操作できる
+（サイクル31・1回目、025-mining-tremorveinで確認）。
+
+1. `node tools/single-html.mjs games/NNN-<名前>` → `games/NNN-<名前>/dist/single.html`（`dist/` は gitignore 対象）
+   - プロジェクトの外（スクラッチパッド等）に置くと静的スナップショット扱いでスクリプトが動かない。必ずプロジェクト内に置く
+2. ブラウザペインで `file:///…/dist/single.html` を開く（`navigate`）。開き直すとタブIDが変わるので `tabs_context` で確認する
+3. `javascript_tool` で `__AIP__.takeControl()` → `reset(seed)` → ペルソナの方針をページ内のJSにして `step()`/`run()` で進める
+4. スクリーンショットで描画を確認する（ペインの表示が小さいときは、canvasの一部を別canvasへ拡大コピーして表示すると読める）
+5. 終わったら `release()`
