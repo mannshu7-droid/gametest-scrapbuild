@@ -27,6 +27,8 @@ import {
  *   v0.2.0: 籠を下ろす振動で揺れ+10（v1で籠が代償なしに強すぎた）
  * - v0.2.0: 足場（scaffold）を買って地下に据えると、その上で掘らずにいる間は揺れが毎tick下がる
  *   （途中の回収点。休むほど安全になるが、売値ボーナスも下がり、時間も使う）。強化を買い切った後のお金の行き先
+ * - v0.3.0: 核石を抱えている間は揺れのたまる速さが3倍（核石が岩盤を鳴らす）。最終目標の帰り道を揺れのダイヤルの
+ *   山場にし、核石に届く閾値で潜る攻める遊び方にも「深い足場で一度下ろす」意味を作る（v2重大#1・#2）
  */
 
 export const WIDTH = 9;
@@ -50,6 +52,8 @@ export const BASKET_TREMOR = 10;
 export const SCAFFOLD_RELIEF = 1.5;
 /** 足場を据えられる最も浅い深さ */
 export const SCAFFOLD_MIN_Y = 10;
+/** 核石を抱えている間の揺れのたまる速さの倍率 */
+export const CORE_TREMOR_MULT = 3;
 export const RESCUE_FEE_RATE = 0.15;
 export const BASE_HP = 60;
 export const HP_PER_LEVEL = 20;
@@ -193,6 +197,9 @@ function emptyMetrics(): Metrics {
     restTicks: 0,
     restRelief: 0,
     peakTremorBanked: 0,
+    coreCarryTicks: 0,
+    coreCaveIns: 0,
+    coreLost: 0,
     clearedTick: null,
     score: 0,
   };
@@ -282,6 +289,10 @@ export class Game {
   private get maxCapacity(): number {
     return BASE_CAPACITY + CAPACITY_PER_LEVEL * this.levels.capacity;
   }
+  /** 深さyで今1tickにたまる揺れ（支保Lv・核石の倍率込み、掘削の倍率は含まない） */
+  private rateAt(y: number): number {
+    return tremorRate(y, this.levels.brace) * (this.hasCore ? CORE_TREMOR_MULT : 1);
+  }
   private get cargoValue(): number {
     return this.cargo.reduce((a, c) => a + c.value, 0);
   }
@@ -327,9 +338,10 @@ export class Game {
           this.metrics.restRelief += before - this.tremor;
         }
       } else {
-        const rate = tremorRate(this.y, this.levels.brace) * (this.digging ? DIG_TREMOR_MULT : 1);
+        const rate = this.rateAt(this.y) * (this.digging ? DIG_TREMOR_MULT : 1);
         this.tremor = Math.min(TREMOR_CAP, this.tremor + rate);
       }
+      if (this.hasCore) this.metrics.coreCarryTicks++;
       // 乱数は地下にいる毎tick必ず1回引く（揺れに関わらず消費量を一定にして決定論の見通しを良くする）
       const roll = this.rng();
       if (roll < caveInProb(this.tremor)) this.caveIn();
@@ -487,6 +499,7 @@ export class Game {
     this.tremor = Math.max(0, this.tremor - CAVEIN_RELIEF);
     this.digging = null;
     this.metrics.caveIns++;
+    if (this.hasCore) this.metrics.coreCaveIns++;
     this.metrics.caveInDamage += damage;
     this.metrics.spilledValue += spilledValue;
     let rescued = false;
@@ -506,6 +519,7 @@ export class Game {
     this.metrics.rescueFeesPaid += fee;
     this.cargo = [];
     if (this.hasCore) {
+      this.metrics.coreLost++;
       this.hasCore = false;
       this.tiles[CORE_Y * WIDTH + CORE_X] = TILE.CORE; // 核石は元の場所へ落ちていく
     }
@@ -578,7 +592,7 @@ export class Game {
       // 1歩ごとに「今いるマスの深さ」の速さで揺れがたまる
       const ticks = returnTicksAlong(this.x, this.y, path, this.levels.winch, stop);
       let sum = 0;
-      for (const y of ticks) sum += tremorRate(y, this.levels.brace);
+      for (const y of ticks) sum += this.rateAt(y);
       estReturnTremor = Math.round(sum * 10) / 10;
       estReturnTicks = ticks.length;
     }
@@ -588,7 +602,7 @@ export class Game {
     if (spath) {
       const ticks = returnTicksAlong(this.x, this.y, spath, this.levels.winch, stop);
       let sum = 0;
-      for (const y of ticks) sum += tremorRate(y, this.levels.brace);
+      for (const y of ticks) sum += this.rateAt(y);
       estScaffoldTremor = Math.round(sum * 10) / 10;
       nearestScaffoldY = spath.length > 0 ? spath[spath.length - 1].y : this.y;
     }
@@ -619,7 +633,7 @@ export class Game {
         hasCore: this.hasCore,
         digging: this.digging ? { ...this.digging } : null,
         tremor: r2(this.tremor),
-        tremorRate: r2(tremorRate(this.y, this.levels.brace)),
+        tremorRate: r2(this.rateAt(this.y)),
         tremorBonus: r2(tremorBonus(this.tremor)),
         caveInChance100: r2(caveInChanceOver(this.tremor, 100)),
         caveInDamage: this.y > 0 ? caveInDamageAt(this.y) : 0,

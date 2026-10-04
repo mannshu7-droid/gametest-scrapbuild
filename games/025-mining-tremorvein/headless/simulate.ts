@@ -16,7 +16,7 @@
  * 地上ではなく足場へ戻って休み、揺れが下がったら掘りに戻る。--noScaffold で足場を買わない対照群になる
  * --seeds は 1,2,3 と 1..40 の両方の書き方を受け付ける
  */
-import { Game, WIDTH, DEPTH, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost } from '../src/core/game';
+import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost } from '../src/core/game';
 import { TILE, type Action, type Dir, type GameState, type UpgradeId } from '../src/core/types';
 
 interface BotConfig {
@@ -158,6 +158,8 @@ export class Bot {
         // 帰り道は地上か、鉱石より浅い足場（そこで休めば揺れが下がる）の近い方
         let ret = approxReturnTremor(cy, brace, winch);
         for (const sc of s.map.scaffolds) if (sc.y <= cy) ret = Math.min(ret, approxReturnTremor(cy, brace, winch, sc.y));
+        // v0.3.0: 核石を抱えた帰り道は揺れがCORE_TREMOR_MULT倍でたまる
+        if (t === TILE.CORE) ret *= CORE_TREMOR_MULT;
         if (projT + ret < this.tRet) {
           const value = ORE_VALUE[t] * (1 + tremorBonus(projT));
           const score = value / (d + 4 + (cy - p.y > 0 ? 0 : 0));
@@ -430,6 +432,11 @@ export interface RunResult {
   peakTremorBanked: number;
   /** クリアした時点の所持金（使い道が尽きたかの指標） */
   moneyLeft: number;
+  /** 核石の報酬（400）を除いた余り＝核石を取る前に使い道が無かったお金 */
+  spareBeforeCore: number;
+  coreCarryTicks: number;
+  coreCaveIns: number;
+  coreLost: number;
   finalTRet: number;
   raises: number;
   /** 地上で行き先が無くなり永久に待つ状態に入ったtick（無ければnull） */
@@ -480,6 +487,10 @@ export function runOne(seed: number, cfg: BotConfig, maxTicks: number): RunResul
     restRelief: m.restRelief,
     restCount: bot.restCount,
     moneyLeft: s.player.money,
+    spareBeforeCore: s.player.money - (s.over ? ORE_VALUE[TILE.CORE] : 0),
+    coreCarryTicks: m.coreCarryTicks,
+    coreCaveIns: m.coreCaveIns,
+    coreLost: m.coreLost,
     peakTremorBanked: m.peakTremorBanked,
     finalTRet: bot.tRet,
     raises: bot.raises,
@@ -503,7 +514,8 @@ export function summarize(label: string, results: RunResult[]): string {
     `avgPeakTremor=${avg((r) => r.peakTremorBanked)} avgFinalTRet=${avg((r) => r.finalTRet)} seedsRaised=${results.filter((r) => r.raises > 0).length}/${results.length} ` +
     `avgBasketTremor=${avg((r) => r.basketTremor)} avgScaffolds=${avg((r) => r.scaffoldsPlaced)} avgScaffoldSpend=${avg((r) => r.scaffoldSpend)} ` +
     `seedsRested=${results.filter((r) => r.restCount > 0).length}/${results.length} avgRests=${avg((r) => r.restCount)} avgRestTicks=${avg((r) => r.restTicks)} ` +
-    `avgRestRelief=${avg((r) => r.restRelief)} avgMoneyLeft=${avg((r) => r.moneyLeft)}`
+    `avgRestRelief=${avg((r) => r.restRelief)} avgMoneyLeft=${avg((r) => r.moneyLeft)} avgSpareBeforeCore=${avg((r) => r.spareBeforeCore)} ` +
+    `avgCoreCarry=${avg((r) => r.coreCarryTicks)} avgCoreCaveIns=${avg((r) => r.coreCaveIns)} seedsCoreLost=${results.filter((r) => r.coreLost > 0).length}/${results.length}`
   );
 }
 
