@@ -86,6 +86,10 @@ export interface Metrics {
   restRelief: number;
   /** 持ち帰った（または送った）揺れの最大値。どこまで粘ったかの指標 */
   peakTremorBanked: number;
+  /** v0.3.0: 核石を抱えて過ごしたtick・その間の落盤・核石を落とした（救助で失った）回数 */
+  coreCarryTicks: number;
+  coreCaveIns: number;
+  coreLost: number;
   clearedTick: number | null;
   score: number;
 }
@@ -109,7 +113,7 @@ export interface GameState {
     digging: Digging | null;
     /** 揺れ（0〜150）。地下にいる間たまり続け、地上で0に戻る。高いほど掘った鉱石の売値が上がり、落盤しやすい */
     tremor: number;
-    /** 今の深さで1tickあたりにたまる揺れ（支保Lv込み） */
+    /** 今の深さで1tickあたりにたまる揺れ（支保Lv・核石を抱えているときの×3込み） */
     tremorRate: number;
     /** 今の揺れで掘った鉱石に付く売値ボーナス（0.6=+60%） */
     tremorBonus: number;
@@ -117,7 +121,7 @@ export interface GameState {
     caveInChance100: number;
     /** 今この場で落盤したときのダメージ */
     caveInDamage: number;
-    /** 掘った床を通って地上まで戻る間に追加でたまる揺れの見積もり（地上ならnull） */
+    /** 掘った床を通って地上まで戻る間に追加でたまる揺れの見積もり（核石を抱えていれば×3込み。地上ならnull） */
     estReturnTremor: number | null;
     /** 帰り道の見積もりtick数 */
     estReturnTicks: number | null;

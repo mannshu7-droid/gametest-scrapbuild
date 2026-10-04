@@ -1,4 +1,4 @@
-import { DEPTH, SCAFFOLD_RELIEF, TREMOR_BONUS_FULL_AT, TREMOR_CAP, WIDTH, caveInChanceOver } from '../core/game';
+import { CORE_TREMOR_MULT, DEPTH, SCAFFOLD_RELIEF, TREMOR_BONUS_FULL_AT, TREMOR_CAP, WIDTH, caveInChanceOver } from '../core/game';
 import { TILE, type GameState } from '../core/types';
 
 const TILE_PX = 32;
@@ -172,8 +172,9 @@ export class Renderer {
     ctx.font = 'bold 12px monospace';
     ctx.fillText('揺れ', gx, 16);
     ctx.font = '9px monospace';
-    ctx.fillStyle = '#999';
-    ctx.fillText('割れ目が開き良い面が出る', gx + 30, 15);
+    // 核石を抱えている間は見出しを差し替える（HUDに行を足さない）
+    ctx.fillStyle = p.hasCore ? '#e05ad8' : '#999';
+    ctx.fillText(p.hasCore ? `核石で揺れ×${CORE_TREMOR_MULT}` : '割れ目が開き良い面が出る', gx + 30, 15);
     // 背景の帯: 色の段階＋ボーナス上限の線
     for (let t = 0; t < TREMOR_CAP; t += 5) {
       ctx.fillStyle = tremorColor(t);
@@ -196,39 +197,49 @@ export class Renderer {
       ctx.fillStyle = '#999';
       ctx.fillText(`${t} +${bonus}% 100tで${chance}%`, gx + gw + 6, yy + 3);
     }
-    // 帰着時の見積もり（今の揺れ＋帰り道の揺れ）をゴーストの線で
-    if (p.estReturnTremor !== null) {
-      const home = p.tremor + p.estReturnTremor;
-      const yy = toY(home);
-      ctx.strokeStyle = '#fff';
-      ctx.setLineDash([3, 3]);
+    // 帰着時の見積もり（今の揺れ＋帰り道の揺れ）をゴーストの線で。ラベルは後でまとめて重ならないように置く
+    const labels: { text: string; color: string; font: string; y: number }[] = [];
+    const dashLine = (yy: number, color: string, dash: number) => {
+      ctx.strokeStyle = color;
+      ctx.setLineDash([dash, dash]);
       ctx.beginPath();
       ctx.moveTo(gx - 6, yy);
       ctx.lineTo(gx + gw + 2, yy);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = '#fff';
-      ctx.fillText('帰着', gx - 2, yy - 3);
+    };
+    if (p.estReturnTremor !== null) {
+      const yy = toY(p.tremor + p.estReturnTremor);
+      dashLine(yy, '#fff', 3);
+      labels.push({ text: '帰着', color: '#fff', font: '10px monospace', y: yy - 3 });
     }
     // 足場が帰り道より近いなら、足場に着いたときの見積もりも黄色の線で（そこで休めば下がる）
     if (p.estScaffoldTremor !== null && !p.onScaffold && (p.estReturnTremor === null || p.estScaffoldTremor < p.estReturnTremor - 0.5)) {
       const yy2 = toY(p.tremor + p.estScaffoldTremor);
-      ctx.strokeStyle = '#d9a441';
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(gx - 6, yy2);
-      ctx.lineTo(gx + gw + 2, yy2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = '#d9a441';
-      ctx.fillText('足場', gx - 2, yy2 + 11);
+      dashLine(yy2, '#d9a441', 2);
+      labels.push({ text: '足場', color: '#d9a441', font: '10px monospace', y: yy2 + 11 });
     }
     // 今の値の読み
-    const yy = toY(p.tremor);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px monospace';
-    ctx.fillText(`${Math.round(p.tremor)}`, gx + 2, Math.max(gy + 10, yy - 3));
+    labels.push({ text: `${Math.round(p.tremor)}`, color: '#fff', font: 'bold 11px monospace', y: Math.max(gy + 10, toY(p.tremor) - 3) });
+    // 近い値のとき重ならないよう、上から順に11px以上離して置く（v2軽微#5）。はみ出したら下から押し戻す
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) labels[i].y = Math.max(labels[i].y, labels[i - 1].y + 11);
+    const bottom = gy + gh - 2;
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const limit = i === labels.length - 1 ? bottom : labels[i + 1].y - 11;
+      labels[i].y = Math.min(labels[i].y, limit);
+    }
+    for (const l of labels) {
+      ctx.font = l.font;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#0b0b0b';
+      ctx.strokeText(l.text, gx - 2, l.y);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = l.color;
+      ctx.fillText(l.text, gx - 2, l.y);
+    }
     ctx.font = '11px monospace';
+    ctx.fillStyle = '#fff';
     ctx.fillText(`売値+${Math.round(p.tremorBonus * 100)}%`, gx, gy + gh + 14);
     if (p.onScaffold && !p.digging) {
       ctx.fillStyle = '#d9a441';
