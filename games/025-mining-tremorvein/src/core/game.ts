@@ -23,7 +23,10 @@ import {
  * - 揺れが高いほど、その瞬間に掘った鉱石の売値が上がる（最大+60%）
  * - 揺れが高いほど、毎tick落盤しやすくなる。落盤は「HPダメージ＋積荷の1/3を落とす＋揺れが少し収まる」で、
  *   即死ではない。HPが0になると地上へ引き上げられ、積荷全損＋所持金の15%を救助費として失う（ゲームは続く）
- * - 送り籠（basket）で積荷を8割の値で途中換金でき、粘る前に一部を確定させられる（部分的な回収点）
+ * - 送り籠（basket）で積荷を8割の値で途中換金でき、粘る前に一部を確定させられる（部分的な回収点）。
+ *   v0.2.0: 籠を下ろす振動で揺れ+10（v1で籠が代償なしに強すぎた）
+ * - v0.2.0: 足場（scaffold）を買って地下に据えると、その上で掘らずにいる間は揺れが毎tick下がる
+ *   （途中の回収点。休むほど安全になるが、売値ボーナスも下がり、時間も使う）。強化を買い切った後のお金の行き先
  */
 
 export const WIDTH = 9;
@@ -41,6 +44,12 @@ export const CAVEIN_RELIEF = 20;
 export const DIG_TREMOR_MULT = 1.5;
 export const BRACE_REDUCTION = 0.12;
 export const BASKET_RATE = 0.8;
+/** 送り籠を下ろす振動で上がる揺れ */
+export const BASKET_TREMOR = 10;
+/** 足場の上で掘らずにいる間、1tickに下がる揺れ */
+export const SCAFFOLD_RELIEF = 1.5;
+/** 足場を据えられる最も浅い深さ */
+export const SCAFFOLD_MIN_Y = 10;
 export const RESCUE_FEE_RATE = 0.15;
 export const BASE_HP = 60;
 export const HP_PER_LEVEL = 20;
@@ -113,10 +122,11 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'brace', name: '支保', desc: '揺れのたまる速さ-12%（同じ揺れでより深く・長く）', maxLevel: 5, baseCost: 20, growth: 1.7 },
   { id: 'capacity', name: '背負子', desc: '積荷+3', maxLevel: 6, baseCost: 10, growth: 1.5 },
   { id: 'winch', name: '巻き上げ機', desc: '巻き上げ（H）で掘った縦穴を1tickに+1マス多く上れる（帰り道の揺れが減る）', maxLevel: 3, baseCost: 30, growth: 1.8 },
-  { id: 'basket', name: '送り籠', desc: '1回の潜行で使える送り籠+1（積荷を8割で途中換金）', maxLevel: 3, baseCost: 25, growth: 1.8 },
+  { id: 'basket', name: '送り籠', desc: '潜行ごとの籠+1（8割で途中換金、揺れ+10）', maxLevel: 3, baseCost: 25, growth: 1.8 },
+  { id: 'scaffold', name: '足場', desc: '地下に据える（P）。上で休むと揺れが下がる', maxLevel: 3, baseCost: 260, growth: 1.85 },
 ];
 
-function upgradeCost(def: UpgradeDef, level: number): number | null {
+export function upgradeCost(def: UpgradeDef, level: number): number | null {
   if (level >= def.maxLevel) return null;
   return Math.round(def.baseCost * Math.pow(def.growth, level));
 }
@@ -178,6 +188,10 @@ function emptyMetrics(): Metrics {
     rescueLostValue: 0,
     basketsSent: 0,
     basketValue: 0,
+    basketTremor: 0,
+    scaffoldsPlaced: 0,
+    restTicks: 0,
+    restRelief: 0,
     peakTremorBanked: 0,
     clearedTick: null,
     score: 0,
@@ -193,7 +207,14 @@ interface CargoEntry extends CargoItem {
  * 帰り道の経路を、巻き上げ（真上へ続く縦穴は1tickで(1+Lv)マス）を使う前提でtickに区切り、
  * 各tickの終わりにいる深さの列を返す（揺れはtickの終わりの深さで加算されるため）
  */
-export function returnTicksAlong(sx: number, sy: number, path: { x: number; y: number }[], winchLv: number): number[] {
+export function returnTicksAlong(
+  sx: number,
+  sy: number,
+  path: { x: number; y: number }[],
+  winchLv: number,
+  /** 巻き上げが止まるマス（足場） */
+  stopAt: (x: number, y: number) => boolean = () => false,
+): number[] {
   const out: number[] = [];
   let px = sx;
   let py = sy;
@@ -201,7 +222,15 @@ export function returnTicksAlong(sx: number, sy: number, path: { x: number; y: n
   while (i < path.length) {
     let n = 1;
     if (path[i].y === py - 1 && path[i].x === px) {
-      while (n < 1 + winchLv && i + n < path.length && path[i + n].x === px && path[i + n].y === path[i + n - 1].y - 1 && path[i + n - 1].y > 0) n++;
+      while (
+        n < 1 + winchLv &&
+        i + n < path.length &&
+        path[i + n].x === px &&
+        path[i + n].y === path[i + n - 1].y - 1 &&
+        path[i + n - 1].y > 0 &&
+        !stopAt(path[i + n - 1].x, path[i + n - 1].y)
+      )
+        n++;
     }
     const last = path[i + n - 1];
     px = last.x;
@@ -227,7 +256,9 @@ export class Game {
   private digging: Digging | null = null;
   private tremor = 0;
   private basketsLeft = 0;
-  private levels: Record<UpgradeId, number> = { drill: 0, hp: 0, brace: 0, capacity: 0, winch: 0, basket: 0 };
+  private levels: Record<UpgradeId, number> = { drill: 0, hp: 0, brace: 0, capacity: 0, winch: 0, basket: 0, scaffold: 0 };
+  private scaffoldsHeld = 0;
+  private scaffolds: { x: number; y: number }[] = [];
   private lastCaveIn: CaveInEvent | null = null;
   private metrics: Metrics = emptyMetrics();
 
@@ -277,6 +308,9 @@ export class Game {
       case 'hoist':
         this.handleHoist();
         break;
+      case 'place':
+        this.handlePlace();
+        break;
       case 'wait':
         this.digging = null;
         break;
@@ -284,8 +318,18 @@ export class Game {
     if (this.over) return;
 
     if (this.y > 0) {
-      const rate = tremorRate(this.y, this.levels.brace) * (this.digging ? DIG_TREMOR_MULT : 1);
-      this.tremor = Math.min(TREMOR_CAP, this.tremor + rate);
+      if (this.onScaffold() && !this.digging) {
+        // 足場の上で掘らずにいる間は、揺れがたまらず下がっていく（途中の回収点）
+        const before = this.tremor;
+        this.tremor = Math.max(0, this.tremor - SCAFFOLD_RELIEF);
+        if (before > this.tremor) {
+          this.metrics.restTicks++;
+          this.metrics.restRelief += before - this.tremor;
+        }
+      } else {
+        const rate = tremorRate(this.y, this.levels.brace) * (this.digging ? DIG_TREMOR_MULT : 1);
+        this.tremor = Math.min(TREMOR_CAP, this.tremor + rate);
+      }
       // 乱数は地下にいる毎tick必ず1回引く（揺れに関わらず消費量を一定にして決定論の見通しを良くする）
       const roll = this.rng();
       if (roll < caveInProb(this.tremor)) this.caveIn();
@@ -330,7 +374,24 @@ export class Game {
     for (let i = 0; i < steps && this.y > 0; i++) {
       if (this.tileAt(this.x, this.y - 1) !== TILE.FLOOR) break;
       this.moveTo(this.x, this.y - 1);
+      if (this.onScaffold()) break; // 足場は踊り場: 巻き上げはそこで止まる
     }
+  }
+
+  isScaffold(x: number, y: number): boolean {
+    return this.scaffolds.some((sc) => sc.x === x && sc.y === y);
+  }
+
+  private onScaffold(): boolean {
+    return this.y > 0 && this.isScaffold(this.x, this.y);
+  }
+
+  private handlePlace(): void {
+    this.digging = null;
+    if (this.y < SCAFFOLD_MIN_Y || this.scaffoldsHeld <= 0 || this.onScaffold()) return;
+    this.scaffolds.push({ x: this.x, y: this.y });
+    this.scaffoldsHeld--;
+    this.metrics.scaffoldsPlaced++;
   }
 
   private finishDig(x: number, y: number, t: number): void {
@@ -398,6 +459,7 @@ export class Game {
     this.money -= cost;
     this.levels[item]++;
     this.metrics.upgradesBought++;
+    if (item === 'scaffold') this.scaffoldsHeld++;
     if (item === 'hp') this.hp = this.maxHp;
   }
 
@@ -410,6 +472,10 @@ export class Game {
     this.metrics.peakTremorBanked = Math.max(this.metrics.peakTremorBanked, Math.round(this.tremor));
     this.cargo = [];
     this.basketsLeft--;
+    // 籠を下ろす振動（v1で籠が代償なしに強すぎたため、揺れのダイヤルに代償を結びつけた）
+    const before = this.tremor;
+    this.tremor = Math.min(TREMOR_CAP, this.tremor + BASKET_TREMOR);
+    this.metrics.basketTremor += this.tremor - before;
   }
 
   private caveIn(): void {
@@ -450,9 +516,20 @@ export class Game {
     this.metrics.trips++;
   }
 
-  /** 掘った床だけを通って地上へ戻る最短経路（BFS）。経路上の各マスの深さの列を返す */
+  /** 掘った床だけを通って地上へ戻る最短経路（BFS） */
   returnPath(): { x: number; y: number }[] | null {
     if (this.y === 0) return [];
+    return this.floorPath((_x, y) => y === 0);
+  }
+
+  /** 掘った床だけを通って一番近い足場へ行く最短経路（足場の上なら空配列、足場が無い・届かないならnull） */
+  scaffoldPath(): { x: number; y: number }[] | null {
+    if (this.scaffolds.length === 0) return null;
+    if (this.onScaffold()) return [];
+    return this.floorPath((x, y) => y > 0 && this.isScaffold(x, y));
+  }
+
+  private floorPath(isGoal: (x: number, y: number) => boolean): { x: number; y: number }[] | null {
     const start = this.y * WIDTH + this.x;
     const prev = new Int32Array(WIDTH * DEPTH).fill(-2);
     prev[start] = -1;
@@ -463,7 +540,7 @@ export class Game {
       const cur = queue[head++];
       const cx = cur % WIDTH;
       const cy = Math.floor(cur / WIDTH);
-      if (cy === 0) {
+      if (cur !== start && isGoal(cx, cy)) {
         goal = cur;
         break;
       }
@@ -494,15 +571,26 @@ export class Game {
 
   getState(): GameState {
     const path = this.returnPath();
+    const stop = (x: number, y: number) => this.isScaffold(x, y);
     let estReturnTremor: number | null = null;
     let estReturnTicks: number | null = null;
     if (this.y > 0 && path) {
       // 1歩ごとに「今いるマスの深さ」の速さで揺れがたまる
-      const ticks = returnTicksAlong(this.x, this.y, path, this.levels.winch);
+      const ticks = returnTicksAlong(this.x, this.y, path, this.levels.winch, stop);
       let sum = 0;
       for (const y of ticks) sum += tremorRate(y, this.levels.brace);
       estReturnTremor = Math.round(sum * 10) / 10;
       estReturnTicks = ticks.length;
+    }
+    let estScaffoldTremor: number | null = null;
+    let nearestScaffoldY: number | null = null;
+    const spath = this.y > 0 ? this.scaffoldPath() : null;
+    if (spath) {
+      const ticks = returnTicksAlong(this.x, this.y, spath, this.levels.winch, stop);
+      let sum = 0;
+      for (const y of ticks) sum += tremorRate(y, this.levels.brace);
+      estScaffoldTremor = Math.round(sum * 10) / 10;
+      nearestScaffoldY = spath.length > 0 ? spath[spath.length - 1].y : this.y;
     }
     const shop: ShopItemState[] = UPGRADES.map((def) => ({
       id: def.id,
@@ -539,8 +627,12 @@ export class Game {
         estReturnTicks,
         basketsLeft: this.y > 0 ? this.basketsLeft : this.levels.basket,
         basketsMax: this.levels.basket,
+        scaffoldsHeld: this.scaffoldsHeld,
+        onScaffold: this.onScaffold(),
+        estScaffoldTremor,
+        nearestScaffoldY,
       },
-      map: { width: WIDTH, depth: DEPTH, tiles: this.tiles.slice() },
+      map: { width: WIDTH, depth: DEPTH, tiles: this.tiles.slice(), scaffolds: this.scaffolds.map((sc) => ({ ...sc })) },
       lastCaveIn: this.lastCaveIn ? { ...this.lastCaveIn } : null,
       shop,
       metrics: { ...this.metrics },

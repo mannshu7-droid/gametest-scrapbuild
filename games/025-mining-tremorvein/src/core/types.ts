@@ -16,14 +16,16 @@ export type Dir = 'up' | 'down' | 'left' | 'right';
 /** shop=地上（y=0）に居る。mine=地下。cleared=核石を持ち帰った */
 export type Phase = 'shop' | 'mine' | 'cleared';
 
-export type UpgradeId = 'drill' | 'hp' | 'brace' | 'capacity' | 'winch' | 'basket';
+export type UpgradeId = 'drill' | 'hp' | 'brace' | 'capacity' | 'winch' | 'basket' | 'scaffold';
 
 export type Action =
   | { type: 'move'; dir: Dir }
   | { type: 'wait' }
   | { type: 'buy'; item: UpgradeId }
-  /** 送り籠: 今の積荷を8割の値で地上へ送る（揺れはそのまま） */
+  /** 送り籠: 今の積荷を8割の値で地上へ送る（籠を下ろす振動で揺れ+10） */
   | { type: 'send' }
+  /** 足場を今いるマスに据える（地下のみ。買って持っている足場が要る） */
+  | { type: 'place' }
   /** 巻き上げ: 真上へ続く掘った縦穴を1tickで(1+巻き上げ機Lv)マス上る */
   | { type: 'hoist' };
 
@@ -75,6 +77,13 @@ export interface Metrics {
   rescueLostValue: number;
   basketsSent: number;
   basketValue: number;
+  /** 送り籠の振動で上がった揺れの合計 */
+  basketTremor: number;
+  /** 据えた足場の数と、足場の上で揺れが収まっていったtick数 */
+  scaffoldsPlaced: number;
+  restTicks: number;
+  /** 足場の上で収まった揺れの合計 */
+  restRelief: number;
   /** 持ち帰った（または送った）揺れの最大値。どこまで粘ったかの指標 */
   peakTremorBanked: number;
   clearedTick: number | null;
@@ -114,12 +123,22 @@ export interface GameState {
     estReturnTicks: number | null;
     basketsLeft: number;
     basketsMax: number;
+    /** 買ってまだ据えていない足場の数 */
+    scaffoldsHeld: number;
+    /** 今いるマスが足場か（足場の上で掘っていなければ、揺れが毎tick下がる） */
+    onScaffold: boolean;
+    /** 掘った床を通って一番近い足場へ着くまでにたまる揺れの見積もり（足場が無い・届かないならnull、足場の上なら0） */
+    estScaffoldTremor: number | null;
+    /** 一番近い足場の深さ（無ければnull） */
+    nearestScaffoldY: number | null;
   };
   map: {
     width: number;
     depth: number;
     /** 行優先の平坦配列（index = y * width + x）。y=0が地上 */
     tiles: number[];
+    /** 据えた足場の位置（タイルは床のまま） */
+    scaffolds: { x: number; y: number }[];
   };
   lastCaveIn: CaveInEvent | null;
   shop: ShopItemState[];
@@ -143,13 +162,20 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
   { type: 'wait', params: {}, description: '何もせず1ティック経過（地下では揺れがたまる）' },
   {
     type: 'buy',
-    params: { item: 'drill|hp|brace|capacity|winch|basket' },
-    description: '地上（y=0）でのみ有効。指定カテゴリを1レベル購入する',
+    params: { item: 'drill|hp|brace|capacity|winch|basket|scaffold' },
+    description: '地上（y=0）でのみ有効。指定カテゴリを1レベル購入する（scaffoldは足場を1つ買って持つ）',
   },
   {
     type: 'send',
     params: {},
-    description: '地下でのみ有効。送り籠を1つ使い、今の積荷を売値の8割で即換金する（揺れは減らない）。籠は地上で補充',
+    description: '地下でのみ有効。送り籠を1つ使い、今の積荷を売値の8割で即換金する（籠を下ろす振動で揺れ+10）。籠は地上で補充',
+  },
+  {
+    type: 'place',
+    params: {},
+    description:
+      '地下（深さ10以上）でのみ有効。持っている足場を今いるマスに据える（据えたら動かせない）。' +
+      '足場の上にいて掘っていない間は、揺れがたまらず毎tick 1.5ずつ下がる（その間は売値ボーナスも下がる）',
   },
   {
     type: 'hoist',
