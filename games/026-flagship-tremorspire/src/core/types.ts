@@ -298,6 +298,17 @@ export interface Metrics {
   rescueLostValue: number;
   /** 梁の回廊（足場）の中で掘らずにいて揺れが下がったtick数 */
   corridorReliefTicks: number;
+  /** v2: 梁なしの塔のレーンで掘らずにいて揺れが下がったtick数 */
+  laneReliefTicks: number;
+  /** v2: 揺れボーナスのうち撃破報酬に乗った分（tremorBonusValueにも含む） */
+  killBonusValue: number;
+  /** v2: 救助の手当てで動けなかったtickの合計 */
+  rescueDownTicks: number;
+  /** v2: 所持金の最小値（負なら救助費の借金） */
+  minMoney: number;
+  /** v2: 救助でホームが受けた耐久ダメージの合計と、ホーム陥落の最後の一撃が救助だったか */
+  rescueHomeDamage: number;
+  homeFallByRescue: boolean;
   /** 夕暮れ（nightWarning中）に積荷を抱えて拠点の外にいて、揺れが速くたまったtick数 */
   duskTicks: number;
   /** 拠点へ戻った瞬間の揺れの最大値と合計（平均=sum/tripsToHome） */
@@ -340,6 +351,8 @@ export interface GameState {
     dusk: boolean;
     /** 救助直後の手当て中の残りtick（0より大きい間は行動できない） */
     rescueDownTicks: number;
+    /** v2: 今倒れたら取られる救助費（その日の稼ぎ×率＋救助回数×段差）。払えなければ借金 */
+    rescueFee: number;
     canTeleport: boolean;
     atk: number;
     atkCd: number;

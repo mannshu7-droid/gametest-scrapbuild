@@ -49,7 +49,7 @@
  *   出力の`quake`行が揺れ版の主指標（救助・落盤・揺れボーナス・回廊で下がったtick・夕暮れtick）。
  *   ブラウザ実プレイ用に`npx esbuild headless/simulate.ts --bundle --format=iife --global-name=__BOTLIB__`でBotをバンドルできる
  */
-import { Game, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
+import { Game, TUNE, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type DeathPhase, type Dir, type Enemy, type GameState, type ShopItemId, type TileId, type Turret } from '../src/core/types';
 
 const DELTA: Record<Dir, [number, number]> = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
@@ -605,9 +605,13 @@ function nextTowerJob(s: GameState, plan: TowerPlan, base: { x: number; radius: 
 /** 026新規: 遠征の制約と固定の帰還閾値（CLIの--resource/--returnAtで設定。ブラウザのバンドルでは既定のまま） */
 let RESOURCE: Resource = 'tremor';
 let RETURN_AT: number | null = null;
+/** v2新規: 反応遅延（--delay N）。帰還条件（揺れ/燃料）が成り立ってからN回の判断は気付かずに今の行動を続ける＝人の「迷う時間」 */
+let RETURN_DELAY = 0;
 
 export class Bot {
   constructor(private strategy: Strategy) {}
+  /** v2: 帰還条件が連続で成り立っている判断回数（反応遅延用） */
+  private returnSeen = 0;
 
   decide(s: GameState): Action {
     const p = s.player;
@@ -724,12 +728,14 @@ export class Bot {
     // 緊急退避: 燃料危険域 / HP危険 / 積載満杯
     // 026新規: 揺れ版はmininingRiskLevel（帰着線の揺れ≥60でdanger）で帰る。--returnAt Nを渡すと固定閾値に置き換える
     // （揺れ版: 帰着線の揺れ≥N、燃料版: 燃料≤帰還推定燃料＋N）。燃料の崖と揺れのカーブを同じボットで掃引するため
-    const criticalFuel =
+    const criticalFuelRaw =
       RETURN_AT === null
         ? p.miningRiskLevel === 'danger'
         : s.resource === 'tremor'
           ? (p.estTremorAtReturn ?? 0) >= RETURN_AT
           : p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + RETURN_AT;
+    this.returnSeen = criticalFuelRaw ? this.returnSeen + 1 : 0;
+    const criticalFuel = criticalFuelRaw && this.returnSeen > RETURN_DELAY;
     const criticalHp = p.hp < p.maxHp * HP_RETREAT_THRESHOLD[this.strategy];
     const cargoFull = p.cargoUnits >= p.maxCapacity;
     if (criticalFuel || criticalHp || cargoFull) {
@@ -933,6 +939,12 @@ interface RunResult {
   rescueFees: number;
   rescueLostValue: number;
   corridorReliefTicks: number;
+  laneReliefTicks: number;
+  killBonusValue: number;
+  rescueDownTicks: number;
+  minMoney: number;
+  rescueHomeDamage: number;
+  homeFallByRescue: boolean;
   duskTicks: number;
   maxTremor: number;
   braceLv: number;
@@ -1054,6 +1066,12 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     rescueFees: s.metrics.rescueFees,
     rescueLostValue: s.metrics.rescueLostValue,
     corridorReliefTicks: s.metrics.corridorReliefTicks,
+    laneReliefTicks: s.metrics.laneReliefTicks,
+    killBonusValue: s.metrics.killBonusValue,
+    rescueDownTicks: s.metrics.rescueDownTicks,
+    minMoney: s.metrics.minMoney,
+    rescueHomeDamage: s.metrics.rescueHomeDamage,
+    homeFallByRescue: s.metrics.homeFallByRescue,
     duskTicks: s.metrics.duskTicks,
     maxTremor: s.metrics.maxTremor,
     braceLv: s.shop.find((it) => it.id === 'brace')?.level ?? 0,
@@ -1073,6 +1091,13 @@ function argVal(name: string): string | undefined {
 RESOURCE = argVal('resource') === 'fuel' ? 'fuel' : 'tremor';
 // 026新規: --returnAt N で遠征の帰還判断を固定閾値にする（揺れ版: 帰着線の揺れ≥N、燃料版: 燃料≤帰還推定燃料+N）
 RETURN_AT = argVal('returnAt') !== undefined ? Number(argVal('returnAt')) : null;
+// v2新規: --delay N で帰還の反応遅延、--tune key=value[,key=value] で揺れ版の調整値（core TUNE）を上書きする
+RETURN_DELAY = Number(argVal('delay') ?? 0);
+for (const kv of (argVal('tune') ?? '').split(',').filter(Boolean)) {
+  const [k, v] = kv.split('=');
+  if (!(k in TUNE)) throw new Error(`unknown tune key: ${k}`);
+  (TUNE as Record<string, number>)[k] = Number(v);
+}
 // 024新規: '1..40' の範囲指定にも対応（カンマ区切りと併用可）
 const seeds = (argVal('seeds') ?? '1,2,3,4,5').split(',').flatMap((part) => {
   const m = part.match(/^(\d+)\.\.(\d+)$/);
@@ -1091,7 +1116,7 @@ const strategies: Strategy[] = strategiesArg
 
 // --quiet で個別ランのJSON行を省き、サマリ行だけを出す（024新規、40シード×多戦略の比較用）
 const quiet = args.includes('--quiet');
-console.log(`# Tremorspire headless simulation (resource=${RESOURCE}${RETURN_AT !== null ? ` returnAt=${RETURN_AT}` : ''}, field ${FIELD_WIDTH}x${LANE_COUNT}, maxTicks=${maxTicks})`);
+console.log(`# Tremorspire headless simulation (resource=${RESOURCE}${RETURN_AT !== null ? ` returnAt=${RETURN_AT}` : ''}${RETURN_DELAY > 0 ? ` delay=${RETURN_DELAY}` : ''}${RESOURCE === 'tremor' ? ` tune=${JSON.stringify(TUNE)}` : ''}, field ${FIELD_WIDTH}x${LANE_COUNT}, maxTicks=${maxTicks})`);
 for (const strategy of strategies) {
   const results: RunResult[] = [];
   for (const seed of seeds) {
@@ -1116,6 +1141,9 @@ for (const strategy of strategies) {
   );
   console.log(
     `# ${strategy} quake: deaths=${hpDeaths}/${results.length} runsWithRescue=${results.filter((r) => r.rescues > 0).length}/${results.length} avgRescues=${avg((r) => r.rescues)} rescueWhere(nightField:${results.reduce((a, r) => a + r.rescueNightField, 0)}/daySiege:${results.reduce((a, r) => a + r.rescueDaySiege, 0)}/inBase:${results.reduce((a, r) => a + r.rescueInBase, 0)}/byCaveIn:${results.reduce((a, r) => a + r.rescueByCaveIn, 0)}) avgCaveIns=${avg((r) => r.caveIns)} avgCaveInDamage=${avg((r) => r.caveInDamage)} avgCaveInLost=${avg((r) => r.caveInLostValue)} avgTremorBonus=${avg((r) => r.tremorBonusValue)} avgRescueFees=${avg((r) => r.rescueFees)} avgRescueLost=${avg((r) => r.rescueLostValue)} avgCorridorRelief=${avg((r) => r.corridorReliefTicks)} avgDuskTicks=${avg((r) => r.duskTicks)} avgMaxTremor=${avg((r) => r.maxTremor)} avgBraceLv=${avg((r) => r.braceLv)} avgFuelEmptyTicks=${avg((r) => r.fuelEmptyTicks)}`,
+  );
+  console.log(
+    `# ${strategy} quake2: avgKillBonus=${avg((r) => r.killBonusValue)} avgLaneRelief=${avg((r) => r.laneReliefTicks)} avgRescueDown=${avg((r) => r.rescueDownTicks)} debtRuns=${results.filter((r) => r.minMoney < 0).length}/${results.length} avgMinMoney=${avg((r) => r.minMoney)} avgRescueHomeDmg=${avg((r) => r.rescueHomeDamage)} homeFalls=${homeDeaths}/${results.length} homeFallByRescue=${results.filter((r) => r.homeFallByRescue).length}`,
   );
   console.log(
     `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDistance=${avg((r) => r.maxDistance)} avgOreMined=${avg((r) => r.oreMined)} avgKills=${avg((r) => r.kills)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgOutposts=${avg((r) => r.outpostsBuilt)} avgBarricadesBuilt=${avg((r) => r.barricadesBuilt)} avgTurretsBuilt=${avg((r) => r.turretsBuilt)} avgTurretsLost=${avg((r) => r.turretsLost)} avgTurretKills=${avg((r) => r.turretKills)} avgTurretDmg=${avg((r) => r.turretDamageDealt)} shieldedShotRatio=${(results.reduce((a, r) => a + r.turretShieldedShots, 0) / Math.max(1, results.reduce((a, r) => a + r.turretShots, 0))).toFixed(3)} turretLossRate=${(results.reduce((a, r) => a + r.turretsLost, 0) / Math.max(1, results.reduce((a, r) => a + r.turretsBuilt, 0))).toFixed(3)} avgTrips=${avg((r) => r.tripsToHome)} avgNightsSurvived=${avg((r) => r.nightsSurvived)} avgOutpostsLost=${avg((r) => r.outpostsLost)} avgRaidersKilled=${avg((r) => r.raidersKilled)} avgBaseDamageTaken=${avg((r) => r.baseDamageTaken)} avgBasedefenseLv=${avg((r) => r.basedefenseLv)} avgScannerLv=${avg((r) => r.scannerLv)} avgChargeLv=${avg((r) => r.chargeLv)} avgResonanceTriggers=${avg((r) => r.resonanceTriggers)} avgResonanceBonusOre=${avg((r) => r.resonanceBonusOre)} avgAppraisalLv=${avg((r) => r.appraisalLv)} avgObstaclesBuilt=${avg((r) => r.obstaclesBuilt)} avgQuality=${(results.reduce((a, r) => a + r.avgQuality, 0) / results.length).toFixed(3)} avgTurretQuality=${(results.filter((r) => r.turretsBuilt > 0).reduce((a, r) => a + r.avgTurretQuality, 0) / Math.max(1, results.filter((r) => r.turretsBuilt > 0).length)).toFixed(3)} avgInformedPlacements=${avg((r) => r.informedPlacements)} avgLinkedPlacements=${avg((r) => r.linkedPlacements)} avgLinkSavedDamage=${avg((r) => r.linkSavedDamage)} avgBarricadesLost=${avg((r) => r.barricadesLost)} avgCombatRiskEsc=${avg((r) => r.combatRiskEscalations)} avgMiningRiskEsc=${avg((r) => r.miningRiskEscalations)} avgRaidRiskEsc=${avg((r) => r.raidRiskEscalations)} avgForecastRiskEsc=${avg((r) => r.forecastRiskEscalations)} avgReturnRiskEsc=${avg((r) => r.returnRiskEscalations)} avgPatrolFuelSavedTicks=${avg((r) => r.patrolFuelSavedTicks)} deaths=${results.filter((r) => r.over && !r.won).length}/${results.length}(hp:${hpDeaths}/home:${homeDeaths}) deathPhase(nightField:${phaseCount('night-field')}/daySiege:${phaseCount('day-siege')}/inBase:${phaseCount('in-base')} of ${deadResults.length}) wins=${results.filter((r) => r.won).length}/${results.length}`,
