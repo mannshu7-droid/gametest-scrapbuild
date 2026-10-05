@@ -30,6 +30,13 @@ const RISK_COLOR: Record<string, string> = {
   danger: '#e74c3c',
 };
 
+/** 3回目: 救助の報告を夜明けから出しておくtick数（10tpsで6秒） */
+const RESCUE_REPORT_TICKS = 60;
+/** 3回目（v2軽微#6）: 稼ぐ前（1日目など）は救助費が0なので、金額ではなく「朝まで」と率を見せる */
+function rescueHint(fee: number): string {
+  return fee > 0 ? `倒れたら朝まで＋救助費${fee}` : '倒れたら朝まで（救助費は今日の稼ぎの半分）';
+}
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
 
@@ -262,6 +269,21 @@ export class Renderer {
       ctx.fillRect(0, fieldTop, VIEW_W * TILE_PX, viewH);
     }
 
+    // 3回目（v2中#1）: 救助は待たせずに夜明けまで飛ばすので、その間に起きたことを6秒だけ報告する
+    const rep = s.rescueReport;
+    if (rep && s.tick - rep.untilTick < RESCUE_REPORT_TICKS) {
+      const lines = [
+        `倒れて朝まで運ばれた（${rep.skippedTicks}tickを失った）  積荷¥${rep.cargoLost}を失い、救助費${rep.fee}`,
+        `その間: 塔と拠点がレイダー${rep.raidersKilled}体を撃破  拠点の被害${Math.round(rep.baseDamage)}（ホーム−${Math.round(rep.homeHpLost)}）` +
+          `${rep.towersLost > 0 ? `  塔${rep.towersLost}基を失った` : ''}${rep.outpostsLost > 0 ? `  前哨${rep.outpostsLost}を失った` : ''}`,
+      ];
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillRect(0, fieldTop + 4, VIEW_W * TILE_PX, 40);
+      ctx.fillStyle = '#ff9f80';
+      ctx.font = '12px monospace';
+      lines.forEach((l, i) => ctx.fillText(l, 8, fieldTop + 20 + i * 16));
+    }
+
     // HUD
     const hudY = fieldTop + viewH;
     ctx.fillStyle = '#111';
@@ -269,7 +291,7 @@ export class Renderer {
     ctx.fillStyle = '#fff';
     ctx.font = '12px monospace';
     ctx.fillText(
-      `x ${s.player.x}/${FIELD_WIDTH}  HP ${Math.max(0, Math.round(s.player.hp))}/${s.player.maxHp}  ATK ${s.player.atk}${s.resource === 'fuel' ? `  fuel ${Math.round(s.player.fuel)}/${s.player.maxFuel}` : ''}${s.player.rescueDownTicks > 0 ? `  救助の手当て中 ${s.player.rescueDownTicks}` : s.resource === 'tremor' ? `  倒れたら救助費${s.player.rescueFee}${s.player.money < 0 ? ` 借金${-s.player.money}` : ''}` : ''}`,
+      `x ${s.player.x}/${FIELD_WIDTH}  HP ${Math.max(0, Math.round(s.player.hp))}/${s.player.maxHp}  ATK ${s.player.atk}${s.resource === 'fuel' ? `  fuel ${Math.round(s.player.fuel)}/${s.player.maxFuel}` : ''}${s.player.rescueDownTicks > 0 ? `  救助の手当て中 ${s.player.rescueDownTicks}` : s.resource === 'tremor' ? `  ${rescueHint(s.player.rescueFee)}${s.player.money < 0 ? ` 借金${-s.player.money}` : ''}` : ''}`,
       6,
       hudY + 16,
     );
@@ -417,7 +439,7 @@ export class Renderer {
     ctx.fillRect(x, y, (w * Math.min(t, cap)) / cap, h);
     // 危険線（帰着線がこれを超えるとminingRisk=danger）
     ctx.fillStyle = '#ff4d4d';
-    ctx.fillRect(x + (w * 60) / cap - 1, y - 2, 2, h + 4);
+    ctx.fillRect(x + (w * TUNE.dangerAt) / cap - 1, y - 2, 2, h + 4);
     // 帰着線
     const est = s.player.estTremorAtReturn;
     if (est !== null) {

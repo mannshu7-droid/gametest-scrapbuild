@@ -306,6 +306,8 @@ export interface Metrics {
   rescueDownTicks: number;
   /** v2: 所持金の最小値（負なら救助費の借金） */
   minMoney: number;
+  /** 3回目: 救助の手当てを待たずに飛ばしたtickの合計（rescueSkip=1の時。rescueDownTicksのうち飛ばした分） */
+  rescueSkippedTicks: number;
   /** v2: 救助でホームが受けた耐久ダメージの合計と、ホーム陥落の最後の一撃が救助だったか */
   rescueHomeDamage: number;
   homeFallByRescue: boolean;
@@ -314,6 +316,24 @@ export interface Metrics {
   /** 拠点へ戻った瞬間の揺れの最大値と合計（平均=sum/tripsToHome） */
   maxTremor: number;
   score: number;
+}
+
+/** 3回目（v2中#1）: 救助で飛ばした時間に起きたこと。人には待ち時間の代わりにこれを見せる */
+export interface RescueReport {
+  /** 救助されたtickと、飛ばし終えたtick（＝次の夜明け） */
+  atTick: number;
+  untilTick: number;
+  skippedTicks: number;
+  /** 飛ばした間に塔・拠点が倒したレイダー、拠点が受けた被害、ホームが減った耐久、越えた夜の数、失った塔・前哨 */
+  raidersKilled: number;
+  baseDamage: number;
+  homeHpLost: number;
+  nightsPassed: number;
+  towersLost: number;
+  outpostsLost: number;
+  /** 倒れた時に失った積荷の価値と救助費 */
+  cargoLost: number;
+  fee: number;
 }
 
 export interface GameState {
@@ -466,6 +486,8 @@ export interface GameState {
   baseForecasts: BaseForecast[];
   shop: ShopItemState[];
   metrics: Metrics;
+  /** 3回目（v2中#1）: 最後に飛ばした救助の報告（揺れ版のみ。まだ救助されていなければnull） */
+  rescueReport: RescueReport | null;
 }
 
 export interface ActionSpecEntry {
