@@ -15,6 +15,7 @@ import {
   type Metrics,
   type Phase,
   type RiskEscalationBanner,
+  type RescueReport,
   type RiskLevel,
   type ShopItemId,
   type ShopItemState,
@@ -62,7 +63,6 @@ const CAVEIN_THRESHOLD = 20;
 const CAVEIN_COEF = 0.00035;
 /** 落盤で揺れが収まる量・落とす積荷の割合・ダメージ（12＋距離×0.3、危険耐性が効く） */
 const CAVEIN_RELIEF = 20;
-const CAVEIN_SPILL_FRAC = 1 / 3;
 const CAVEIN_DMG_BASE = 12;
 const CAVEIN_DMG_PER_DIST = 0.3;
 /** 毒ガスを掘ると揺れが上がる（燃料版の燃料-15の翻案） */
@@ -112,12 +112,25 @@ export const TUNE = {
   laneRelief: 0.3,
   /** v1中#4: 夕暮れ（夜の予告中）に積荷を抱えて拠点の外にいると揺れのたまる速さがこの倍率（v1は1.5） */
   duskMult: 2,
+  /**
+   * v2中#1（3回目）: 救助の手当て（次の夜明けまで）を「待たせる」のではなく、救助された同じstep()の中で
+   * 夜明けまでの時間を一気に進めて「飛ばす」。失う時間・夜の防衛（塔だけで戦う）は待つ場合と1tickも違わない。
+   * 人には待ち時間の代わりに「運ばれている間に起きたこと」の報告（rescueReport）を見せる。0なら2回目と同じ待ち
+   */
+  rescueSkip: 1,
+  /**
+   * v2中#2（3回目）: 帰着線の危険線・注意線（miningRisk=danger/caution、ゲージの赤線）。2回目は60/40。
+   * 固定閾値の掃引で、慎重な5戦略（wall/p02/mason/spireAll/weave）の山は30、p01の山は45、60はどの戦略にも「損の側」だった。
+   * 危険線＝攻める戦略の山（45）、注意線＝慎重な戦略の山（30）に揃え、ゲージの線が「ここから先は損」を指すようにした
+   */
+  dangerAt: 45,
+  cautionAt: 30,
+  /** v2中#2（3回目）: 落盤で落とす積荷の割合（1/3・1/6・0を掃引し、どの戦略もscore±3%で帰還点を動かさないので1/3のまま） */
+  caveInSpill: 1 / 3,
 };
 /** 揺れ版のテレポートは積荷の価値のこの割合を失う */
 const TELEPORT_CARGO_LOSS = 0.25;
 /** 帰還見積もり（estTremorAtReturn）に対する危険度ヒントの境界 */
-export const TREMOR_DANGER_AT = 60;
-export const TREMOR_CAUTION_AT = 40;
 
 export type Resource = 'tremor' | 'fuel';
 
@@ -692,9 +705,18 @@ export class Game {
   /** v2: 夜明けからの稼ぎ（救助費の基準） */
   private todayEarned = 0;
   private rescuesToday = 0;
+  private lastRescueCargoLost = 0;
+  private lastRescueFee = 0;
   /** このtickに掘削を進めたか（026新規、回廊で揺れが下がるのは掘らずにいる時だけ） */
   private dugThisTick = false;
   tick = 0;
+  /**
+   * v2中#1（3回目）: 救助の時間を飛ばす時に越えないtick（simulateが--maxTicksを入れる。nullなら上限なし）。
+   * 飛ばした分だけランの最後がはみ出して待つ版と結果がずれないようにするため
+   */
+  tickLimit: number | null = null;
+  /** v2中#1（3回目）: 最後に飛ばした救助の報告（HUD・AIPに見せる） */
+  private rescueReport: RescueReport | null = null;
   over = false;
   won = false;
   loseReason: 'playerHp' | 'homeDestroyed' | null = null;
@@ -829,6 +851,7 @@ export class Game {
     laneReliefTicks: 0,
     killBonusValue: 0,
     rescueDownTicks: 0,
+    rescueSkippedTicks: 0,
     minMoney: 0,
     rescueHomeDamage: 0,
     homeFallByRescue: false,
@@ -1019,8 +1042,8 @@ export class Game {
   private tremorRiskLevel(): RiskLevel {
     const est = this.estTremorAtReturn();
     if (est === null) return 'safe';
-    if (est >= TREMOR_DANGER_AT) return 'danger';
-    if (est >= TREMOR_CAUTION_AT) return 'caution';
+    if (est >= TUNE.dangerAt) return 'danger';
+    if (est >= TUNE.cautionAt) return 'caution';
     return 'safe';
   }
   /** 毎tickの揺れの更新と落盤判定（行動の後に呼ぶ） */
@@ -1047,7 +1070,7 @@ export class Game {
     const d = this.nearestBaseDistance(p.x);
     const dmg = Math.round((CAVEIN_DMG_BASE + d * CAVEIN_DMG_PER_DIST) * this.hazardMult());
     p.hp -= dmg;
-    const spill = Math.floor(p.cargoUnits * CAVEIN_SPILL_FRAC);
+    const spill = Math.floor(p.cargoUnits * TUNE.caveInSpill);
     if (spill > 0) {
       const lost = Math.round((p.cargoValue * spill) / p.cargoUnits);
       p.cargoUnits -= spill;
@@ -1068,11 +1091,13 @@ export class Game {
     else if (where === 'day-siege') this.metrics.rescueDaySiege++;
     else this.metrics.rescueInBase++;
     this.metrics.rescueLostValue += p.cargoValue;
+    this.lastRescueCargoLost = p.cargoValue;
     // v2（重大#1）: 救助費は「その日の稼ぎ」と救助回数で決まり、払えなければ借金になる（所持金が負＝何も買えない）
     const fee = this.rescueFeeNow();
     const homeDmg = TUNE.rescueHomeDmg * (this.rescuesToday + 1);
     this.rescuesToday++;
     p.money -= fee;
+    this.lastRescueFee = fee;
     this.metrics.rescueFees += fee;
     if (p.money < this.metrics.minMoney) this.metrics.minMoney = p.money;
     p.cargoUnits = 0;
@@ -1642,7 +1667,7 @@ export class Game {
     let marginRatio: number;
     if (this.resource === 'tremor') {
       const est = this.estTremorAtReturn() ?? 0;
-      marginRatio = est >= TREMOR_DANGER_AT ? 1 : est >= TREMOR_CAUTION_AT ? 1.5 : 3;
+      marginRatio = est >= TUNE.dangerAt ? 1 : est >= TUNE.cautionAt ? 1.5 : 3;
     } else {
       const estReturn = this.estFuelToReturn();
       if (estReturn === null || estReturn === 0) return 'safe';
@@ -2660,6 +2685,30 @@ export class Game {
 
   step(action: Action = { type: 'wait' }): void {
     if (this.over) return;
+    this.advance(action);
+    // v2中#1（3回目）: 救助されたら、手当ての残り（次の夜明けまで）をこのstepの中で進めてしまう（待たせずに時間を失う）
+    if (this.resource !== 'tremor' || TUNE.rescueSkip <= 0 || this.player.rescueDownTicks <= 0) return;
+    const m = this.metrics;
+    const homeHpBefore = this.homeBase.hp;
+    const before = { tick: this.tick, raidersKilled: m.raidersKilled, baseDamageTaken: m.baseDamageTaken, nights: m.nightsSurvived, towersLost: m.towersLost, outpostsLost: m.outpostsLost };
+    while (this.player.rescueDownTicks > 0 && !this.over && (this.tickLimit === null || this.tick < this.tickLimit)) this.advance({ type: 'wait' });
+    this.rescueReport = {
+      atTick: before.tick,
+      untilTick: this.tick,
+      skippedTicks: this.tick - before.tick,
+      raidersKilled: m.raidersKilled - before.raidersKilled,
+      baseDamage: m.baseDamageTaken - before.baseDamageTaken,
+      homeHpLost: Math.max(0, homeHpBefore - this.homeBase.hp),
+      nightsPassed: m.nightsSurvived - before.nights,
+      towersLost: m.towersLost - before.towersLost,
+      outpostsLost: m.outpostsLost - before.outpostsLost,
+      cargoLost: this.lastRescueCargoLost,
+      fee: this.lastRescueFee,
+    };
+    m.rescueSkippedTicks += this.rescueReport.skippedTicks;
+  }
+
+  private advance(action: Action): void {
     this.tick++;
 
     // ---- 昼夜フェーズの進行（013新規）: 夜へ切り替わる瞬間にレイダーを一括スポーンさせる ----
@@ -2951,6 +3000,7 @@ export class Game {
       baseForecasts: this.baseForecasts.map((f) => ({ ...f })),
       shop,
       metrics: { ...this.metrics },
+      rescueReport: this.rescueReport ? { ...this.rescueReport } : null,
     };
   }
 }

@@ -942,6 +942,7 @@ interface RunResult {
   laneReliefTicks: number;
   killBonusValue: number;
   rescueDownTicks: number;
+  rescueSkippedTicks: number;
   minMoney: number;
   rescueHomeDamage: number;
   homeFallByRescue: boolean;
@@ -954,6 +955,8 @@ interface RunResult {
 function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
   const game = new Game(seed, RESOURCE);
   const bot = new Bot(strategy);
+  // 3回目: 救助の時間を飛ばす（rescueSkip）時も--maxTicksを越えないように上限を渡す
+  game.tickLimit = maxTicks;
   let ticks = 0;
   // 死亡直前の状況（v3新規、v2バグ#2の調査用）: 昼夜・拠点内か・近傍の敵がレイダーか
   let deathPhase: 'day' | 'night' | null = null;
@@ -961,10 +964,10 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
   let deathByRaider = false;
   let deathBaseDist = -1;
   let deathInPatrol = false;
-  while (!game.over && ticks < maxTicks) {
+  while (!game.over && game.tick < maxTicks) {
     const before = game.getState();
     game.step(bot.decide(before));
-    ticks++;
+    ticks = game.tick;
     if (game.over && game.loseReason === 'playerHp') {
       deathPhase = before.phase;
       deathAtBase = inBaseRadius(before);
@@ -1069,6 +1072,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     laneReliefTicks: s.metrics.laneReliefTicks,
     killBonusValue: s.metrics.killBonusValue,
     rescueDownTicks: s.metrics.rescueDownTicks,
+    rescueSkippedTicks: s.metrics.rescueSkippedTicks,
     minMoney: s.metrics.minMoney,
     rescueHomeDamage: s.metrics.rescueHomeDamage,
     homeFallByRescue: s.metrics.homeFallByRescue,
@@ -1143,7 +1147,7 @@ for (const strategy of strategies) {
     `# ${strategy} quake: deaths=${hpDeaths}/${results.length} runsWithRescue=${results.filter((r) => r.rescues > 0).length}/${results.length} avgRescues=${avg((r) => r.rescues)} rescueWhere(nightField:${results.reduce((a, r) => a + r.rescueNightField, 0)}/daySiege:${results.reduce((a, r) => a + r.rescueDaySiege, 0)}/inBase:${results.reduce((a, r) => a + r.rescueInBase, 0)}/byCaveIn:${results.reduce((a, r) => a + r.rescueByCaveIn, 0)}) avgCaveIns=${avg((r) => r.caveIns)} avgCaveInDamage=${avg((r) => r.caveInDamage)} avgCaveInLost=${avg((r) => r.caveInLostValue)} avgTremorBonus=${avg((r) => r.tremorBonusValue)} avgRescueFees=${avg((r) => r.rescueFees)} avgRescueLost=${avg((r) => r.rescueLostValue)} avgCorridorRelief=${avg((r) => r.corridorReliefTicks)} avgDuskTicks=${avg((r) => r.duskTicks)} avgMaxTremor=${avg((r) => r.maxTremor)} avgBraceLv=${avg((r) => r.braceLv)} avgFuelEmptyTicks=${avg((r) => r.fuelEmptyTicks)}`,
   );
   console.log(
-    `# ${strategy} quake2: avgKillBonus=${avg((r) => r.killBonusValue)} avgLaneRelief=${avg((r) => r.laneReliefTicks)} avgRescueDown=${avg((r) => r.rescueDownTicks)} debtRuns=${results.filter((r) => r.minMoney < 0).length}/${results.length} avgMinMoney=${avg((r) => r.minMoney)} avgRescueHomeDmg=${avg((r) => r.rescueHomeDamage)} homeFalls=${homeDeaths}/${results.length} homeFallByRescue=${results.filter((r) => r.homeFallByRescue).length}`,
+    `# ${strategy} quake2: avgKillBonus=${avg((r) => r.killBonusValue)} avgLaneRelief=${avg((r) => r.laneReliefTicks)} avgRescueDown=${avg((r) => r.rescueDownTicks)} avgRescueSkipped=${avg((r) => r.rescueSkippedTicks)} debtRuns=${results.filter((r) => r.minMoney < 0).length}/${results.length} avgMinMoney=${avg((r) => r.minMoney)} avgRescueHomeDmg=${avg((r) => r.rescueHomeDamage)} homeFalls=${homeDeaths}/${results.length} homeFallByRescue=${results.filter((r) => r.homeFallByRescue).length}`,
   );
   console.log(
     `# ${strategy} summary: avgScore=${avg((r) => r.score)} avgMoneyEarned=${avg((r) => r.moneyEarned)} avgMaxDistance=${avg((r) => r.maxDistance)} avgOreMined=${avg((r) => r.oreMined)} avgKills=${avg((r) => r.kills)} avgUpgradesBought=${avg((r) => r.upgradesBought)} avgOutposts=${avg((r) => r.outpostsBuilt)} avgBarricadesBuilt=${avg((r) => r.barricadesBuilt)} avgTurretsBuilt=${avg((r) => r.turretsBuilt)} avgTurretsLost=${avg((r) => r.turretsLost)} avgTurretKills=${avg((r) => r.turretKills)} avgTurretDmg=${avg((r) => r.turretDamageDealt)} shieldedShotRatio=${(results.reduce((a, r) => a + r.turretShieldedShots, 0) / Math.max(1, results.reduce((a, r) => a + r.turretShots, 0))).toFixed(3)} turretLossRate=${(results.reduce((a, r) => a + r.turretsLost, 0) / Math.max(1, results.reduce((a, r) => a + r.turretsBuilt, 0))).toFixed(3)} avgTrips=${avg((r) => r.tripsToHome)} avgNightsSurvived=${avg((r) => r.nightsSurvived)} avgOutpostsLost=${avg((r) => r.outpostsLost)} avgRaidersKilled=${avg((r) => r.raidersKilled)} avgBaseDamageTaken=${avg((r) => r.baseDamageTaken)} avgBasedefenseLv=${avg((r) => r.basedefenseLv)} avgScannerLv=${avg((r) => r.scannerLv)} avgChargeLv=${avg((r) => r.chargeLv)} avgResonanceTriggers=${avg((r) => r.resonanceTriggers)} avgResonanceBonusOre=${avg((r) => r.resonanceBonusOre)} avgAppraisalLv=${avg((r) => r.appraisalLv)} avgObstaclesBuilt=${avg((r) => r.obstaclesBuilt)} avgQuality=${(results.reduce((a, r) => a + r.avgQuality, 0) / results.length).toFixed(3)} avgTurretQuality=${(results.filter((r) => r.turretsBuilt > 0).reduce((a, r) => a + r.avgTurretQuality, 0) / Math.max(1, results.filter((r) => r.turretsBuilt > 0).length)).toFixed(3)} avgInformedPlacements=${avg((r) => r.informedPlacements)} avgLinkedPlacements=${avg((r) => r.linkedPlacements)} avgLinkSavedDamage=${avg((r) => r.linkSavedDamage)} avgBarricadesLost=${avg((r) => r.barricadesLost)} avgCombatRiskEsc=${avg((r) => r.combatRiskEscalations)} avgMiningRiskEsc=${avg((r) => r.miningRiskEscalations)} avgRaidRiskEsc=${avg((r) => r.raidRiskEscalations)} avgForecastRiskEsc=${avg((r) => r.forecastRiskEscalations)} avgReturnRiskEsc=${avg((r) => r.returnRiskEscalations)} avgPatrolFuelSavedTicks=${avg((r) => r.patrolFuelSavedTicks)} deaths=${results.filter((r) => r.over && !r.won).length}/${results.length}(hp:${hpDeaths}/home:${homeDeaths}) deathPhase(nightField:${phaseCount('night-field')}/daySiege:${phaseCount('day-siege')}/inBase:${phaseCount('in-base')} of ${deadResults.length}) wins=${results.filter((r) => r.won).length}/${results.length}`,
