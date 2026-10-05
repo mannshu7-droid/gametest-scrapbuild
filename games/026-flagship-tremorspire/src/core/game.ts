@@ -1,0 +1,2873 @@
+import { mulberry32, randInt, type Rng } from './rng';
+import {
+  TILE,
+  type Action,
+  type Barricade,
+  type Base,
+  type Beam,
+  type BaseForecast,
+  type DeathPhase,
+  type Digging,
+  type Dir,
+  type Enemy,
+  type EnemyType,
+  type GameState,
+  type Metrics,
+  type Phase,
+  type RiskEscalationBanner,
+  type RiskLevel,
+  type ShopItemId,
+  type ShopItemState,
+  type TileId,
+  type Turret,
+} from './types';
+
+// ---- ワールド定数（009/010/011と同一の横方向帯状フィールド構造を踏襲） ----
+export const FIELD_WIDTH = 320;
+export const LANE_COUNT = 5;
+export const LENGTH = FIELD_WIDTH + 1;
+export const BAND_SIZE = 40;
+export const HOME_RADIUS = 3;
+export const OUTPOST_RADIUS = 2;
+export const OUTPOST_MIN_GAP = 50;
+const SPAWN_Y = Math.floor(LANE_COUNT / 2);
+
+// ---- 燃料・掘削（011を踏襲、数値も同一） ----
+const PASSIVE_FUEL_DRAIN = 1;
+const DIG_FUEL_COST = 1;
+const FUEL_EMPTY_HP_DRAIN = 1.5;
+const GAS_FUEL_DRAIN = 15;
+const HAZARD_BASE_DMG = 12;
+const HAZARD_DMG_PER_BAND = 2;
+const UNSTABLE_TRIGGER_CHANCE = 0.35;
+const TELEPORT_FUEL_COST = 25;
+
+// ---- 揺れ（026新規、025-mining-tremorveinの「揺れ1本のダイヤル」を昼の遠征へ移植。resource='tremor'のときだけ使う） ----
+// 024までの燃料は「帰れる／帰れない」の二値（燃料0でHP毎tick-1.5＝017と同じ崖）だった。揺れは拠点の外にいる間たまり続け、
+// 高いほど掘った鉱石の売値が上がり（最大+60%）、同時に毎tick落盤しやすくなる。落盤はHPダメージ＋積荷の1/3を落とす部分損失で、
+// HP0は即死ではなく救助（ホームへ運ばれ、積荷全損＋所持金の15%＋手当ての時間）。拠点に入ると揺れは0に戻る
+export const TREMOR_CAP = 150;
+export const TREMOR_BONUS_MAX = 0.6;
+export const TREMOR_BONUS_FULL_AT = 100;
+/** 最寄りの拠点からの距離dで1tickにたまる揺れ = TREMOR_RATE_BASE + TREMOR_RATE_QUAD×(d/TREMOR_RATE_SCALE)² */
+const TREMOR_RATE_BASE = 0.08;
+const TREMOR_RATE_QUAD = 0.4;
+const TREMOR_RATE_SCALE = 40;
+/** 掘っているtickは揺れのたまる速さがこの倍率（025と同じ） */
+const DIG_TREMOR_MULT = 1.5;
+/** 支保（brace）1Lvあたりの揺れの減り（下限BRACE_MIN_MULT） */
+const BRACE_REDUCTION = 0.1;
+const BRACE_MIN_MULT = 0.4;
+/** 落盤: 揺れがCAVEIN_THRESHOLDを超えた分に二乗で効く毎tickの確率（025と同じ式） */
+const CAVEIN_THRESHOLD = 20;
+const CAVEIN_COEF = 0.00035;
+/** 落盤で揺れが収まる量・落とす積荷の割合・ダメージ（12＋距離×0.3、危険耐性が効く） */
+const CAVEIN_RELIEF = 20;
+const CAVEIN_SPILL_FRAC = 1 / 3;
+const CAVEIN_DMG_BASE = 12;
+const CAVEIN_DMG_PER_DIST = 0.3;
+/** 毒ガスを掘ると揺れが上がる（燃料版の燃料-15の翻案） */
+const GAS_TREMOR = 15;
+/** 梁で編んだ回廊（woven）は足場: 中で掘らずにいる間、揺れが毎tickこれだけ下がる（025の足場と同じ1.5） */
+const CORRIDOR_RELIEF = 1.5;
+/** 回廊の中で掘っている間・梁なしの塔のレーン（lane）の中では、揺れのたまる速さがこの倍率（燃料版の0.5/0.65と同じ） */
+const WOVEN_TREMOR_MULT = 0.5;
+const PATROL_TREMOR_MULT = 0.65;
+/** 夕暮れ（夜の予告nightWarning中）に積荷を抱えて拠点の外にいると揺れのたまる速さがこの倍率（025の核石×3の翻案、低めから試す） */
+export const DUSK_TREMOR_MULT = 1.5;
+/** 救助: 所持金からの救助費の割合と、ホームで動けない手当ての時間 */
+const RESCUE_FEE_RATE = 0.15;
+export const RESCUE_DOWN_TICKS = 60;
+/** 揺れ版のテレポートは積荷の価値のこの割合を失う */
+const TELEPORT_CARGO_LOSS = 0.25;
+/** 帰還見積もり（estTremorAtReturn）に対する危険度ヒントの境界 */
+export const TREMOR_DANGER_AT = 60;
+export const TREMOR_CAUTION_AT = 40;
+
+export type Resource = 'tremor' | 'fuel';
+
+export function tremorRateAt(d: number): number {
+  if (d <= 0) return 0;
+  const k = d / TREMOR_RATE_SCALE;
+  return TREMOR_RATE_BASE + TREMOR_RATE_QUAD * k * k;
+}
+export function caveInProb(t: number): number {
+  if (t < CAVEIN_THRESHOLD) return 0;
+  const k = (t - CAVEIN_THRESHOLD) / 10;
+  return CAVEIN_COEF * k * k;
+}
+export function tremorBonusOf(t: number): number {
+  return (Math.min(t, TREMOR_BONUS_FULL_AT) / TREMOR_BONUS_FULL_AT) * TREMOR_BONUS_MAX;
+}
+
+// ---- 危険度ヒント2種（008パターン#11。combat=HP/推奨HP、mining=燃料/帰還推定燃料） ----
+const RISK_DANGER_MARGIN = 15;
+const RISK_CAUTION_MULT = 1.8;
+const RISK_BANNER_TICKS = 90;
+
+// ---- 戦闘（010の数値をmaxHp基準100（011準拠）へ合わせて約3倍にスケール） ----
+const PLAYER_INIT_ATK = 18;
+const ATK_CD_MAX = 5;
+const ATK_RANGE = 1;
+const DASH_RANGE_INIT = 4;
+const DASH_CD_MAX_INIT = 30;
+const DASH_INVULN_TICKS = 3;
+const BASE_REGEN_PER_TICK = 4;
+
+// ---- 詰みからの脱出手段（money版、008パターン#4。010/011と同一パターン）:
+// 拠点で最安の未購入強化すら買えない間、少額の哨戒報酬が入る ----
+const STUCK_INCOME_INTERVAL = 20;
+const STUCK_INCOME_AMOUNT = 3;
+
+// ---- 詰みからの脱出手段（HP版、010 v2を踏襲）: 拠点圏外・非戦闘中はごく僅かに自然回復する ----
+const FIELD_REGEN_INTERVAL = 15;
+const FIELD_REGEN_AMOUNT = 3;
+const FIELD_REGEN_SAFE_RANGE = 5;
+
+// ---- 建築コスト ----
+const BARRICADE_BASE_COST = 8;
+const BARRICADE_BAND_MULT = 0.15;
+const BARRICADE_HP = 78;
+const OUTPOST_BASE_COST = 70;
+const OUTPOST_BAND_COST_MULT = 0.2;
+
+// ---- 昼夜サイクル・拠点HP（013新規。012の空間構造・成長・経済はすべて継承しこの節のみ追加） ----
+export const DAY_LENGTH = 1200;
+export const NIGHT_LENGTH = 500;
+const NIGHT_WARNING_TICKS = 150;
+/**
+ * v3 FIX（v2バグ#1・#3）: 400→250。BASE_DAY_REGENの引き下げとセット（下記）。
+ * v2までは自宅HP400・昼の回復が実質フル（1.5×1200tick）で、夜ごとの拠点被害（1夜15〜65）が
+ * 翌朝に必ず全快し、「拠点被害の少なさ」が生存にもscoreにも一切効かなかった（クラスタ配置の唯一の利点である
+ * BDT低下が結果に繋がらず、45000tickでは分散配置rangerがscore・生存とも一方的に優位だった）。
+ * 後半（15夜以降）の被害が蓄積して自宅を落とし得るように絞り、序盤〜中盤（〜20000tick）の挙動は変えない
+ * （120シードでwall/mason/ranger/cautiousのavgScore・死亡数が旧設定と一致、p02/p01nも無回帰）
+ */
+const HOME_BASE_MAX_HP = 250;
+const OUTPOST_BASE_MAX_HP = 200;
+const OUTPOST_HP_BAND_MULT = 0.15;
+/** v3 FIX: 1.5→0.05（1昼で最大60回復）。理由はHOME_BASE_MAX_HPの注釈を参照 */
+const BASE_DAY_REGEN = 0.05;
+/** 拠点からこの距離未満のタイルはレイダーのスポーン候補から除外する（拠点直下への湧きを防ぐ） */
+const RAID_MIN_SPAWN_DIST = 10;
+const RAID_BASE_COUNT = 3;
+const RAID_PER_NIGHT_DIV = 2;
+const RAID_MAX_COUNT = 12;
+/** raidRiskLevelのcaution/danger境界（拠点からの距離） */
+const RAID_CAUTION_DIST = 15;
+const RAID_NIGHT_ATK_MULT = 0.08;
+/**
+ * 拠点の自動迎撃（014 v2 FIX、v1バグ#2対応）。拠点圏内のレイダーへ毎tickごく少量のダメージを与える。
+ * 「safe予告＝完全放置してよい」わけではないのに、1体のレイダーに丸一晩張り付かれるとプレイヤー
+ * 不在のまま拠点が一方的に全損しうる問題（Learnings案(b)）への対応。プレイヤー自身の迎撃
+ * （atk18〜、attack毎5tick）に比べ十分弱く「不在でも即詰みにはならない下限」に留め、
+ * 複数拠点の同時被弾時に「どの拠点を見捨てるか」という013由来のコアファン仮説は壊さない
+ */
+const BASE_AUTO_DEFENSE_DMG = 3;
+
+/**
+ * 拠点防衛への恒久投資（015新規、014-final提案(2)への対応）。014-finalが発見したバグ#4
+ * 「際限なく上昇するレイダー攻撃力倍率(RAID_NIGHT_ATK_MULT)に対し固定値の拠点自動迎撃
+ * (BASE_AUTO_DEFENSE_DMG)が長期的にはスケールせず、想定セッション時間の3倍以上（21夜以降）
+ * でhomeDestroyedが再発しうる」を、単純な定数調整ではなく「プレイヤーが資金を投じて
+ * 全拠点の自動迎撃力そのものを恒久強化できる」新規ショップ項目(basedefense)として解決する。
+ * 既存のバリケード（都度消費される防具）とは別の、他の10項目と同じ拠点内購入フローに乗る
+ * 恒久投資として実装し、013-final Learnings「症状への対症療法より根本原因への対処」を踏襲する
+ */
+const DEFENSE_LEVEL_DMG_BONUS = 2;
+
+/**
+ * 拠点防衛タレット（016新規、015-final提案(2)への対応）。015の`basedefense`は「資金を投じて
+ * 既存のステータス（全拠点共通の自動迎撃ダメージ）を底上げする」抽象的な恒久投資だったが、
+ * 016では007〜010で確立した「建築が実際に進行を可能にする」（バリケード＝身代わり、前線拠点＝
+ * 目標を生む建築）というパターンを拠点防衛にも適用し、**プレイヤーが拠点保護半径内の特定タイルへ
+ * 実際に配置する防衛設備**を新設する。basedefenseとの違い:
+ * - 配置位置を選ぶ（どのタイルに置くか＝射程内に収める範囲を選ぶ）という空間的な意思決定がある
+ * - バリケード同様にHPを持ち、レイダーに阻まれて攻撃され破壊されうる（恒久ステータスと違い"失いうる"）
+ * - 拠点ごとに設置数上限（MAX_TURRETS_PER_BASE）があり、「どの拠点にどれだけ投資するか」も選べる
+ *   （basedefenseは全拠点一括だったため、この拠点別配分はタレットで初めて可能になる）
+ */
+const TURRET_BASE_COST = 40;
+const TURRET_BAND_COST_MULT = 0.18;
+/**
+ * v2 FIX 観察事項#1: v1では設置数に関わらず基礎コスト40のまま固定だったため、cautious/P02は
+ * ほぼ毎ランMAX_TURRETS_PER_BASE付近まで到達し「予算が足りず設置を諦める」場面がほとんど
+ * 観測できなかった。他のショップ項目（SHOP_DEFS、baseCost*growth^level）と同じ複利成長パターンを
+ * 拠点ごとの設置数に適用し、1基目は安価なまま・2基目以降が段階的に高くなる構成にすることで、
+ * 「この拠点にあと1基積むか、他の強化に回すか」という悩ましさを作る
+ */
+const TURRET_COST_GROWTH = 1.6;
+const TURRET_HP = 60;
+/**
+ * 迎撃レイダーを探すチェビシェフ距離。
+ * v2 FIX 観察事項#2: v1は2だったため、LANE_COUNT(5)の中央（y=2）に置けば|dy|<=2で全レーンを
+ * カバーでき、仕様書のコアファン仮説「配置位置に応じて迎撃力が変わる」という空間トレードオフが
+ * 実質的に検証できなかった。1に絞ることで中央配置でも隣接2レーン（y=1〜3）までしか届かず、
+ * 両端レーン（y=0,4）を守るには別タイルへの追加配置が必要になる
+ */
+const TURRET_RANGE = 1;
+const TURRET_DMG = 24;
+const TURRET_ATK_CD_MAX = 8;
+/** 拠点1つあたりのタレット設置上限。無制限にすると壁の代わりに並べるだけの物量ゲーになり
+ * 015final提案の「配置位置に応じて迎撃力が変わる」という悩ましさが失われるため上限を設ける */
+export const MAX_TURRETS_PER_BASE = 3;
+
+// ---- 非対称の情報公開・共鳴チャージ（018新規、017-mining-forkshaftの採掘パターンを本命ゲームの
+// mining側へ統合。017の「フォーク型分岐」は本ゲームの横方向帯状フィールド（どこでもレーン変更可能）
+// と根本的に噛み合わないため対象外とし、「非対称の情報公開」「共鳴チャージ」の2点のみを移植する ----
+/** バンド×レーンごとの豊富さ・危険度メタが定義される範囲。FIELD_WIDTH=320なので0〜7の8バンド */
+const NUM_BANDS = Math.floor((FIELD_WIDTH - 1) / BAND_SIZE) + 1;
+/** 豊富さ0〜3 → 鉱石出現重みへの倍率（017と同一表） */
+const RICHNESS_MULT = [0.5, 1.0, 1.6, 2.4];
+/** 危険度0〜2 → GAS/UNSTABLE出現重みへの倍率（017と同一表） */
+const HAZARD_MULT = [0.4, 1.0, 2.0];
+/**
+ * 探査ドリル（scanner）Lvに応じて、まだ到達していないバンドのうち何バンド先まで実体を見通せるか。
+ * Lv0でも危険度だけは1バンド先まで常に見える（017の「危険度は探査Lv0でも常に見える」原則を踏襲）が、
+ * 豊富さ（＝鉱石の実体）はLv1以上でしか見えない。フォーク（分岐点）を持たない横方向帯状フィールドでは
+ * 「既に到達したバンド」を境に情報公開の非対称を作る（既到達バンドは常に全公開、017の
+ * 「既に採掘済みは常に見える」原則を面レベルに拡張した扱い）
+ */
+const SCANNER_HAZARD_PREVIEW_BANDS = 1;
+
+/** 共鳴チャージのLv別上限（017と同一式。Lv0は機能自体が眠ったまま） */
+function maxChargeOf(chargeLv: number): number {
+  return chargeLv === 0 ? 0 : 2 + chargeLv * 2;
+}
+/** 鉱石種別ごとの共鳴チャージ増分。要求ドリル威力が高い（＝投資が必要な）鉱石ほど多く貯まり、
+ * 「ドリル威力への投資→高価値鉱石へ到達→チャージがより速く満タンになる」というシナジーを強める（017と同一） */
+const CHARGE_GAIN: Partial<Record<TileId, number>> = {
+  [TILE.ORE_COPPER]: 2,
+  [TILE.ORE_IRON]: 3,
+  [TILE.ORE_GOLD]: 5,
+};
+
+// ---- 建材ロットの非対称品質公開・隣接連携共鳴（020新規、019-building-hallmarkのbuildingパターンを
+// 本命ゲームの建築パート（バリケード・拠点防衛タレット）へ統合する）。019は単一の高さ指標が
+// 構造的限界で鑑定投資の効果を見誤らせた（019-final）ため、020は最初から score・撃破数・
+// obstacle喪失数・baseDamageTakenなど多面的な指標で評価する ----
+/** 建材ロットキューの長さ。lotIndexは0〜LOT_QUEUE_SIZE-1 */
+export const LOT_QUEUE_SIZE = 4;
+/** ロット品質倍率の範囲（019 v2と同じ0.5〜1.5。ばらつきが小さいと鑑定のROIが成立しなかった学びを踏襲） */
+const LOT_QUALITY_MIN = 0.5;
+const LOT_QUALITY_RANGE = 1.0;
+/** 連携（隣接チェビシェフ距離1に別のバリケード/タレット）中のobstacleが受ける被ダメージ倍率（019のbrace肩代わり率相当） */
+const LINK_DAMAGE_MULT = 0.6;
+/**
+ * 盾持ち（隣接にバリケードがある）タレットの攻撃ダメージ倍率。v2 FIXで「隣接するobstacleなら何でも」から
+ * 「隣接にバリケードがある」へ絞った（v1バグ#3: タレット3基の縦クラスタが5レーン全射程＋連携で
+ * 支配的最適解になっていた）。タレットを並べるだけでは火力ボーナスが付かず、バリケードを前に
+ * 置く維持コスト（バリケードは被弾で壊れる→建て直す）を払う必要がある
+ */
+const TURRET_LINK_DMG_MULT = 1.5;
+/**
+ * タレットの品質→攻撃ダメージの指数（v2 FIX、v1バグ#1）。v1は線形（品質×ダメージ）でタレットの撃破貢献自体が
+ * 小さく（1セッションのtaretKills3〜9）、品質+42%が成果に跳ね返らなかった。凸にして選別の差を広げる
+ * （期待値: 一様0.5〜1.5でE[q^1.5]≒1.03のため、鑑定なしプレイヤーの平均性能は据え置き）
+ */
+const TURRET_QUALITY_DMG_EXP = 2;
+/**
+ * バリケードへ効く品質の割合（v2 FIX）。バリケードのHPは 1+(品質-1)×BARRICADE_QUALITY_SPREAD 倍になる
+ * （0.5〜1.5 → 0.8〜1.2）。v1は品質を素のままHPへ乗せて鑑定なしプレイヤーへ純損失（-13.6%）が出たため
+ * ばらつきを1/5に抑え、それでも悪ロットの捨て先（＝良ロットをタレットへ温存する選別の後半）としては機能させる
+ */
+const BARRICADE_QUALITY_SPREAD = 0.4;
+/**
+ * 鑑定Lv1以上で`lotIndex`を明示指定して建てるたびにscoreへ直接加点する。019 v3で「money経由だと
+ * 強い既存システムの複利に埋もれる」と判明したためmoney非依存のscore直接加点にし、最初から設計に含める
+ */
+const INFORMED_PLACEMENT_SCORE_BONUS = 1.5;
+
+// ---- タレットのパトロール圏・鑑定による帰還危険度precision（022新規、020-final提案(1)・021の
+// 「帰還マージン→撤退判断→生死」を既存の拠点防衛投資（タレット品質・連携、鑑定）から辿れる形へ
+// 組み替える。020-finalが発見した「防衛系の死亡94%は夜のフィールド、拠点内は7.5%」という
+// 構造課題への対応。新規ショップ項目は追加せず、既存投資（タレット・鑑定）の効能を拡張する ----
+/** タレットのパトロール圏（同じレーン上、x方向のチェビシェフ距離）の基礎範囲。
+ * v2 FIX（バグ#1）: 020-flagship-hearthline v1でpatroller戦略が標準20000tickで0/20死亡になり
+ * 効果が強すぎたため、5→4へ縮小した */
+const PATROL_RANGE_BASE = 4;
+/** 品質(0.5〜1.5)がパトロール圏に与える倍率。品質が高いほど遠くまで帰路を支援できる。
+ * v2 FIX（バグ#1）: 4→2へ縮小（旧: 最大+6、新: 最大+3） */
+const PATROL_RANGE_QUALITY_MULT = 2;
+/** 連携中（隣接obstacleあり）タレットへの追加パトロール範囲ボーナス。v2 FIX（バグ#1）: 3→2へ縮小 */
+const PATROL_RANGE_LINK_BONUS = 2;
+/** パトロール圏内での受動燃料消費倍率。021のdaylight投資（帰路への恒久投資）に相当する即時効果。
+ * v2 FIX（バグ#1）: 0.5→0.65へ緩和（節約幅を50%→35%に縮小）。v1レビューの提案通り、
+ * 範囲・燃料節約の両方を少しずつ弱め、危険を「事実上消す」ことのないよう調整した */
+const PATROL_FUEL_DRAIN_MULT = 0.65;
+// ---- 塔・梁・細長さ（024新規、023-building-rootweaveの「梁で編む塔」を022の拠点防衛タレットへ統合する）。
+// 新規ショップ項目は増やさず、既存のタレットに「高さ」を与える。高さは射程・パトロール圏という塔の機能にだけ効き、
+// 脚・段ごとの報酬は出さない（023-final「捨てる部分」#1）。023の細長さ（直下の梁からの自由長）をそのまま移植し、
+// 単一塔には天井（SLENDER_LIMIT）があり、隣の塔と梁で編むと天井を越えられる。braceは独立アイテムにしない
+// （023-final バグ#3/捨てる部分#3: brace必須の構造は知らない人を詰ませるため、梁だけで最低限の高さに届く設計にする） ----
+/** 自由長（高さ−その塔に架かる最高の梁の高さ）の安全上限。超えた分（overstress）に比例して崩落しうる */
+export const SLENDER_LIMIT = 4;
+/** 塔の最大高さ（梁2段で到達できる高さ） */
+export const TOWER_MAX_HEIGHT = 12;
+/** 1段積み増すのに要する作業tick（023の梁の架設時間と同じ「時間で払う」コスト。資金が余る終盤の選択を保つ） */
+export const RAISE_TICKS = 20;
+/** 梁1本の架設に要する作業tick */
+export const BEAM_TICKS = 16;
+/** 梁を架けられる塔同士の距離（チェビシェフ）。拠点保護半径内の隣接〜1マス空けた塔まで */
+export const BEAM_SPAN = 2;
+/** 高さがこの段数ごとに迎撃射程+1（h4で射程2＝中央から全5レーン、h8で3、h12で4） */
+export const TOWER_RANGE_STEP = 4;
+/** 高さ1段あたりのパトロール圏（x方向）の延長 */
+export const PATROL_HEIGHT_MULT = 2.5;
+const RAISE_BASE_COST = 8;
+const RAISE_COST_PER_LEVEL = 4;
+const BEAM_BASE_COST = 10;
+const BEAM_COST_PER_LEVEL = 2;
+/** 梁で編まれた回廊内の受動燃料消費倍率（レーンだけのパトロール圏0.65より軽い、023の「梁の周りは揺れ半減」の翻案） */
+const WOVEN_FUEL_DRAIN_MULT = 0.5;
+/** 自由長超過1段あたり・1tickあたりの崩落確率（夜はOVERSTRESS_NIGHT_MULT倍） */
+const OVERSTRESS_COLLAPSE_CHANCE = 0.002;
+const OVERSTRESS_NIGHT_MULT = 2;
+/** 自由長超過の塔が被弾した時、超過1段あたりの即時崩落確率 */
+const OVERSTRESS_HIT_CHANCE = 0.25;
+/** 崩落時に塔自身が受けるダメージ（最大HP比） */
+const COLLAPSE_HP_FRAC = 0.25;
+/** 崩落時、塔に隣接（チェビシェフ1）しているプレイヤーが受ける1段あたりの落下物ダメージ */
+const FALL_DMG_PER_SEGMENT = 8;
+// ---- v2 FIX（v1バグ#1・#2・#3）: 塔の効果を「死ぬ場面」へ届け、高い塔に代償を与える ----
+// v1の診断: 夜のフィールド死はすべて拠点から3〜4マス（拠点圏のすぐ外、パトロール圏内）でレイダーに倒されていた。
+// 燃料切れは0。塔の燃料軽減は死因に届いていなかった
+/** 援護射撃（v2新規）: 夜、プレイヤーが高さ1以上の塔のパトロール圏（梁の回廊を含む）にいる間、その塔は
+ * プレイヤーからこの半径＋高さ由来の射程延長（turretRange-1）以内にいる敵を、拠点の防衛より優先して撃つ。
+ * 高さが援護の届く範囲に効く（h0は援護しない＝022のwall/masonは変わらない） */
+const COVER_RADIUS_BASE = 1;
+/** 誘引（v2新規）: 夜、高さ1以上の塔からx方向に「高さ×この倍率」以内に入ったレイダーは、拠点ではなく最も高い塔を
+ * 襲いに行く（高い塔ほど遠くの敵を呼ぶ）。塔は修理できないため、高く積んだ投資が夜ごとに削られうる。
+ * 梁で編んだ塔が壊されると梁が落ち、相方の塔が連鎖崩落しうる（v1バグ#3: 編むことのリスクが発生しない） */
+const ATTRACT_PER_HEIGHT = 2;
+/** 梁の耐久（v2新規、v3で20→12: 標準セッションでも梁が落ちる。掃引で12/20を比較）。引き付けられたレイダーは、塔に梁が架かっていれば射程内から塔本体ではなく最も高い梁を狙う
+ * （梁は網の弱点）。梁が落ちると両塔の自由長が伸び、超過した塔はその場で折れうる（被弾時と同じ判定） */
+export const BEAM_HP = 12;
+/** 高い塔は遠くから見える（v2新規）: 拠点ごとに「その拠点の塔の高さの合計÷この値（切り捨て）」体だけ、夜の襲撃が増える。
+ * 合計で数えるため、1本だけの低い塔（h4）は目立たず、編んだ網（3基×h12=36→+6体）は遠くから敵を呼ぶ。
+ * 呼び寄せた敵も倒せば報酬になる（高さは「危険と稼ぎの両方を上げるダイヤル」）。掃引: 最高値で数える案(÷4)と
+ * 合計÷4/6/8を40シードで比較し、weaveの夜のフィールド被害がspireAllと同水準になる÷6を採用（v2レビュー参照） */
+const LURE_RAID_STEP = 6;
+// ---- v3 FIX（v2バグ#1〜#3） ----
+/** 見張り台（v3新規、v2バグ#1）: 梁の架かっていない塔（高さ1以上）は、援護射撃を自分のレーンの上下この数のレーンまで広げる。
+ * 梁を架けると援護は回廊（繋がった塔のレーン）に沿う形へ変わり、燃料の軽い回廊を得る代わりに見張りの広さを失う。
+ * spireAll（梁なし多塔）を「夜のフィールドで最も守られる網」にし、weave（拠点が最も守られる網）と性格を分ける */
+const WATCH_LANES = 1;
+/** 孤塔（v3新規、v2バグ#1）: 拠点圏内で高さ1以上の塔が自分1本だけ（梁なし）なら、援護半径をこの値だけ伸ばす。
+ * 1本に絞ると誘引（高さ合計÷6）を呼ばず、作業も短い。spireAllを弱めずspire固有の長所を足す（掃引: +1/+2） */
+const LONE_COVER_RADIUS_BONUS = 1;
+/** 呼び寄せた敵の報酬倍率（v3新規、v2バグ#3）。誘引で増えた襲撃（lured）を倒した時の報酬をこの倍率にする。
+ * 0にすると「呼ぶと損をするだけ」になるので避けた。掃引: 1/0.5/0.25（scoreの順位はほぼ変わらず、稼ぎの膨張だけ抑える） */
+const LURED_REWARD_MULT = 0.5;
+
+/** returnRiskLevel算出時、帰路付近の夜間レイダーを探索するx方向の距離 */
+const RETURN_RISK_SCAN_RANGE = 20;
+/**
+ * 鑑定Lvに応じたreturnRiskLevel表示の「ずれ確率」。021-finalの注意点（マージン計算式が正確すぎると
+ * 危険が消える）への対応として、ずれるのは表示（プレイヤーが知る情報）だけに留め、実際の危険
+ * （敵の攻撃力・接近）自体は鑑定Lvに関係なく変わらない設計にする
+ */
+const RETURN_RISK_NOISE_CHANCE: Record<number, number> = { 0: 1, 1: 0.5, 2: 0.2, 3: 0 };
+
+// ---- 拠点ごとの脅威予告(baseForecasts、014新規): 昼のうちに「今夜どの拠点が危ないか」を伝える ----
+// spawnRaidWaveと同じ候補抽出・重み付け・最寄り拠点割り当てロジックを乱数を消費せずに再現し、
+// 各拠点が受け取るであろうレイダー数の期待値を求める。「複数の危険度ヒントは発火頻度を横並び
+// 比較する」（012-final Learnings）を踏まえ、combat/mining/raidと同じRiskLevel3段階・
+// バナー・エスカレーションカウンタの型に合わせる
+/** 昼の間、この間隔(tick)ごとにbaseForecastsを再計算する（毎tick計算はコスト不要に高いため） */
+const FORECAST_UPDATE_INTERVAL = 40;
+/** 期待レイダー数1体あたり、迎撃されない場合に想定する被弾回数（初期値。要調整） */
+const FORECAST_ENGAGEMENT_HITS = 4;
+/** 予告damage / 拠点現在HP の比率がこの値未満ならsafe */
+const FORECAST_CAUTION_RATIO = 0.15;
+/** 同、この値以上ならdanger */
+const FORECAST_DANGER_RATIO = 0.4;
+
+const DIGGABLE: TileId[] = [TILE.DIRT, TILE.ROCK, TILE.ORE_COPPER, TILE.ORE_IRON, TILE.ORE_GOLD, TILE.GAS, TILE.UNSTABLE];
+
+/** タイルの硬さ階層（0=最も柔らかい）。003/011と同一 */
+const TIER: Partial<Record<TileId, number>> = {
+  [TILE.DIRT]: 0,
+  [TILE.ORE_COPPER]: 0,
+  [TILE.ROCK]: 1,
+  [TILE.GAS]: 1,
+  [TILE.ORE_IRON]: 2,
+  [TILE.UNSTABLE]: 2,
+  [TILE.ORE_GOLD]: 3,
+};
+const BASE_TICKS: Partial<Record<TileId, number>> = {
+  [TILE.DIRT]: 2,
+  [TILE.ORE_COPPER]: 3,
+  [TILE.ROCK]: 4,
+  [TILE.GAS]: 4,
+  [TILE.ORE_IRON]: 5,
+  [TILE.UNSTABLE]: 4,
+  [TILE.ORE_GOLD]: 6,
+};
+const BASE_VALUE: Partial<Record<TileId, number>> = {
+  [TILE.ORE_COPPER]: 7,
+  [TILE.ORE_IRON]: 22,
+  [TILE.ORE_GOLD]: 54,
+};
+
+/** band = floor((x-1)/40)。009/010/011と同一式 */
+export function bandAt(x: number): number {
+  return Math.floor((x - 1) / BAND_SIZE);
+}
+export function requiredDrillPower(type: TileId, band: number): number {
+  const tier = type === TILE.ROCK || type === TILE.GAS ? 0 : (TIER[type] ?? 0);
+  return 1 + tier + Math.floor(band / 2);
+}
+export function digTicksFor(type: TileId, band: number, drillPower: number, digspeedLevel: number): number {
+  const req = requiredDrillPower(type, band);
+  const base = BASE_TICKS[type] ?? 2;
+  const bonus = 0.2 * (drillPower - req) + 0.15 * digspeedLevel;
+  return Math.max(1, Math.round(base / (1 + bonus)));
+}
+export function oreValue(type: TileId, band: number): number {
+  const base = BASE_VALUE[type] ?? 0;
+  return Math.round(base * (1 + band * 0.12));
+}
+function recommendedHpForBand(band: number): number {
+  // v1では66+band*12で、初期maxHp(100)が常に大幅に上回りcombatRiskLevelが機能しなかった。
+  // band0でmaxHp(100)とほぼ等しくなるよう起点を引き上げ、vitality未投資のまま奥へ進むと
+  // caution/dangerへ確実に遷移するようにした（v2 FIX）
+  return 100 + Math.max(0, band) * 20;
+}
+
+interface LaneMeta {
+  /** 豊富さ0〜3（018新規、017の「バンド×レーンの豊富さ」を移植） */
+  richness: number;
+  /** 危険度0〜2（018新規、同上） */
+  hazardTier: number;
+}
+
+function pickTileType(band: number, meta: LaneMeta, rng: Rng): TileId {
+  const b = Math.max(0, band);
+  const richMult = RICHNESS_MULT[meta.richness];
+  const hazMult = HAZARD_MULT[meta.hazardTier];
+  const pHazard = Math.min(0.12, 0.02 + b * 0.015) * hazMult;
+  const pGold = Math.min(0.05, b * 0.01) * richMult;
+  const pIron = Math.min(0.18, 0.02 + b * 0.025) * richMult;
+  const pCopper = Math.max(0.05, 0.2 - b * 0.01) * (1 + (richMult - 1) * 0.4);
+  const pStone = Math.min(0.5, 0.15 + b * 0.03);
+  const pDirt = Math.max(0, 1 - (pHazard + pGold + pIron + pCopper + pStone));
+  const entries: [TileId, number][] = [
+    [TILE.DIRT, pDirt],
+    [TILE.ROCK, pStone],
+    [TILE.ORE_COPPER, pCopper],
+    [TILE.ORE_IRON, pIron],
+    [TILE.ORE_GOLD, pGold],
+    [TILE.GAS, pHazard / 2],
+    [TILE.UNSTABLE, pHazard / 2],
+  ];
+  const total = entries.reduce((a, [, w]) => a + w, 0);
+  let r = rng() * total;
+  for (const [type, w] of entries) {
+    r -= w;
+    if (r <= 0) return type;
+  }
+  return TILE.DIRT;
+}
+
+/** left/right=進行方向(x)、up/down=レーン変更(y) */
+const DELTA: Record<Dir, [number, number]> = {
+  left: [-1, 0],
+  right: [1, 0],
+  up: [0, -1],
+  down: [0, 1],
+};
+
+interface EnemyDef {
+  hp: number;
+  atk: number;
+  range: number;
+  atkCdMax: number;
+  moveCdMax: number;
+  value: number;
+}
+const ENEMY_DEFS: Record<EnemyType, EnemyDef> = {
+  skirmisher: { hp: 27, atk: 9, range: 1, atkCdMax: 14, moveCdMax: 1, value: 5 },
+  archer: { hp: 21, atk: 9, range: 3, atkCdMax: 18, moveCdMax: 2, value: 7 },
+  brute: { hp: 72, atk: 15, range: 1, atkCdMax: 16, moveCdMax: 2, value: 14 },
+};
+const SPAWN_WEIGHTS: [EnemyType, number][] = [
+  ['skirmisher', 0.5],
+  ['archer', 0.3],
+  ['brute', 0.2],
+];
+function pickEnemyType(rng: Rng): EnemyType {
+  const r = rng();
+  let acc = 0;
+  for (const [t, w] of SPAWN_WEIGHTS) {
+    acc += w;
+    if (r < acc) return t;
+  }
+  return 'skirmisher';
+}
+/** SPAWN_WEIGHTSで重み付けした敵種の平均atk（乱数を消費しない期待値計算、baseForecasts用） */
+const AVG_RAIDER_ATK = SPAWN_WEIGHTS.reduce((a, [t, w]) => a + ENEMY_DEFS[t].atk * w, 0);
+
+function severityOf(level: RiskLevel): number {
+  return level === 'safe' ? 0 : level === 'caution' ? 1 : 2;
+}
+function riskLevelForRatio(current: number, recommended: number): RiskLevel {
+  const ratio = current / recommended;
+  if (ratio >= 1) return 'safe';
+  if (ratio >= 0.7) return 'caution';
+  return 'danger';
+}
+function chebyshev(x1: number, y1: number, x2: number, y2: number): number {
+  return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2));
+}
+function clampLane(y: number): number {
+  return Math.max(0, Math.min(LANE_COUNT - 1, y));
+}
+function adjacentTile(x: number, y: number, dir: Dir): { nx: number; ny: number } {
+  const [dx, dy] = DELTA[dir];
+  return { nx: x + dx, ny: clampLane(y + dy) };
+}
+
+interface ShopDef {
+  id: ShopItemId;
+  name: string;
+  desc: string;
+  baseCost: number;
+  growth: number;
+  maxLevel: number;
+}
+const SHOP_DEFS: ShopDef[] = [
+  { id: 'offense', name: '攻撃力', desc: '攻撃力+2', baseCost: 15, growth: 1.5, maxLevel: 10 },
+  { id: 'mobility', name: '機動力', desc: 'ダッシュ再使用短縮', baseCost: 12, growth: 1.45, maxLevel: 8 },
+  { id: 'vitality', name: '耐久強化', desc: '最大HP+20（即回復込み）。戦闘・危険タイル両方の被弾に効く', baseCost: 20, growth: 1.4, maxLevel: 10 },
+  { id: 'drill', name: 'ドリル威力', desc: 'ドリル威力+1（硬いタイルを掘れるように）', baseCost: 30, growth: 1.6, maxLevel: 8 },
+  { id: 'fuel', name: '燃料タンク', desc: '最大燃料+40', baseCost: 20, growth: 1.4, maxLevel: 6 },
+  // 026新規: 揺れ版で燃料タンクの代わりに売る。価格・段数は燃料タンクと同じ（Lv6で揺れ0.4倍≒燃料Lv6の340/100の逆数に近い）
+  { id: 'brace', name: '支保', desc: '揺れのたまる速さ-10%（下限-60%）', baseCost: 20, growth: 1.4, maxLevel: 6 },
+  { id: 'digspeed', name: '採掘速度', desc: '掘削が速くなる', baseCost: 25, growth: 1.5, maxLevel: 5 },
+  { id: 'lantern', name: 'ランタン強化', desc: '受動燃料消費-5%（下限-20%）', baseCost: 20, growth: 1.3, maxLevel: 4 },
+  { id: 'hazardresist', name: '危険耐性', desc: '危険タイルの被ダメージ-15%（下限-45%）', baseCost: 30, growth: 1.5, maxLevel: 3 },
+  { id: 'capacity', name: '積載拡張', desc: '最大積載+5', baseCost: 15, growth: 1.3, maxLevel: 8 },
+  { id: 'teleport', name: 'ホームテレポート', desc: '採掘中いつでも燃料25で即時帰還できるようになる（1回のみ）', baseCost: 150, growth: 1, maxLevel: 1 },
+  {
+    id: 'basedefense',
+    name: '拠点防衛投資',
+    desc: `全拠点の自動迎撃ダメージ+${DEFENSE_LEVEL_DMG_BONUS}（毎tick、恒久・全拠点共通）。夜を重ねるほど強くなるレイダーに対抗する投資先`,
+    baseCost: 45,
+    growth: 1.32,
+    maxLevel: 15,
+  },
+  {
+    id: 'scanner',
+    name: '探査ドリル',
+    desc: 'まだ到達していない先のバンドを見通せる距離+1バンド（018新規、017の非対称の情報公開を移植）。危険度は探査Lv0でも1バンド先まで常に見えるが、豊富さ（実際の鉱石）はLv1以上でしか見えない',
+    // v1(baseCost18)はdrill(30)と同格の価格帯でoffense/vitality/drill等の既存投資先と競合し
+    // 機会費用が情報投資のリターンを上回っていた（v1レビュー#1）。018は017と違い多数の既存投資先が
+    // あるため、017と同一の価格構造を移植するだけでは不十分と判明し、v2で単独では明確に安価な
+    // 価格帯へ引き下げた
+    baseCost: 11,
+    growth: 1.6,
+    maxLevel: 3,
+  },
+  {
+    id: 'charge',
+    name: '共鳴チャージ',
+    desc: 'Lv1で解禁、以降チャージ上限+2（018新規、017の共鳴チャージを移植）。鉱石を採掘するたびに階層比例でチャージが溜まり、満タン時に次の採掘で同じx座標の他レーンも要求ドリル威力さえ満たせば同時に採掘する',
+    // v1(baseCost22, growth1.7)からv2で引き下げ（理由は scanner と同様）
+    baseCost: 12,
+    growth: 1.5,
+    maxLevel: 3,
+  },
+  {
+    id: 'appraisal',
+    name: '鑑定',
+    desc: '建材ロット（次に使うバリケード/タレットの素材）の品質倍率0.5〜1.5が見える精度を上げる（020新規、019の非対称品質公開を移植）。Lv0=完全不明、Lv1=0.2刻み、Lv2=0.1刻み、Lv3=正確値。良いロットを前線・タレットへ、悪いロットは使い捨てへと選別配置できる。022新規: 夜フェーズ・拠点圏外でのreturnRiskLevel（帰還危険度）の表示精度にも同じLvが効く',
+    // 019 v2の学び（コストを引き下げないと投資ROIが成立しない）を踏まえ、最初から安価に設定
+    baseCost: 9,
+    growth: 1.5,
+    maxLevel: 3,
+  },
+];
+
+interface PlayerState {
+  x: number;
+  y: number;
+  hp: number;
+  fuel: number;
+  /** 026新規: 揺れ（揺れ版のみ） */
+  tremor: number;
+  braceLv: number;
+  /** 救助後の手当て中の残りtick */
+  rescueDownTicks: number;
+  atk: number;
+  atkCd: number;
+  dashCd: number;
+  dashCdMax: number;
+  dashRange: number;
+  dashInvulnTicks: number;
+  money: number;
+  cargoUnits: number;
+  cargoValue: number;
+  digging: Digging | null;
+  offenseLv: number;
+  mobilityLv: number;
+  vitalityLv: number;
+  drillLv: number;
+  fuelLv: number;
+  digspeedLv: number;
+  lanternLv: number;
+  hazardresistLv: number;
+  capacityLv: number;
+  teleportLv: number;
+  basedefenseLv: number;
+  scannerLv: number;
+  chargeLv: number;
+  charge: number;
+  appraisalLv: number;
+}
+
+function maxHpOf(vitalityLv: number): number {
+  return 100 + 20 * vitalityLv;
+}
+function maxFuelOf(fuelLv: number): number {
+  return 100 + 40 * fuelLv;
+}
+function maxCapacityOf(capacityLv: number): number {
+  return 20 + 5 * capacityLv;
+}
+function drillPowerOf(drillLv: number): number {
+  return 1 + drillLv;
+}
+function lanternMultOf(lanternLv: number): number {
+  return Math.max(0.8, 1 - 0.05 * lanternLv);
+}
+function hazardMultOf(hazardresistLv: number): number {
+  return Math.max(0.55, 1 - 0.15 * hazardresistLv);
+}
+
+/** バリケード or タレット（016新規、どちらも「敵の移動を塞ぎ攻撃を吸うobstacle」として同じ扱い） */
+type Obstacle = { kind: 'barricade'; ref: Barricade } | { kind: 'turret'; ref: Turret };
+
+export class Game {
+  seed: number;
+  /** 026新規: 遠征の制約（'tremor'=揺れ、'fuel'=024と同じ燃料の対照群） */
+  readonly resource: Resource;
+  /** 落盤判定専用PRNG（026新規）。燃料版では消費されず、024の乱数列を一切乱さない */
+  private quakeRng: Rng;
+  /** このtickに掘削を進めたか（026新規、回廊で揺れが下がるのは掘らずにいる時だけ） */
+  private dugThisTick = false;
+  tick = 0;
+  over = false;
+  won = false;
+  loseReason: 'playerHp' | 'homeDestroyed' | null = null;
+  private rng: Rng;
+  private tiles: number[];
+  /** バンド×レーンごとの豊富さ・危険度メタ（018新規、生成時に一度だけ決定） */
+  private laneMeta: LaneMeta[][] = [];
+  private nextEnemyId = 1;
+  private nextBarricadeId = 1;
+  private nextTurretId = 1;
+  /** 建材ロット専用PRNG（020新規） */
+  private lotRng: Rng;
+  /** 帰還危険度ヒントの表示ずれ専用PRNG（022新規）。既存の世界生成・敵スポーン・ロット生成の乱数列を乱さない */
+  private riskRng: Rng;
+  /** 建材ロットキュー（真の品質倍率。プレイヤーには鑑定Lvに応じた精度でしか公開しない、020新規） */
+  private buildLots: number[] = [];
+  /** 連携判定のキャッシュ。obstacleの増減時のみ再計算する（毎回O(n²)のペアワイズ判定を避ける） */
+  private linkedCache: Set<number> | null = null;
+  /** 隣接にバリケードがある（盾持ち）タレットのキー集合（v2、linkedCacheと同時に無効化・再計算する） */
+  private shieldedCache: Set<number> | null = null;
+  private player: PlayerState;
+  private enemies: Enemy[] = [];
+  private barricades: Barricade[] = [];
+  private turrets: Turret[] = [];
+  /** 塔と塔を繋ぐ梁（024新規） */
+  private beams: Beam[] = [];
+  private nextBeamId = 1;
+  /** 架設中の梁の進捗（024新規、キー=小さいid-大きいid） */
+  private beamProgress = new Map<string, { progress: number; level: number }>();
+  /** 崩落判定専用PRNG（024新規）。overstressの塔が無い限り消費されず、022の乱数列を乱さない */
+  private towerRng: Rng;
+  /** このtickに行った塔作業（024新規、getState()公開用） */
+  private towerWork: { kind: 'raise' | 'beam'; turretId: number; progress: number; total: number } | null = null;
+  private homeBase: Base = { x: 0, isHome: true, hp: HOME_BASE_MAX_HP, maxHp: HOME_BASE_MAX_HP };
+  private outposts: Base[] = [];
+  private wasInBase = true;
+  private prevCombatSeverity = 0;
+  private combatRiskBannerTicks = 0;
+  private lastMiningRisk: RiskLevel = 'safe';
+  private miningBanner: RiskEscalationBanner | null = null;
+  private lastRaidRisk: RiskLevel = 'safe';
+  private raidBanner: RiskEscalationBanner | null = null;
+  /** 帰還危険度ヒント（022新規）の直近値・バナー。既存3種のリスクヒントと同じキャッシュパターン */
+  private lastReturnRisk: RiskLevel | null = null;
+  private returnRiskBanner: RiskEscalationBanner | null = null;
+  private baseForecasts: BaseForecast[] = [];
+  private lastForecastRisk: RiskLevel = 'safe';
+  private forecastBanner: RiskEscalationBanner | null = null;
+  private phase: Phase = 'day';
+  private phaseTicksLeft = DAY_LENGTH;
+  private stuckIncomeTimer = 0;
+  private fieldRegenTimer = 0;
+  private maxXReached = 0;
+  /** タイルごとの掘削進捗の永続化（011の「詰みからの脱出手段」対策と同一パターン） */
+  private digProgress = new Map<number, number>();
+  private metrics: Metrics = {
+    distanceReached: 0,
+    kills: 0,
+    died: false,
+    moneyEarned: 0,
+    oreMined: 0,
+    oreWasted: 0,
+    upgradesBought: 0,
+    dashUses: 0,
+    barricadesBuilt: 0,
+    barricadesLost: 0,
+    turretsBuilt: 0,
+    turretsLost: 0,
+    turretKills: 0,
+    outpostsBuilt: 0,
+    tripsToHome: 0,
+    hazardHits: 0,
+    hazardDamage: 0,
+    fuelEmptyTicks: 0,
+    combatRiskEscalations: 0,
+    miningRiskEscalations: 0,
+    raidRiskEscalations: 0,
+    forecastRiskEscalations: 0,
+    stuckIncomeEarned: 0,
+    nightsSurvived: 0,
+    outpostsLost: 0,
+    raidersKilled: 0,
+    baseDamageTaken: 0,
+    resonanceTriggers: 0,
+    resonanceBonusOre: 0,
+    obstaclesBuilt: 0,
+    qualitySumBuilt: 0,
+    turretQualitySumBuilt: 0,
+    informedPlacements: 0,
+    linkedPlacements: 0,
+    linkSavedDamage: 0,
+    turretShots: 0,
+    turretShieldedShots: 0,
+    turretDamageDealt: 0,
+    deathPhase: 'none',
+    returnRiskEscalations: 0,
+    patrolFuelSavedTicks: 0,
+    wovenCorridorTicks: 0,
+    raiseLevels: 0,
+    beamsBuilt: 0,
+    firstBeamTick: -1,
+    towerWorkTicks: 0,
+    towerCollapses: 0,
+    cascadeCollapses: 0,
+    segmentsLost: 0,
+    fallDamage: 0,
+    maxTowerHeight: 0,
+    tallShots: 0,
+    coverShots: 0,
+    coverKills: 0,
+    lureHits: 0,
+    beamsLost: 0,
+    luredRaiders: 0,
+    nightFieldDamage: 0,
+    towersLost: 0,
+    heightLostToRaids: 0,
+    tickToH4: -1,
+    tickToH8: -1,
+    tickToH12: -1,
+    caveIns: 0,
+    caveInDamage: 0,
+    caveInLostValue: 0,
+    tremorBonusValue: 0,
+    rescues: 0,
+    rescueNightField: 0,
+    rescueDaySiege: 0,
+    rescueInBase: 0,
+    rescueByCaveIn: 0,
+    rescueFees: 0,
+    rescueLostValue: 0,
+    corridorReliefTicks: 0,
+    duskTicks: 0,
+    maxTremor: 0,
+    score: 0,
+  };
+
+  constructor(seed: number, resource: Resource = 'tremor') {
+    this.seed = seed;
+    this.resource = resource;
+    this.quakeRng = mulberry32((seed ^ 0x2c1b3c6d) >>> 0);
+    this.rng = mulberry32(seed);
+    this.tiles = this.generateWorld();
+    this.player = {
+      x: 0,
+      y: SPAWN_Y,
+      hp: maxHpOf(0),
+      fuel: resource === 'fuel' ? maxFuelOf(0) : 0,
+      tremor: 0,
+      braceLv: 0,
+      rescueDownTicks: 0,
+      atk: PLAYER_INIT_ATK,
+      atkCd: 0,
+      dashCd: 0,
+      dashCdMax: DASH_CD_MAX_INIT,
+      dashRange: DASH_RANGE_INIT,
+      dashInvulnTicks: 0,
+      money: 0,
+      cargoUnits: 0,
+      cargoValue: 0,
+      digging: null,
+      offenseLv: 0,
+      mobilityLv: 0,
+      vitalityLv: 0,
+      drillLv: 0,
+      fuelLv: 0,
+      digspeedLv: 0,
+      lanternLv: 0,
+      hazardresistLv: 0,
+      capacityLv: 0,
+      teleportLv: 0,
+      basedefenseLv: 0,
+      scannerLv: 0,
+      chargeLv: 0,
+      charge: 0,
+      appraisalLv: 0,
+    };
+    // 建材ロットは専用のPRNGで生成する（既存の世界生成・敵スポーンの乱数列を一切乱さないため）
+    this.lotRng = mulberry32((seed ^ 0x5bd1e995) >>> 0);
+    for (let i = 0; i < LOT_QUEUE_SIZE; i++) this.buildLots.push(this.drawLot());
+    // 帰還危険度ヒントの表示ずれも専用PRNGで消費する（022新規、lotRngと同じ理由で別ストリームに分離）
+    this.riskRng = mulberry32((seed ^ 0x27d4eb2f) >>> 0);
+    this.towerRng = mulberry32((seed ^ 0x165667b1) >>> 0);
+    this.baseForecasts = this.computeBaseForecasts();
+  }
+
+  private generateWorld(): number[] {
+    this.laneMeta = [];
+    for (let b = 0; b < NUM_BANDS; b++) {
+      const lanes: LaneMeta[] = [];
+      for (let y = 0; y < LANE_COUNT; y++) {
+        lanes.push({ richness: randInt(this.rng, 4), hazardTier: randInt(this.rng, 3) });
+      }
+      this.laneMeta.push(lanes);
+    }
+    const tiles = new Array<number>(LENGTH * LANE_COUNT).fill(TILE.FLOOR);
+    for (let x = HOME_RADIUS + 1; x < LENGTH; x++) {
+      const band = bandAt(x);
+      const bandMeta = this.laneMeta[Math.max(0, Math.min(NUM_BANDS - 1, band))];
+      for (let y = 0; y < LANE_COUNT; y++) {
+        tiles[x * LANE_COUNT + y] = pickTileType(band, bandMeta[y], this.rng);
+      }
+    }
+    return tiles;
+  }
+
+  /**
+   * フォグ越しに実タイル種を見通せるか（018新規、非対称の情報公開）。既に到達したバンドは常に全公開
+   * （017の「既に採掘済みは常に見える」原則を面レベルに拡張）。未到達バンドは、危険タイル(GAS/UNSTABLE)
+   * だけは1バンド先まで探査Lv0でも常に見える（017の「危険度は常に予告される」原則）。豊富さ（鉱石の実体）
+   * を含む全タイル種は、探査ドリル(scanner)Lv分だけ先のバンドまで見通せる。内部の掘削・戦闘ロジックは
+   * 常に実タイル(this.tiles)を参照するため、この関数はgetState()が公開する見た目にのみ影響する
+   */
+  private isRevealed(x: number, realType: TileId): boolean {
+    if (realType === TILE.FLOOR) return true;
+    const band = Math.max(0, bandAt(x));
+    const frontierBand = Math.max(0, bandAt(Math.max(this.maxXReached, HOME_RADIUS + 1)));
+    if (band <= frontierBand) return true;
+    const aheadBands = band - frontierBand;
+    const isHazard = realType === TILE.GAS || realType === TILE.UNSTABLE;
+    if (isHazard && aheadBands <= SCANNER_HAZARD_PREVIEW_BANDS) return true;
+    return aheadBands <= this.player.scannerLv;
+  }
+  /** getState()が公開するmap.tilesを、フォグを適用して構築する（018新規） */
+  private visibleTiles(): number[] {
+    const out = new Array<number>(this.tiles.length);
+    for (let x = 0; x < LENGTH; x++) {
+      for (let y = 0; y < LANE_COUNT; y++) {
+        const idx = x * LANE_COUNT + y;
+        const real = this.tiles[idx] as TileId;
+        out[idx] = this.isRevealed(x, real) ? real : TILE.UNSCANNED;
+      }
+    }
+    return out;
+  }
+
+  private inBounds(x: number, y: number): boolean {
+    return x >= 0 && x < LENGTH && y >= 0 && y < LANE_COUNT;
+  }
+  private tileAt(x: number, y: number): TileId {
+    return this.tiles[x * LANE_COUNT + y] as TileId;
+  }
+
+  private drillPower(): number {
+    return drillPowerOf(this.player.drillLv);
+  }
+  private maxHp(): number {
+    return maxHpOf(this.player.vitalityLv);
+  }
+  private maxFuel(): number {
+    return maxFuelOf(this.player.fuelLv);
+  }
+  private maxCapacity(): number {
+    return maxCapacityOf(this.player.capacityLv);
+  }
+  private lanternMult(): number {
+    return lanternMultOf(this.player.lanternLv);
+  }
+  private hazardMult(): number {
+    return hazardMultOf(this.player.hazardresistLv);
+  }
+  private teleportUnlocked(): boolean {
+    return this.player.teleportLv >= 1;
+  }
+  private canTeleport(): boolean {
+    if (!this.teleportUnlocked()) return false;
+    return this.resource === 'fuel' ? this.player.fuel >= TELEPORT_FUEL_COST : true;
+  }
+
+  // ---- 揺れ（026新規） ----
+  /** 燃料タンクは燃料版だけ、支保は揺れ版だけで売る */
+  private sells(item: ShopItemId): boolean {
+    if (item === 'fuel') return this.resource === 'fuel';
+    if (item === 'brace') return this.resource === 'tremor';
+    return true;
+  }
+  /** 揺れのたまる速さの倍率（支保とランタン。ランタンは燃料版と同じく受動の消費＝揺れを-5%/Lv） */
+  private tremorGearMult(): number {
+    return Math.max(BRACE_MIN_MULT, 1 - BRACE_REDUCTION * this.player.braceLv) * this.lanternMult();
+  }
+  private isDusk(): boolean {
+    return this.phase === 'day' && this.phaseTicksLeft <= NIGHT_WARNING_TICKS && this.player.cargoUnits > 0;
+  }
+  /** 現在地(x,y)で1tickに変わる揺れ（回廊の中で掘らずにいれば負＝下がる） */
+  private tremorRateHere(x: number, y: number, digging: boolean): number {
+    if (this.inBaseRadius(x)) return 0;
+    const coverage = this.patrolCoverage(x, y);
+    if (coverage === 'woven' && !digging) return -CORRIDOR_RELIEF;
+    let rate = tremorRateAt(this.nearestBaseDistance(x)) * this.tremorGearMult();
+    if (digging) rate *= DIG_TREMOR_MULT;
+    if (coverage === 'woven') rate *= WOVEN_TREMOR_MULT;
+    else if (coverage === 'lane') rate *= PATROL_TREMOR_MULT;
+    if (this.isDusk()) rate *= DUSK_TREMOR_MULT;
+    return rate;
+  }
+  /**
+   * 今からホーム方向へ歩いて最寄りの拠点圏に入るまでに、揺れが最も高くなる値の見積もり（帰着線）。
+   * 掘らずに今のレーンを歩く前提。回廊（足場）に入るとそこから下がるので、回廊の手前がピークになる
+   * （開発中の観察: 到着時の値を使うと、回廊で下がる分を当て込んで回廊の外で揺れ100超まで粘り、落盤が3倍になった）。
+   * 拠点圏内・燃料版ではnull
+   */
+  private estTremorAtReturn(): number | null {
+    if (this.resource !== 'tremor') return null;
+    const p = this.player;
+    if (this.inBaseRadius(p.x)) return null;
+    let t = p.tremor;
+    let peak = t;
+    for (let x = p.x - 1; x >= 0; x--) {
+      if (this.inBaseRadius(x)) break;
+      t = Math.max(0, Math.min(TREMOR_CAP, t + this.tremorRateHere(x, p.y, false)));
+      if (t > peak) peak = t;
+    }
+    return Math.round(peak);
+  }
+  private tremorRiskLevel(): RiskLevel {
+    const est = this.estTremorAtReturn();
+    if (est === null) return 'safe';
+    if (est >= TREMOR_DANGER_AT) return 'danger';
+    if (est >= TREMOR_CAUTION_AT) return 'caution';
+    return 'safe';
+  }
+  /** 毎tickの揺れの更新と落盤判定（行動の後に呼ぶ） */
+  private tickTremor(): void {
+    const p = this.player;
+    if (this.inBaseRadius(p.x)) {
+      p.tremor = 0;
+      return;
+    }
+    const coverage = this.patrolCoverage(p.x, p.y);
+    const rate = this.tremorRateHere(p.x, p.y, this.dugThisTick);
+    if (rate < 0) this.metrics.corridorReliefTicks++;
+    if (this.isDusk()) this.metrics.duskTicks++;
+    if (coverage !== 'none') this.metrics.patrolFuelSavedTicks++;
+    if (coverage === 'woven') this.metrics.wovenCorridorTicks++;
+    p.tremor = Math.max(0, Math.min(TREMOR_CAP, p.tremor + rate));
+    if (p.tremor > this.metrics.maxTremor) this.metrics.maxTremor = Math.round(p.tremor);
+    const prob = caveInProb(p.tremor);
+    if (prob <= 0 || this.quakeRng() >= prob) return;
+    // 落盤: HPダメージ＋積荷の1/3を落とす＋揺れが少し収まる（即死ではない部分損失）
+    const d = this.nearestBaseDistance(p.x);
+    const dmg = Math.round((CAVEIN_DMG_BASE + d * CAVEIN_DMG_PER_DIST) * this.hazardMult());
+    p.hp -= dmg;
+    const spill = Math.floor(p.cargoUnits * CAVEIN_SPILL_FRAC);
+    if (spill > 0) {
+      const lost = Math.round((p.cargoValue * spill) / p.cargoUnits);
+      p.cargoUnits -= spill;
+      p.cargoValue -= lost;
+      this.metrics.caveInLostValue += lost;
+    }
+    p.tremor = Math.max(0, p.tremor - CAVEIN_RELIEF);
+    this.metrics.caveIns++;
+    this.metrics.caveInDamage += dmg;
+    if (p.hp <= 0) this.metrics.rescueByCaveIn++;
+  }
+  /** HP0からの救助（揺れ版、025の救助を移植）: ホームへ運ばれ、積荷全損＋所持金の15%＋手当ての時間。ゲームは続く */
+  private rescue(): void {
+    const p = this.player;
+    const where = this.deathPhaseAt();
+    this.metrics.rescues++;
+    if (where === 'night-field') this.metrics.rescueNightField++;
+    else if (where === 'day-siege') this.metrics.rescueDaySiege++;
+    else this.metrics.rescueInBase++;
+    this.metrics.rescueLostValue += p.cargoValue;
+    const fee = Math.floor(p.money * RESCUE_FEE_RATE);
+    p.money -= fee;
+    this.metrics.rescueFees += fee;
+    p.cargoUnits = 0;
+    p.cargoValue = 0;
+    this.stashDigging();
+    p.digging = null;
+    p.x = 0;
+    p.y = SPAWN_Y;
+    p.tremor = 0;
+    p.hp = this.maxHp();
+    p.rescueDownTicks = RESCUE_DOWN_TICKS;
+    this.wasInBase = true;
+  }
+
+  private allBases(): Base[] {
+    return [this.homeBase, ...this.outposts];
+  }
+  private radiusFor(base: Base): number {
+    return base.isHome ? HOME_RADIUS : OUTPOST_RADIUS;
+  }
+  private findBaseByX(x: number): Base | undefined {
+    return this.allBases().find((b) => b.x === x);
+  }
+  private nearestBaseDistance(x: number): number {
+    let best = Infinity;
+    for (const b of this.allBases()) best = Math.min(best, Math.abs(x - b.x));
+    return best;
+  }
+  /** 拠点（ホーム or 前線拠点）の保護範囲内か（008パターン#3） */
+  private inBaseRadius(x: number): boolean {
+    for (const b of this.allBases()) {
+      if (Math.abs(x - b.x) <= this.radiusFor(b)) return true;
+    }
+    return false;
+  }
+  /** 死亡直前の状況分類（022新規、020/021-finalの教訓でcore Metricsへ標準搭載）。拠点圏内なら'in-base'、
+   * 拠点圏外なら昼夜フェーズに応じて'day-siege'/'night-field'を返す */
+  private deathPhaseAt(): DeathPhase {
+    if (this.inBaseRadius(this.player.x)) return 'in-base';
+    return this.phase === 'night' ? 'night-field' : 'day-siege';
+  }
+
+  /** 拠点HPが0以下になった時の処理。ホームなら敗北、前線拠点なら破壊して除去する */
+  private destroyBase(base: Base): void {
+    if (base.isHome) {
+      this.over = true;
+      this.won = false;
+      this.loseReason = 'homeDestroyed';
+      this.metrics.died = true;
+      this.metrics.deathPhase = 'in-base';
+      return;
+    }
+    this.outposts = this.outposts.filter((o) => o.x !== base.x);
+    this.metrics.outpostsLost++;
+    // 破壊された拠点を狙っていたレイダーは、残存する最寄りの拠点へ再ターゲットする
+    const remaining = this.allBases();
+    for (const e of this.enemies) {
+      if (!e.isRaider || e.targetBaseX !== base.x) continue;
+      let best = remaining[0];
+      let bestDist = Infinity;
+      for (const b of remaining) {
+        const d = Math.abs(e.x - b.x);
+        if (d < bestDist) {
+          bestDist = d;
+          best = b;
+        }
+      }
+      e.targetBaseX = best.x;
+    }
+  }
+  /** 昼フェーズ中、レイダーに脅かされていない拠点はゆっくり自己修復する */
+  private regenBasesForDay(): void {
+    if (this.phase !== 'day') return;
+    for (const base of this.allBases()) {
+      if (base.hp >= base.maxHp) continue;
+      const threatened = this.enemies.some((e) => e.isRaider && Math.abs(e.x - base.x) <= this.radiusFor(base));
+      if (threatened) continue;
+      base.hp = Math.min(base.maxHp, base.hp + BASE_DAY_REGEN);
+    }
+  }
+  private barricadeAt(x: number, y: number): Barricade | undefined {
+    return this.barricades.find((b) => b.x === x && b.y === y);
+  }
+  private turretAt(x: number, y: number): Turret | undefined {
+    return this.turrets.find((t) => t.x === x && t.y === y);
+  }
+  /**
+   * バリケードとタレットはどちらも「敵の移動を塞ぎ、攻撃を吸うobstacle」として同じ扱いを受ける
+   * （016新規）。種別をkindで持ち、破壊時にどちらの配列・メトリクスを更新すべきかを一箇所で判定できるようにする
+   */
+  private obstacleAt(x: number, y: number): Obstacle | undefined {
+    const b = this.barricadeAt(x, y);
+    if (b) return { kind: 'barricade', ref: b };
+    const t = this.turretAt(x, y);
+    if (t) return { kind: 'turret', ref: t };
+    return undefined;
+  }
+  /**
+   * 連携（隣接チェビシェフ距離1に別のバリケード/タレットがある）状態のobstacleキー集合（020新規）。
+   * obstacleが増減した時（設置・破壊）にキャッシュを無効化するため、判定はO(n×8)のみ。
+   * 019で確認した「ペアワイズ判定がO(n^3)で破綻する」問題を最初から避けた設計
+   */
+  private linkedSet(): Set<number> {
+    if (this.linkedCache) return this.linkedCache;
+    const occ = new Set<number>();
+    const wallKeys = new Set<number>();
+    const all: { x: number; y: number }[] = [...this.barricades, ...this.turrets];
+    for (const o of all) occ.add(o.x * LANE_COUNT + o.y);
+    for (const b of this.barricades) wallKeys.add(b.x * LANE_COUNT + b.y);
+    const linked = new Set<number>();
+    for (const o of all) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          const ny = o.y + dy;
+          if (ny < 0 || ny >= LANE_COUNT) continue;
+          if (occ.has((o.x + dx) * LANE_COUNT + ny)) linked.add(o.x * LANE_COUNT + o.y);
+        }
+      }
+    }
+    const shielded = new Set<number>();
+    for (const t of this.turrets) {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          const ny = t.y + dy;
+          if (ny < 0 || ny >= LANE_COUNT) continue;
+          if (wallKeys.has((t.x + dx) * LANE_COUNT + ny)) shielded.add(t.x * LANE_COUNT + t.y);
+        }
+      }
+    }
+    this.linkedCache = linked;
+    this.shieldedCache = shielded;
+    return linked;
+  }
+  /** タレットの隣接にバリケードがあるか（盾持ち＝攻撃ダメージボーナス対象、v2） */
+  private isShielded(x: number, y: number): boolean {
+    this.linkedSet();
+    return this.shieldedCache!.has(x * LANE_COUNT + y);
+  }
+  private isLinked(x: number, y: number): boolean {
+    return this.linkedSet().has(x * LANE_COUNT + y);
+  }
+
+  /** 建材ロットを1つ生成する（品質倍率0.5〜1.5の一様乱数） */
+  private drawLot(): number {
+    return LOT_QUALITY_MIN + this.lotRng() * LOT_QUALITY_RANGE;
+  }
+  /** 鑑定Lvに応じた精度でロット品質を公開する（Lv0=null、Lv1=0.2刻み、Lv2=0.1刻み、Lv3=0.01刻みの正確値） */
+  private appraisedLots(): (number | null)[] {
+    const lv = this.player.appraisalLv;
+    if (lv === 0) return this.buildLots.map(() => null);
+    const step = lv === 1 ? 0.2 : lv === 2 ? 0.1 : 0.01;
+    return this.buildLots.map((q) => Math.round(Math.round(q / step) * step * 100) / 100);
+  }
+  /**
+   * 建材ロットを1つ消費し、品質倍率を返す。鑑定Lv0では品質が見えないため常に先頭（index0）を消費する
+   * （lotIndexは無視される）。消費後は末尾へ新ロットを補充し、キュー長を保つ
+   */
+  private takeLot(lotIndex: number | undefined): { quality: number; informed: boolean } {
+    const canChoose = this.player.appraisalLv >= 1;
+    let idx = 0;
+    if (canChoose && lotIndex !== undefined && Number.isInteger(lotIndex) && lotIndex >= 0 && lotIndex < this.buildLots.length) {
+      idx = lotIndex;
+    }
+    const [quality] = this.buildLots.splice(idx, 1);
+    this.buildLots.push(this.drawLot());
+    return { quality, informed: canChoose && lotIndex !== undefined };
+  }
+  /** 設置直後の共通記録（品質・連携・鑑定投資に基づく選別配置のメトリクス）。obstacleを配列へ追加した後に呼ぶ */
+  private recordPlacement(x: number, y: number, quality: number, informed: boolean, isTurret: boolean): void {
+    this.linkedCache = null;
+    this.shieldedCache = null;
+    this.metrics.obstaclesBuilt++;
+    this.metrics.qualitySumBuilt += quality;
+    if (isTurret) this.metrics.turretQualitySumBuilt += quality;
+    if (informed) this.metrics.informedPlacements++;
+    if (this.isLinked(x, y)) this.metrics.linkedPlacements++;
+  }
+
+  private damageObstacle(o: Obstacle, dmg: number): void {
+    if (this.isLinked(o.ref.x, o.ref.y)) {
+      const reduced = dmg * LINK_DAMAGE_MULT;
+      this.metrics.linkSavedDamage += dmg - reduced;
+      dmg = reduced;
+    }
+    o.ref.hp -= dmg;
+    if (o.ref.hp > 0) {
+      // 024新規: 自由長を超えた塔は、被弾の揺れで超過分に比例して即座に折れうる
+      if (o.kind === 'turret') {
+        const over = this.overstressOf(o.ref);
+        if (over > 0 && this.towerRng() < OVERSTRESS_HIT_CHANCE * over) this.collapseTower(o.ref, false);
+      }
+      return;
+    }
+    this.linkedCache = null;
+    this.shieldedCache = null;
+    if (o.kind === 'barricade') {
+      this.barricades = this.barricades.filter((b) => b.id !== o.ref.id);
+      this.metrics.barricadesLost++;
+    } else {
+      this.destroyTurret(o.ref);
+    }
+  }
+
+  /**
+   * 射線上（始点・終点を除く中間マス）にobstacle（バリケード or タレット）があれば、それを返す
+   * （v2 FIXの対象をタレットにも拡張、016）。距離を維持したまま撃ち続けるarcher(range>1)に対しても、
+   * どちらのobstacleも身代わりになれる。Bresenhamで射線上の中間マスを辿り、最初に見つかったものを返す
+   */
+  private lineOfSightObstacle(x1: number, y1: number, x2: number, y2: number): Obstacle | undefined {
+    let x = x1;
+    let y = y1;
+    const dx = Math.abs(x2 - x1);
+    const dy = Math.abs(y2 - y1);
+    const sx = x1 < x2 ? 1 : -1;
+    const sy = y1 < y2 ? 1 : -1;
+    let err = dx - dy;
+    while (x !== x2 || y !== y2) {
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+      if (x === x2 && y === y2) break;
+      const o = this.obstacleAt(x, y);
+      if (o) return o;
+    }
+    return undefined;
+  }
+
+  /** 既に掘った道(FLOOR)だけを通ってホーム(x=0)へ戻るのに必要なマス数をBFSで求める */
+  private bfsDistanceToHome(): number {
+    if (this.player.x === 0) return 0;
+    const visited = new Uint8Array(LENGTH * LANE_COUNT);
+    const startIdx = this.player.x * LANE_COUNT + this.player.y;
+    visited[startIdx] = 1;
+    let queue: number[] = [startIdx];
+    let qi = 0;
+    let dist = 0;
+    while (qi < queue.length) {
+      const levelSize = queue.length - qi;
+      dist++;
+      for (let i = 0; i < levelSize; i++) {
+        const idx = queue[qi++];
+        const x = Math.floor(idx / LANE_COUNT);
+        const y = idx % LANE_COUNT;
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (!this.inBounds(nx, ny)) continue;
+          const nidx = nx * LANE_COUNT + ny;
+          if (visited[nidx]) continue;
+          if (nx === 0) return dist;
+          if (this.tileAt(nx, ny) !== TILE.FLOOR) continue;
+          visited[nidx] = 1;
+          queue.push(nidx);
+        }
+      }
+    }
+    return Infinity;
+  }
+  private estFuelToReturn(): number | null {
+    const dist = this.bfsDistanceToHome();
+    if (!Number.isFinite(dist)) return null;
+    return Math.ceil(dist * PASSIVE_FUEL_DRAIN * this.lanternMult());
+  }
+
+  private recommendedHp(): number {
+    return recommendedHpForBand(bandAt(this.player.x));
+  }
+  private combatRiskLevel(): RiskLevel {
+    return riskLevelForRatio(this.maxHp(), this.recommendedHp());
+  }
+  private computeMiningRisk(fuel: number, estReturn: number | null): RiskLevel {
+    if (estReturn === null) return 'safe';
+    if (fuel <= estReturn + RISK_DANGER_MARGIN) return 'danger';
+    if (fuel <= estReturn * RISK_CAUTION_MULT) return 'caution';
+    return 'safe';
+  }
+  private static readonly RISK_ORDER: Record<RiskLevel, number> = { safe: 0, caution: 1, danger: 2 };
+
+  /** 夜フェーズかつどの拠点圏内にもいない場合に発火する新規ヒント（013新規） */
+  private computeRaidRisk(): RiskLevel {
+    if (this.phase !== 'night') return 'safe';
+    if (this.inBaseRadius(this.player.x)) return 'safe';
+    const dist = this.nearestBaseDistance(this.player.x);
+    if (dist <= RAID_CAUTION_DIST) return 'caution';
+    return 'danger';
+  }
+
+  /** タレットのパトロール圏（同レーン上のx方向チェビシェフ距離）。品質・連携が既存投資通り効く（022新規） */
+  private turretPatrolRange(t: Turret): number {
+    return (
+      PATROL_RANGE_BASE +
+      t.quality * PATROL_RANGE_QUALITY_MULT +
+      (this.isLinked(t.x, t.y) ? PATROL_RANGE_LINK_BONUS : 0) +
+      t.height * PATROL_HEIGHT_MULT
+    );
+  }
+  /** 指定タイルがいずれかのタレットのパトロール圏内か（022新規） */
+  private inPatrolCorridor(x: number, y: number): boolean {
+    return this.patrolCoverage(x, y) !== 'none';
+  }
+  /**
+   * 指定タイルのパトロール圏の種類（024新規）。梁で繋がった塔は、繋がった塔群のレーン範囲全体を
+   * 回廊として覆い（'woven'、燃料消費がさらに軽い）、梁の無い塔は022と同じく自分のレーンだけを覆う（'lane'）
+   */
+  private patrolCoverage(x: number, y: number): 'none' | 'lane' | 'woven' {
+    let best: 'none' | 'lane' | 'woven' = 'none';
+    for (const t of this.turrets) {
+      if (Math.abs(x - t.x) > this.turretPatrolRange(t)) continue;
+      if (this.topBeamLevel(t) > 0) {
+        const [lo, hi] = this.corridorLanes(t);
+        if (y >= lo && y <= hi) return 'woven';
+      }
+      if (t.y === y) best = 'lane';
+    }
+    return best;
+  }
+
+  // ---- 塔・梁（024新規） ----
+  private turretById(id: number): Turret | undefined {
+    return this.turrets.find((t) => t.id === id);
+  }
+  private topBeamLevel(t: Turret): number {
+    let m = 0;
+    for (const b of this.beams) if ((b.aId === t.id || b.bId === t.id) && b.level > m) m = b.level;
+    return m;
+  }
+  private freeLengthOf(t: Turret): number {
+    return t.height - this.topBeamLevel(t);
+  }
+  private overstressOf(t: Turret): number {
+    return Math.max(0, this.freeLengthOf(t) - SLENDER_LIMIT);
+  }
+  private turretRange(t: Turret): number {
+    return TURRET_RANGE + Math.floor(t.height / TOWER_RANGE_STEP);
+  }
+  private raiseCostOf(t: Turret): number {
+    return RAISE_BASE_COST + RAISE_COST_PER_LEVEL * t.height;
+  }
+  private beamCostOf(level: number): number {
+    return BEAM_BASE_COST + BEAM_COST_PER_LEVEL * level;
+  }
+  /** 梁で繋がった塔群（連結成分）のレーン範囲 */
+  private corridorLanes(t: Turret): [number, number] {
+    let lo = t.y;
+    let hi = t.y;
+    const seen = new Set<number>([t.id]);
+    const stack = [t.id];
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      for (const b of this.beams) {
+        const other = b.aId === id ? b.bId : b.bId === id ? b.aId : -1;
+        if (other < 0 || seen.has(other)) continue;
+        seen.add(other);
+        const o = this.turretById(other);
+        if (!o) continue;
+        lo = Math.min(lo, o.y);
+        hi = Math.max(hi, o.y);
+        stack.push(other);
+      }
+    }
+    return [lo, hi];
+  }
+  private pairLevel(aId: number, bId: number): number {
+    let m = 0;
+    for (const b of this.beams) {
+      if ((b.aId === aId && b.bId === bId) || (b.aId === bId && b.bId === aId)) m = Math.max(m, b.level);
+    }
+    return m;
+  }
+  /**
+   * 自由長超過による崩落（024新規）。「最高の梁＋SLENDER_LIMIT」より上の段が折れて落ちる。
+   * 塔自身も損傷し、隣接していたプレイヤーは落下物でダメージを受ける
+   */
+  private collapseTower(t: Turret, cascade: boolean): void {
+    const keep = this.topBeamLevel(t) + SLENDER_LIMIT;
+    const lost = t.height - keep;
+    if (lost <= 0) return;
+    t.height = keep;
+    t.raiseProgress = 0;
+    this.metrics.towerCollapses++;
+    if (cascade) this.metrics.cascadeCollapses++;
+    this.metrics.segmentsLost += lost;
+    if (chebyshev(t.x, t.y, this.player.x, this.player.y) <= 1 && this.player.dashInvulnTicks <= 0) {
+      const dmg = FALL_DMG_PER_SEGMENT * lost;
+      this.player.hp -= dmg;
+      this.metrics.fallDamage += dmg;
+    }
+    t.hp -= COLLAPSE_HP_FRAC * t.maxHp;
+    if (t.hp <= 0) this.destroyTurret(t);
+  }
+  /** タレット（塔）の破壊（024新規）。架かっていた梁は落ち、相手の塔は自由長が伸びて連鎖崩落しうる */
+  private destroyTurret(t: Turret): void {
+    if (!this.turrets.includes(t)) return;
+    this.turrets = this.turrets.filter((o) => o.id !== t.id);
+    this.metrics.turretsLost++;
+    if (t.height > 0) {
+      this.metrics.towersLost++;
+      this.metrics.heightLostToRaids += t.height;
+    }
+    this.linkedCache = null;
+    this.shieldedCache = null;
+    const partners: number[] = [];
+    for (const b of this.beams) {
+      if (b.aId === t.id) partners.push(b.bId);
+      else if (b.bId === t.id) partners.push(b.aId);
+    }
+    this.beams = this.beams.filter((b) => b.aId !== t.id && b.bId !== t.id);
+    for (const id of partners) {
+      const o = this.turretById(id);
+      if (o && this.overstressOf(o) > 0) this.collapseTower(o, true);
+    }
+  }
+  /** v2新規: 高い塔が呼び寄せる追加の襲撃数（拠点ごとの塔の高さの合計÷LURE_RAID_STEP、切り捨て） */
+  private lureRaidCount(): number {
+    let n = 0;
+    for (const base of this.allBases()) {
+      let total = 0;
+      for (const t of this.turrets) if (Math.abs(t.x - base.x) <= this.radiusFor(base)) total += t.height;
+      n += Math.floor(total / LURE_RAID_STEP);
+    }
+    return n;
+  }
+  /** v2新規: この塔に架かる最も高い梁（無ければnull） */
+  private topBeamOf(t: Turret): Beam | null {
+    let best: Beam | null = null;
+    for (const b of this.beams) if ((b.aId === t.id || b.bId === t.id) && (!best || b.level > best.level)) best = b;
+    return best;
+  }
+  /** v2新規: 梁への攻撃。耐久が尽きると梁が落ち、両塔は自由長が伸びて超過分に応じその場で折れうる（連鎖崩落として数える） */
+  private damageBeam(b: Beam, dmg: number): void {
+    b.hp -= dmg;
+    if (b.hp > 0) return;
+    this.beams = this.beams.filter((o) => o.id !== b.id);
+    this.metrics.beamsLost++;
+    for (const id of [b.aId, b.bId]) {
+      const t = this.turretById(id);
+      if (!t) continue;
+      const over = this.overstressOf(t);
+      if (over > 0 && this.towerRng() < OVERSTRESS_HIT_CHANCE * over) this.collapseTower(t, true);
+    }
+  }
+  /** 毎tick: 自由長を超えた塔は超過分に比例して崩落しうる（夜は揺れが強い） */
+  private tickTowers(): void {
+    for (const t of [...this.turrets]) {
+      if (!this.turrets.includes(t)) continue;
+      const over = this.overstressOf(t);
+      if (over <= 0) continue;
+      const chance = OVERSTRESS_COLLAPSE_CHANCE * over * (this.phase === 'night' ? OVERSTRESS_NIGHT_MULT : 1);
+      if (this.towerRng() < chance) this.collapseTower(t, false);
+    }
+  }
+  private adjacentTurret(dir: Dir): Turret | undefined {
+    const { nx, ny } = adjacentTile(this.player.x, this.player.y, dir);
+    const targetX = dir === 'left' || dir === 'right' ? Math.max(0, Math.min(FIELD_WIDTH, nx)) : this.player.x;
+    const targetY = dir === 'up' || dir === 'down' ? ny : this.player.y;
+    return this.turretAt(targetX, targetY);
+  }
+  /** 積み増し（024新規）。開始時に費用を払い、RAISE_TICKSの作業で高さ+1 */
+  private applyRaise(dir: Dir): void {
+    const t = this.adjacentTurret(dir);
+    if (!t || t.height >= TOWER_MAX_HEIGHT) return;
+    if (t.raiseProgress === 0) {
+      const cost = this.raiseCostOf(t);
+      if (this.player.money < cost) return;
+      this.player.money -= cost;
+    }
+    this.stashDigging();
+    this.player.digging = null;
+    t.raiseProgress++;
+    this.metrics.towerWorkTicks++;
+    this.towerWork = { kind: 'raise', turretId: t.id, progress: t.raiseProgress, total: RAISE_TICKS };
+    if (t.raiseProgress >= RAISE_TICKS) {
+      t.raiseProgress = 0;
+      t.height++;
+      this.metrics.raiseLevels++;
+      this.metrics.maxTowerHeight = Math.max(this.metrics.maxTowerHeight, t.height);
+      if (t.height >= 4 && this.metrics.tickToH4 < 0) this.metrics.tickToH4 = this.tick;
+      if (t.height >= 8 && this.metrics.tickToH8 < 0) this.metrics.tickToH8 = this.tick;
+      if (t.height >= 12 && this.metrics.tickToH12 < 0) this.metrics.tickToH12 = this.tick;
+    }
+  }
+  /** 梁を架ける相手の塔を選ぶ: 架設中のものを優先、次に架けられる高さが最大、同点は近い方・id順 */
+  private pickBeamPartner(a: Turret): { b: Turret; level: number; key: string } | null {
+    let best: { b: Turret; level: number; key: string } | null = null;
+    let bestScore = -Infinity;
+    for (const b of this.turrets) {
+      if (b.id === a.id) continue;
+      const d = chebyshev(a.x, a.y, b.x, b.y);
+      if (d > BEAM_SPAN) continue;
+      const key = `${Math.min(a.id, b.id)}-${Math.max(a.id, b.id)}`;
+      const pending = this.beamProgress.get(key);
+      const level = Math.min(a.height, b.height);
+      if (!pending && (level < 1 || level <= this.pairLevel(a.id, b.id))) continue;
+      const score = (pending ? 10000 : 0) + level * 10 - d;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { b, level: pending ? pending.level : level, key };
+      }
+    }
+    return best;
+  }
+  /** 梁の架設（024新規）。開始時に費用を払い、BEAM_TICKSの作業で完成 */
+  private applyBeam(dir: Dir): void {
+    const a = this.adjacentTurret(dir);
+    if (!a) return;
+    const pick = this.pickBeamPartner(a);
+    if (!pick) return;
+    let entry = this.beamProgress.get(pick.key);
+    if (!entry) {
+      const cost = this.beamCostOf(pick.level);
+      if (this.player.money < cost) return;
+      this.player.money -= cost;
+      entry = { progress: 0, level: pick.level };
+      this.beamProgress.set(pick.key, entry);
+    }
+    this.stashDigging();
+    this.player.digging = null;
+    entry.progress++;
+    this.metrics.towerWorkTicks++;
+    this.towerWork = { kind: 'beam', turretId: a.id, progress: entry.progress, total: BEAM_TICKS };
+    if (entry.progress < BEAM_TICKS) return;
+    this.beamProgress.delete(pick.key);
+    // 架設中に塔が崩れて低くなっていれば、梁はその時点の低い方の高さに架かる（それでも既存の梁以下なら無駄になる）
+    const level = Math.min(entry.level, a.height, pick.b.height);
+    if (level < 1 || level <= this.pairLevel(a.id, pick.b.id)) return;
+    this.beams.push({ id: this.nextBeamId++, aId: a.id, bId: pick.b.id, level, hp: BEAM_HP, maxHp: BEAM_HP });
+    this.metrics.beamsBuilt++;
+    if (this.metrics.firstBeamTick < 0) this.metrics.firstBeamTick = this.tick;
+  }
+
+  /**
+   * 帰還危険度の"実体"（022新規）。燃料マージン（現在燃料÷帰還推定燃料）と、帰路付近
+   * （ホーム側・x方向RETURN_RISK_SCAN_RANGE以内）にいる夜間レイダーの数の両方から決まる。
+   * この値自体は鑑定Lvに一切依存しない——燃料さえ足りていても、帰路に敵がいれば危険という
+   * 021-finalが望んだ「敵密度・戦闘による停滞」の要素を最初から組み込む
+   */
+  private computeTrueReturnRisk(): RiskLevel {
+    if (this.phase !== 'night') return 'safe';
+    if (this.inBaseRadius(this.player.x)) return 'safe';
+    // 026新規: 揺れ版は帰着線の揺れを燃料の余裕度に読み替える（危険線60＝余裕1.2倍、注意線40＝2.0倍に相当）
+    let marginRatio: number;
+    if (this.resource === 'tremor') {
+      const est = this.estTremorAtReturn() ?? 0;
+      marginRatio = est >= TREMOR_DANGER_AT ? 1 : est >= TREMOR_CAUTION_AT ? 1.5 : 3;
+    } else {
+      const estReturn = this.estFuelToReturn();
+      if (estReturn === null || estReturn === 0) return 'safe';
+      marginRatio = this.player.fuel / estReturn;
+    }
+    let nearbyRaiders = 0;
+    for (const e of this.enemies) {
+      if (!e.isRaider) continue;
+      if (e.x > this.player.x) continue; // ホーム側（帰路上）にいるレイダーのみ数える
+      if (this.player.x - e.x <= RETURN_RISK_SCAN_RANGE) nearbyRaiders++;
+    }
+    if (marginRatio < 1.2 || nearbyRaiders >= 3) return 'danger';
+    if (marginRatio < 2.0 || nearbyRaiders >= 1) return 'caution';
+    return 'safe';
+  }
+  private static readonly RISK_STEPS: RiskLevel[] = ['safe', 'caution', 'danger'];
+  /**
+   * 鑑定Lvに応じた帰還危険度の表示精度（022新規）。Lv0はヒント自体を出さない（null）。
+   * Lv1〜3は実体(trueLevel)に対し確率的に隣接1段階へずらす——鑑定は「知ること」だけに効き、
+   * 実際の危険（trueLevel、＝computeTrueReturnRiskが返す値）自体は変えない
+   */
+  private displayedReturnRisk(trueLevel: RiskLevel): RiskLevel | null {
+    const lv = Math.max(0, Math.min(3, this.player.appraisalLv));
+    if (lv === 0) return null;
+    const noiseChance = RETURN_RISK_NOISE_CHANCE[lv];
+    if (this.riskRng() >= noiseChance) return trueLevel;
+    const idx = Game.RISK_STEPS.indexOf(trueLevel);
+    const dir = this.riskRng() < 0.5 ? -1 : 1;
+    const nidx = Math.max(0, Math.min(Game.RISK_STEPS.length - 1, idx + dir));
+    return Game.RISK_STEPS[nidx];
+  }
+
+  /**
+   * 帰還時に寄るべきレーン（022新規、021のルート選択をレーン制フィールドへ翻案）。現在地の
+   * x座標がパトロール圏に含まれるタレットのうち、現在レーンと異なりレーン変更コストが最小の
+   * ものを推奨する。夜フェーズ・拠点圏外でのみ意味を持つ
+   */
+  private recommendedReturnLane(): number | null {
+    if (this.phase !== 'night') return null;
+    if (this.inBaseRadius(this.player.x)) return null;
+    let best: number | null = null;
+    let bestExtra = Infinity;
+    for (const t of this.turrets) {
+      if (t.y === this.player.y) continue;
+      if (Math.abs(this.player.x - t.x) > this.turretPatrolRange(t)) continue;
+      const extra = Math.abs(t.y - this.player.y);
+      if (extra < bestExtra) {
+        bestExtra = extra;
+        best = t.y;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 拠点ごとの今夜の脅威予告（014新規）。spawnRaidWaveが夜フェーズ開始時に実際に行う
+   * 「拠点からRAID_MIN_SPAWN_DIST以上離れた掘削済みタイルを候補にし、band依存の重みで
+   * 最寄り拠点へ配分する」ロジックを、乱数を消費せず期待値として先読みする。
+   * 昼フェーズ中のみ意味を持ち、夜フェーズ中は（予告はすでに解決済みのため）空配列を返す
+   */
+  private computeBaseForecasts(): BaseForecast[] {
+    if (this.phase !== 'day') return [];
+    const bases = this.allBases();
+    const raidCount = Math.min(RAID_MAX_COUNT, RAID_BASE_COUNT + Math.floor(this.metrics.nightsSurvived / RAID_PER_NIGHT_DIV));
+    const zoneWeight = new Map<number, number>(bases.map((b) => [b.x, 0]));
+    // v3 FIX バグ#6: 予告のband係数(mult)には拠点自身の座標のband(常にhomeなら0)を使っていたが、
+    // 実際にspawnRaidWaveが個々のレイダーへ与えるband係数は、そのレイダーの湧いたタイル
+    // (picked.x、拠点から10マス以上離れた掘削済みの地）のbandを使う。特にhome拠点(x=0)は
+    // どれだけ深く掘り進めても拠点自身のband常に0のままなので、この不一致により
+    // 「深く掘るほど強くなるレイダー」の実際の脅威をhome予告が一貫して過小評価していた
+    // （outpostは湧き元と近いため誤差は小さい）。zoneWeightと同じ重み付けで湧き元タイルの
+    // band加重平均を求め、拠点自身のbandの代わりに使うことでspawnRaidWaveの期待値と一致させる
+    const zoneBandWeight = new Map<number, number>(bases.map((b) => [b.x, 0]));
+    let totalWeight = 0;
+    for (let x = 0; x <= FIELD_WIDTH; x++) {
+      if (bases.some((b) => Math.abs(x - b.x) < RAID_MIN_SPAWN_DIST)) continue;
+      let floorLanes = 0;
+      for (let y = 0; y < LANE_COUNT; y++) {
+        if (this.tileAt(x, y) === TILE.FLOOR) floorLanes++;
+      }
+      if (floorLanes === 0) continue;
+      const tileBand = Math.max(0, bandAt(x));
+      const w = (1 + tileBand * 2) * floorLanes;
+      let nearest = bases[0];
+      let bestDist = Infinity;
+      for (const b of bases) {
+        const d = Math.abs(x - b.x);
+        if (d < bestDist) {
+          bestDist = d;
+          nearest = b;
+        }
+      }
+      zoneWeight.set(nearest.x, (zoneWeight.get(nearest.x) ?? 0) + w);
+      zoneBandWeight.set(nearest.x, (zoneBandWeight.get(nearest.x) ?? 0) + w * tileBand);
+      totalWeight += w;
+    }
+    return bases.map((b) => {
+      const w = zoneWeight.get(b.x) ?? 0;
+      // totalWeight===0は「掘削済みタイルがまだ拠点から十分離れていない」状態で、
+      // 実際のspawnRaidWaveもcandidates.length===0なら1体も湧かせず早期returnする（本節冒頭コメント参照）。
+      // ここでraidCountをそのまま拠点数で等分してしまうと「誰も掘っていないのに今夜は危険」という
+      // 実態と矛盾した予告になるため、実際の挙動に合わせ0体（safe）として扱う
+      const expectedRaiders = totalWeight > 0 ? raidCount * (w / totalWeight) : 0;
+      // v3 FIX バグ#6: 拠点自身のband(bandAt(b.x))ではなく、この拠点を狙うレイダーの
+      // 湧き元タイルのband加重平均(w>0なら按分、0なら実際にレイダーが湧かないのでband0で無害)を使う
+      const spawnBand = w > 0 ? (zoneBandWeight.get(b.x) ?? 0) / w : 0;
+      const mult = 1 + spawnBand * 0.1 + this.metrics.nightsSurvived * RAID_NIGHT_ATK_MULT;
+      // v2 FIX バグ#5: basedefense投資(baseAutoDefenseDmg)を全く考慮せず、Lv0時と同じ
+      // FORECAST_ENGAGEMENT_HITSで予測していたため、防衛にどれだけ投資しても予告の危険度が
+      // 一切改善しない整合性バグがあった。自動迎撃ダメージが強いほどレイダーは早く倒れ、
+      // 拠点への着弾回数(engagementHits)が減るはずなので、Lv0基準(BASE_AUTO_DEFENSE_DMG)からの
+      // 比で按分する（レイダーhpも同じmultでスケールするため、この比はnightsSurvivedに依存しない）
+      const engagementHits = (FORECAST_ENGAGEMENT_HITS * BASE_AUTO_DEFENSE_DMG) / this.baseAutoDefenseDmg();
+      const predictedDamage = expectedRaiders * AVG_RAIDER_ATK * mult * engagementHits;
+      const ratio = predictedDamage / Math.max(1, b.hp);
+      const level: RiskLevel = ratio < FORECAST_CAUTION_RATIO ? 'safe' : ratio < FORECAST_DANGER_RATIO ? 'caution' : 'danger';
+      return { x: b.x, isHome: b.isHome, level };
+    });
+  }
+  /** baseForecasts全体の中で最悪のレベル（combat/mining/raidと同じ単一RiskLevelヒントとしての要約値） */
+  private worstForecastLevel(): RiskLevel {
+    let worst: RiskLevel = 'safe';
+    for (const f of this.baseForecasts) {
+      if (severityOf(f.level) > severityOf(worst)) worst = f.level;
+    }
+    return worst;
+  }
+
+  /** 危険度3種のヒント（combat/mining/raid）を毎tick1回だけ更新する（008パターン#11の拡張） */
+  private updateRiskTracking(): void {
+    const combatLevel = this.combatRiskLevel();
+    const combatSeverity = severityOf(combatLevel);
+    if (combatSeverity > this.prevCombatSeverity) {
+      this.combatRiskBannerTicks = RISK_BANNER_TICKS;
+      this.metrics.combatRiskEscalations++;
+    }
+    this.prevCombatSeverity = combatSeverity;
+    if (this.combatRiskBannerTicks > 0) this.combatRiskBannerTicks--;
+
+    const miningLevel = this.resource === 'fuel' ? this.computeMiningRisk(this.player.fuel, this.estFuelToReturn()) : this.tremorRiskLevel();
+    if (Game.RISK_ORDER[miningLevel] > Game.RISK_ORDER[this.lastMiningRisk]) {
+      this.miningBanner = { level: miningLevel, ticksLeft: RISK_BANNER_TICKS };
+      this.metrics.miningRiskEscalations++;
+    }
+    this.lastMiningRisk = miningLevel;
+    if (this.miningBanner) {
+      this.miningBanner.ticksLeft--;
+      if (this.miningBanner.ticksLeft <= 0) this.miningBanner = null;
+    }
+
+    const raidLevel = this.computeRaidRisk();
+    if (Game.RISK_ORDER[raidLevel] > Game.RISK_ORDER[this.lastRaidRisk]) {
+      this.raidBanner = { level: raidLevel, ticksLeft: RISK_BANNER_TICKS };
+      this.metrics.raidRiskEscalations++;
+    }
+    this.lastRaidRisk = raidLevel;
+    if (this.raidBanner) {
+      this.raidBanner.ticksLeft--;
+      if (this.raidBanner.ticksLeft <= 0) this.raidBanner = null;
+    }
+
+    // 帰還危険度ヒント（022新規）: riskRngは1tickにつき最大1回だけ消費する（getState()側では消費しない）
+    const returnLevel = this.displayedReturnRisk(this.computeTrueReturnRisk());
+    if (returnLevel !== null && severityOf(returnLevel) > severityOf(this.lastReturnRisk ?? 'safe')) {
+      this.returnRiskBanner = { level: returnLevel, ticksLeft: RISK_BANNER_TICKS };
+      this.metrics.returnRiskEscalations++;
+    }
+    this.lastReturnRisk = returnLevel;
+    if (this.returnRiskBanner) {
+      this.returnRiskBanner.ticksLeft--;
+      if (this.returnRiskBanner.ticksLeft <= 0) this.returnRiskBanner = null;
+    }
+
+    const forecastLevel = this.worstForecastLevel();
+    if (Game.RISK_ORDER[forecastLevel] > Game.RISK_ORDER[this.lastForecastRisk]) {
+      this.forecastBanner = { level: forecastLevel, ticksLeft: RISK_BANNER_TICKS };
+      this.metrics.forecastRiskEscalations++;
+    }
+    this.lastForecastRisk = forecastLevel;
+    if (this.forecastBanner) {
+      this.forecastBanner.ticksLeft--;
+      if (this.forecastBanner.ticksLeft <= 0) this.forecastBanner = null;
+    }
+  }
+
+  // ---- 敵のスポーン: 既にFLOOR化された(=掘った)道の上、プレイヤーの前方にのみ出現する ----
+  // 「掘り進めた道が敵の侵入経路になる」というコアファン仮説の直接実装
+  private spawnEnemies(): void {
+    const band = Math.max(0, bandAt(this.player.x));
+    const cap = Math.min(3 + Math.floor(band / 2), 8);
+    if (this.enemies.length >= cap) return;
+    const interval = Math.max(4, 7 - Math.floor(band / 2));
+    const chance = Math.min(0.55, 0.3 + band * 0.02);
+    if (this.tick % interval !== 0) return;
+    if (this.rng() >= chance) return;
+
+    const candidates: { x: number; y: number }[] = [];
+    const spaced: { x: number; y: number }[] = [];
+    for (let dx = 3; dx <= 14; dx++) {
+      const x = this.player.x + dx;
+      if (x > FIELD_WIDTH) break;
+      if (this.inBaseRadius(x)) continue;
+      for (let y = 0; y < LANE_COUNT; y++) {
+        // 既に敵がいるマスは候補から除外する（v2 FIX）。プレイヤーが同じ場所に留まって
+        // 停滞すると、掘削済みの候補マスが少ないまま同じ位置が繰り返し抽選され、複数の敵が
+        // 完全に重なって出現しがちだった。重なった敵は同時に射撃/攻撃してくるため、
+        // 停滞するほど戦闘が急激に理不尽化し、さらに停滞が悪化する悪循環を生んでいた
+        if (this.tileAt(x, y) !== TILE.FLOOR || this.enemies.some((e) => e.x === x && e.y === y)) continue;
+        candidates.push({ x, y });
+        // v3 FIX（残課題#3）: 完全スタックは解消済みだが、隣接マスへの「準スタック」
+        // （複数の敵がほぼ同じ位置に集中し、実質同時攻撃になる）は起こりうる。
+        // 既存の敵から2マス以上離れた候補を優先することで準スタックの発生頻度を下げる
+        if (!this.enemies.some((e) => Math.max(Math.abs(e.x - x), Math.abs(e.y - y)) <= 1)) {
+          spaced.push({ x, y });
+        }
+      }
+    }
+    const pool = spaced.length > 0 ? spaced : candidates;
+    if (pool.length === 0) return;
+    const { x: spawnX, y: spawnY } = pool[randInt(this.rng, pool.length)];
+    const type = pickEnemyType(this.rng);
+    const def = ENEMY_DEFS[type];
+    const mul = 1 + band * 0.1;
+    this.enemies.push({
+      id: this.nextEnemyId++,
+      type,
+      x: spawnX,
+      y: spawnY,
+      hp: Math.round(def.hp * mul),
+      maxHp: Math.round(def.hp * mul),
+      atk: Math.round(def.atk * mul),
+      atkCd: 0,
+      moveCd: def.moveCdMax,
+      range: def.range,
+      isRaider: false,
+      targetBaseX: -1,
+    });
+  }
+
+  /**
+   * 夜フェーズ開始時に1回だけ呼ばれる。既に掘削済み(FLOOR)のタイル網全体（プレイヤー近傍に限らない）
+   * から拠点圏外の候補を抽出し、奥(band高)ほど選ばれやすい重み付けでレイダーを一括スポーンさせる。
+   * 「昼に掘り広げたトンネル網が夜には拠点への侵攻路になる」というコアファン仮説の直接実装
+   */
+  private spawnRaidWave(): void {
+    const bases = this.allBases();
+    let count = Math.min(RAID_MAX_COUNT, RAID_BASE_COUNT + Math.floor(this.metrics.nightsSurvived / RAID_PER_NIGHT_DIV));
+    // v2新規: 高い塔は遠くから見え、その分だけ襲撃を呼ぶ（塔の無い022の戦略では0）
+    const lured = this.lureRaidCount();
+    count += lured;
+    this.metrics.luredRaiders += lured;
+    if (count <= 0) return;
+
+    const candidates: { x: number; y: number; w: number }[] = [];
+    for (let x = 0; x <= FIELD_WIDTH; x++) {
+      if (bases.some((b) => Math.abs(x - b.x) < RAID_MIN_SPAWN_DIST)) continue;
+      const w = 1 + Math.max(0, bandAt(x)) * 2;
+      for (let y = 0; y < LANE_COUNT; y++) {
+        if (this.tileAt(x, y) !== TILE.FLOOR) continue;
+        candidates.push({ x, y, w });
+      }
+    }
+    if (candidates.length === 0) return;
+
+    const spawned: { x: number; y: number }[] = [];
+    for (let i = 0; i < count; i++) {
+      // 012 v3の分散ロジック（重複除外→距離優先）をレイダーの一括スポーンにも適用し、
+      // 集中砲火バグが最初から起きないようにする
+      let pool = candidates.filter((c) => !spawned.some((s) => Math.max(Math.abs(s.x - c.x), Math.abs(s.y - c.y)) <= 1));
+      if (pool.length === 0) pool = candidates;
+      const totalW = pool.reduce((a, c) => a + c.w, 0);
+      let r = this.rng() * totalW;
+      let picked = pool[pool.length - 1];
+      for (const c of pool) {
+        r -= c.w;
+        if (r <= 0) {
+          picked = c;
+          break;
+        }
+      }
+      spawned.push({ x: picked.x, y: picked.y });
+
+      let target = bases[0];
+      let bestDist = Infinity;
+      for (const b of bases) {
+        const d = Math.abs(picked.x - b.x);
+        if (d < bestDist) {
+          bestDist = d;
+          target = b;
+        }
+      }
+
+      const type = pickEnemyType(this.rng);
+      const def = ENEMY_DEFS[type];
+      const mul = 1 + Math.max(0, bandAt(picked.x)) * 0.1 + this.metrics.nightsSurvived * RAID_NIGHT_ATK_MULT;
+      this.enemies.push({
+        id: this.nextEnemyId++,
+        type,
+        x: picked.x,
+        y: picked.y,
+        hp: Math.round(def.hp * mul),
+        maxHp: Math.round(def.hp * mul),
+        atk: Math.round(def.atk * mul),
+        atkCd: 0,
+        moveCd: def.moveCdMax,
+        range: def.range,
+        isRaider: true,
+        targetBaseX: target.x,
+        lured: i >= count - lured,
+      });
+    }
+  }
+
+  /** 全拠点共通の自動迎撃ダメージ（015新規: basedefense投資レベルぶん恒久的に上乗せされる） */
+  private baseAutoDefenseDmg(): number {
+    return BASE_AUTO_DEFENSE_DMG + this.player.basedefenseLv * DEFENSE_LEVEL_DMG_BONUS;
+  }
+  /** 拠点圏内のレイダーへ毎tick少量のダメージを与える（v2 FIX、014 BASE_AUTO_DEFENSE_DMG参照。
+   * 015でbasedefense投資による恒久強化を追加） */
+  private applyBaseAutoDefense(): void {
+    const dmg = this.baseAutoDefenseDmg();
+    for (const base of this.allBases()) {
+      for (const e of this.enemies) {
+        if (!e.isRaider || Math.abs(e.x - base.x) > this.radiusFor(base)) continue;
+        e.hp -= dmg;
+        if (e.hp <= 0) this.killEnemy(e);
+      }
+    }
+    this.enemies = this.enemies.filter((e) => e.hp > 0);
+  }
+
+  /**
+   * 拠点防衛タレットの自動迎撃（016新規）。basedefense（拠点全体への一律ボーナス）と異なり、
+   * タレットごとに個別のクールダウン・射程(TURRET_RANGE)を持ち、その射程内で最も近いレイダー1体を狙う。
+   * 昼間の通常敵はinBaseRadiusで拠点圏内に侵入できないため、実質的に夜間レイダー専用の迎撃火力になる
+   */
+  private applyTurretDefense(): void {
+    for (const t of this.turrets) {
+      if (t.atkCd > 0) {
+        t.atkCd--;
+        continue;
+      }
+      let target: Enemy | null = null;
+      let bestDist = Infinity;
+      // v2新規: 援護射撃。夜、プレイヤーがこの塔の圏内にいれば、プレイヤーに迫る敵（昼の敵も含む）を最優先で撃つ
+      if (this.coversPlayer(t)) {
+        const radius = COVER_RADIUS_BASE + this.turretRange(t) - TURRET_RANGE + (this.isLoneTower(t) ? LONE_COVER_RADIUS_BONUS : 0);
+        let bestToPlayer = Infinity;
+        for (const e of this.enemies) {
+          if (e.hp <= 0) continue;
+          const dp = chebyshev(e.x, e.y, this.player.x, this.player.y);
+          if (dp <= radius && dp < bestToPlayer) {
+            bestToPlayer = dp;
+            target = e;
+          }
+        }
+      }
+      if (target) {
+        t.atkCd = TURRET_ATK_CD_MAX;
+        const shot = this.turretShot(t);
+        target.hp -= shot;
+        this.metrics.turretShots++;
+        this.metrics.coverShots++;
+        this.metrics.turretDamageDealt += shot;
+        if (target.hp <= 0) {
+          this.killEnemy(target);
+          this.metrics.turretKills++;
+          this.metrics.coverKills++;
+        }
+        continue;
+      }
+      for (const e of this.enemies) {
+        if (!e.isRaider) continue;
+        const d = chebyshev(e.x, e.y, t.x, t.y);
+        if (d <= this.turretRange(t) && d < bestDist) {
+          bestDist = d;
+          target = e;
+        }
+      }
+      if (!target) continue;
+      t.atkCd = TURRET_ATK_CD_MAX;
+      if (bestDist > TURRET_RANGE) this.metrics.tallShots++;
+      // 品質倍率（020新規）と連携ボーナス（隣接obstacleがあれば強化）が攻撃ダメージに乗る
+      const shielded = this.isShielded(t.x, t.y);
+      const shot = this.turretShot(t);
+      target.hp -= shot;
+      this.metrics.turretShots++;
+      if (shielded) this.metrics.turretShieldedShots++;
+      this.metrics.turretDamageDealt += shot;
+      if (target.hp <= 0) {
+        this.killEnemy(target);
+        this.metrics.turretKills++;
+      }
+    }
+    this.enemies = this.enemies.filter((e) => e.hp > 0);
+  }
+
+  /** タレット1発のダメージ: 品質倍率（020新規）と盾持ちボーナス（隣接バリケードがあれば強化） */
+  private turretShot(t: Turret): number {
+    return TURRET_DMG * Math.pow(t.quality, TURRET_QUALITY_DMG_EXP) * (this.isShielded(t.x, t.y) ? TURRET_LINK_DMG_MULT : 1);
+  }
+  /** v2新規: 夜、プレイヤーがこの塔（高さ1以上）のパトロール圏・梁の回廊の中にいるか（援護射撃の条件） */
+  private coversPlayer(t: Turret): boolean {
+    if (this.phase !== 'night' || t.height <= 0) return false;
+    const p = this.player;
+    if (Math.abs(p.x - t.x) > this.turretPatrolRange(t)) return false;
+    if (p.y === t.y) return true;
+    if (this.topBeamLevel(t) <= 0) return Math.abs(p.y - t.y) <= WATCH_LANES;
+    const [lo, hi] = this.corridorLanes(t);
+    return p.y >= lo && p.y <= hi;
+  }
+  /** v3新規: 孤塔か（高さ1以上・梁なしで、同じ拠点圏内に高さ1以上の塔が他に無い）。拠点圏外の塔は孤塔にならない */
+  isLoneTower(t: Turret): boolean {
+    if (t.height <= 0 || this.topBeamLevel(t) > 0) return false;
+    const base = this.allBases().find((b) => Math.abs(t.x - b.x) <= this.radiusFor(b));
+    if (!base) return false;
+    return !this.turrets.some((o) => o !== t && o.height > 0 && Math.abs(o.x - base.x) <= this.radiusFor(base));
+  }
+  /** v2新規: このレイダーを引き付けている塔（x方向に高さ×ATTRACT_PER_HEIGHT以内で最も高い塔）。夜のみ */
+  private attractingTower(e: Enemy): Turret | null {
+    if (this.phase !== 'night' || !e.isRaider) return null;
+    let best: Turret | null = null;
+    for (const t of this.turrets) {
+      if (t.height <= 0) continue;
+      if (Math.abs(e.x - t.x) > t.height * ATTRACT_PER_HEIGHT) continue;
+      if (!best || t.height > best.height || (t.height === best.height && chebyshev(e.x, e.y, t.x, t.y) < chebyshev(e.x, e.y, best.x, best.y))) best = t;
+    }
+    return best;
+  }
+
+  private killEnemy(e: Enemy): void {
+    this.metrics.kills++;
+    if (e.isRaider) this.metrics.raidersKilled++;
+    const reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
+    this.player.money += reward;
+    this.metrics.moneyEarned += reward;
+  }
+
+  /** 敵の1マス移動: 既にFLOORの道しか通れない。obstacle（バリケード or タレット、016）に阻まれたらそれを返す */
+  private stepTowardBlocked(e: Enemy, tx: number, ty: number): Obstacle | null {
+    const dx = tx - e.x;
+    const dy = ty - e.y;
+    const candidates: { nx: number; ny: number }[] = [];
+    if (Math.abs(dx) >= Math.abs(dy) && dx !== 0) {
+      candidates.push({ nx: e.x + Math.sign(dx), ny: e.y });
+      if (dy !== 0) candidates.push({ nx: e.x, ny: clampLane(e.y + Math.sign(dy)) });
+    } else if (dy !== 0) {
+      candidates.push({ nx: e.x, ny: clampLane(e.y + Math.sign(dy)) });
+      if (dx !== 0) candidates.push({ nx: e.x + Math.sign(dx), ny: e.y });
+    }
+    let blocker: Obstacle | undefined;
+    for (const { nx, ny } of candidates) {
+      if (nx < 0 || nx > FIELD_WIDTH || ny < 0 || ny >= LANE_COUNT) continue;
+      if (this.tileAt(nx, ny) !== TILE.FLOOR) continue; // 未採掘の壁は敵も通れない
+      const o = this.obstacleAt(nx, ny);
+      if (!o) {
+        e.x = nx;
+        e.y = ny;
+        return null;
+      }
+      blocker = o;
+    }
+    return blocker ?? null;
+  }
+
+  /**
+   * 夜間レイダー専用の1マス移動: 目標拠点のx座標だけを目指す（yは気にしない）。
+   * 主レーンが掘削されていない/obstacleで塞がれている場合は隣接レーンへの迂回を試みる。
+   * 完全なBFS経路探索はしない（012のstepTowardBlockedと同系の軽量ヒューリスティック）ため、
+   * 迷路状に掘られたトンネルでは詰まる可能性がある——この挙動はv1レビューで検証する対象
+   */
+  private stepRaiderTowardBlocked(e: Enemy, targetX: number): Obstacle | null {
+    const dx = targetX - e.x;
+    const candidates: { nx: number; ny: number }[] = [];
+    if (dx !== 0) candidates.push({ nx: e.x + Math.sign(dx), ny: e.y });
+    for (const dy of [1, -1]) {
+      const ny = clampLane(e.y + dy);
+      if (ny !== e.y) candidates.push({ nx: e.x, ny });
+    }
+    let blocker: Obstacle | undefined;
+    for (const { nx, ny } of candidates) {
+      if (nx < 0 || nx > FIELD_WIDTH || ny < 0 || ny >= LANE_COUNT) continue;
+      if (this.tileAt(nx, ny) !== TILE.FLOOR) continue;
+      const o = this.obstacleAt(nx, ny);
+      if (!o) {
+        e.x = nx;
+        e.y = ny;
+        return null;
+      }
+      if (nx !== e.x) blocker = blocker ?? o;
+    }
+    return blocker ?? null;
+  }
+
+  private stepAway(e: Enemy, tx: number, ty: number): void {
+    const dx = tx - e.x;
+    const dy = ty - e.y;
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      const nx = e.x - Math.sign(dx);
+      if (nx >= 0 && nx <= FIELD_WIDTH && this.tileAt(nx, e.y) === TILE.FLOOR) e.x = nx;
+    } else {
+      const ny = clampLane(e.y - Math.sign(dy));
+      if (this.tileAt(e.x, ny) === TILE.FLOOR) e.y = ny;
+    }
+  }
+
+  private stepEnemies(): void {
+    for (const e of [...this.enemies]) {
+      if (!this.enemies.includes(e)) continue;
+
+      let blockedBy: Obstacle | null = null;
+      let lure: Turret | null = null;
+      let beamTarget: Beam | null = null;
+
+      if (e.isRaider) {
+        // 夜間レイダー: 目標拠点のx座標だけを目指す。拠点圏内は昼間敵と違い保護対象外（侵入できる）
+        const distToTarget = Math.abs(e.x - e.targetBaseX);
+        // v2新規: 高い塔に引き付けられたレイダーは、拠点ではなくその塔を目指して襲う
+        lure = this.attractingTower(e);
+        // 塔に梁が架かっていて射程内に入っていれば、立ち止まって梁を狙う（移動しない）
+        if (lure && chebyshev(e.x, e.y, lure.x, lure.y) <= e.range) beamTarget = this.topBeamOf(lure);
+        if (beamTarget) {
+          if (e.moveCd > 0) e.moveCd--;
+        } else if (e.moveCd > 0) e.moveCd--;
+        else {
+          e.moveCd = ENEMY_DEFS[e.type].moveCdMax;
+          if (lure) {
+            blockedBy = this.stepTowardBlocked(e, lure.x, lure.y);
+          } else if (distToTarget > 0) blockedBy = this.stepRaiderTowardBlocked(e, e.targetBaseX);
+        }
+      } else {
+        if (this.inBaseRadius(e.x)) continue; // 固定範囲の保護装置（008パターン#3、昼間の通常敵のみ）
+        const dist = chebyshev(e.x, e.y, this.player.x, this.player.y);
+        if (e.moveCd > 0) e.moveCd--;
+        else {
+          e.moveCd = ENEMY_DEFS[e.type].moveCdMax;
+          const desiredDist = e.type === 'archer' ? Math.max(1, e.range - 1) : 0;
+          if (dist > desiredDist) {
+            blockedBy = this.stepTowardBlocked(e, this.player.x, this.player.y);
+          } else if (e.type === 'archer' && dist < desiredDist) {
+            this.stepAway(e, this.player.x, this.player.y);
+          }
+        }
+      }
+
+      if (e.atkCd > 0) e.atkCd--;
+      if (blockedBy) {
+        if (e.atkCd <= 0) {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          if (lure) this.metrics.lureHits++;
+          this.damageObstacle(blockedBy, e.atk);
+        }
+        continue;
+      }
+
+      const distToPlayer = chebyshev(e.x, e.y, this.player.x, this.player.y);
+      if (distToPlayer <= e.range && e.atkCd <= 0) {
+        // 射線上にobstacle（バリケード or タレット、016）があれば、プレイヤーの代わりにそれを攻撃する（012 v2 FIX継承）
+        const losBlocker = distToPlayer > 1 ? this.lineOfSightObstacle(e.x, e.y, this.player.x, this.player.y) : undefined;
+        if (losBlocker) {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          this.damageObstacle(losBlocker, e.atk);
+        } else {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          if (this.player.dashInvulnTicks <= 0) this.player.hp -= e.atk;
+        }
+        continue;
+      }
+
+      // v2新規: 塔に引き付けられたレイダーは、プレイヤーが射程外なら梁を攻撃する
+      if (beamTarget) {
+        if (e.atkCd <= 0) {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          this.metrics.lureHits++;
+          this.damageBeam(beamTarget, e.atk);
+        }
+        continue;
+      }
+
+      // 夜間レイダーが目標拠点の防衛半径内に到達し、かつプレイヤーが射程内にいない場合は拠点HPを削る
+      if (e.isRaider && e.atkCd <= 0) {
+        const base = this.findBaseByX(e.targetBaseX);
+        if (base && Math.abs(e.x - base.x) <= this.radiusFor(base)) {
+          e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
+          base.hp -= e.atk;
+          this.metrics.baseDamageTaken += e.atk;
+          if (base.hp <= 0) this.destroyBase(base);
+        }
+      }
+    }
+    this.enemies = this.enemies.filter((e) => e.hp > 0 && (e.isRaider || e.x >= this.player.x - 15));
+  }
+
+  /** 現在の掘削中タイルの残りtickを、中断される前にdigProgressへ退避する */
+  private stashDigging(): void {
+    if (this.player.digging) {
+      const idx = this.player.digging.x * LANE_COUNT + this.player.digging.y;
+      this.digProgress.set(idx, this.player.digging.remaining);
+    }
+  }
+
+  /** 1tick分の掘削の代価（燃料版は燃料-1、揺れ版はこのtickの揺れが掘削の倍率になる） */
+  private spendDig(): void {
+    if (this.resource === 'fuel') this.player.fuel = Math.max(0, this.player.fuel - DIG_FUEL_COST);
+    else this.dugThisTick = true;
+  }
+
+  private applyMove(dir: Dir): void {
+    const { nx, ny } = adjacentTile(this.player.x, this.player.y, dir);
+    const clampedX = Math.max(0, Math.min(FIELD_WIDTH, nx));
+    const targetX = dir === 'left' || dir === 'right' ? clampedX : this.player.x;
+    const targetY = dir === 'up' || dir === 'down' ? ny : this.player.y;
+    if (!this.inBounds(targetX, targetY)) return;
+    const t = this.tileAt(targetX, targetY);
+
+    if (t === TILE.FLOOR) {
+      this.stashDigging();
+      this.player.digging = null;
+      this.player.x = targetX;
+      this.player.y = targetY;
+      return;
+    }
+    if (!DIGGABLE.includes(t)) return;
+
+    const band = Math.max(0, bandAt(targetX));
+    const req = requiredDrillPower(t, band);
+    if (this.drillPower() < req) return; // ドリル威力不足で不発（式から予測可能、後出しではない）
+
+    // 018新規（017の共鳴チャージ移植）: チャージが満タンなら、対象タイルを即時採掘完了させると同時に
+    // 同じx座標の他レーンも要求ドリル威力さえ満たせば巻き込み採掘する
+    const resonanceReady = this.player.chargeLv >= 1 && this.player.charge >= maxChargeOf(this.player.chargeLv);
+    if (resonanceReady) {
+      this.digProgress.delete(targetX * LANE_COUNT + targetY);
+      this.spendDig();
+      this.player.digging = null;
+      this.completeDig(targetX, targetY, t, band);
+      this.player.x = targetX;
+      this.player.y = targetY;
+      this.triggerResonance(targetX, targetY, band);
+      return;
+    }
+
+    if (!this.player.digging || this.player.digging.x !== targetX || this.player.digging.y !== targetY) {
+      this.stashDigging();
+      const idx = targetX * LANE_COUNT + targetY;
+      const total = digTicksFor(t, band, this.drillPower(), this.player.digspeedLv);
+      const saved = this.digProgress.get(idx);
+      const remaining = saved !== undefined ? Math.min(saved, total) : total;
+      this.player.digging = { x: targetX, y: targetY, remaining, total };
+    }
+    this.spendDig();
+    this.player.digging.remaining--;
+    if (this.player.digging.remaining <= 0) {
+      this.digProgress.delete(targetX * LANE_COUNT + targetY);
+      this.completeDig(targetX, targetY, t, band);
+      this.player.digging = null;
+      this.player.x = targetX;
+      this.player.y = targetY;
+    }
+  }
+
+  /**
+   * 共鳴掘削（018新規、017の移植）: チャージを消費し、同じx座標の他レーン（掘った本人のレーンを除く
+   * LANE_COUNT-1本）を、要求ドリル威力さえ満たしていれば同時に即時採掘する。届かないタイルは素通り
+   * （無効）。既にFLOORのレーンや、既に敵・obstacle等がいる場所は、その時点でFLOOR確定のため
+   * DIGGABLEチェックで自然に除外される
+   */
+  private triggerResonance(x: number, y: number, band: number): void {
+    this.metrics.resonanceTriggers++;
+    this.player.charge = 0;
+    for (let oy = 0; oy < LANE_COUNT; oy++) {
+      if (oy === y) continue;
+      const idx = x * LANE_COUNT + oy;
+      const ot = this.tiles[idx] as TileId;
+      if (ot === TILE.FLOOR || !DIGGABLE.includes(ot)) continue;
+      if (this.drillPower() < requiredDrillPower(ot, band)) continue; // 届かないタイルは素通り
+      const wasOre = ot === TILE.ORE_COPPER || ot === TILE.ORE_IRON || ot === TILE.ORE_GOLD;
+      this.digProgress.delete(idx);
+      this.completeDig(x, oy, ot, band);
+      if (wasOre) this.metrics.resonanceBonusOre++;
+    }
+  }
+
+  private completeDig(x: number, y: number, type: TileId, band: number): void {
+    this.tiles[x * LANE_COUNT + y] = TILE.FLOOR;
+    if (type === TILE.ORE_COPPER || type === TILE.ORE_IRON || type === TILE.ORE_GOLD) {
+      if (this.player.cargoUnits < this.maxCapacity()) {
+        this.player.cargoUnits++;
+        const base = oreValue(type, band);
+        if (this.resource === 'tremor') {
+          // 026新規: 掘った瞬間の揺れで売値が上がる（最大+60%）
+          const v = Math.round(base * (1 + tremorBonusOf(this.player.tremor)));
+          this.metrics.tremorBonusValue += v - base;
+          this.player.cargoValue += v;
+        } else {
+          this.player.cargoValue += base;
+        }
+        this.metrics.oreMined++;
+        // 018新規: 共鳴チャージへの蓄積（鉱石階層に比例。chargeLv=0ならmaxChargeが0のためclampで常に0のまま）
+        this.player.charge = Math.min(maxChargeOf(this.player.chargeLv), this.player.charge + (CHARGE_GAIN[type] ?? 0));
+      } else {
+        this.metrics.oreWasted++;
+      }
+      return;
+    }
+    if (type === TILE.GAS) {
+      const dmg = Math.round((HAZARD_BASE_DMG + band * HAZARD_DMG_PER_BAND) * this.hazardMult());
+      this.player.hp -= dmg;
+      if (this.resource === 'fuel') this.player.fuel = Math.max(0, this.player.fuel - GAS_FUEL_DRAIN);
+      else this.player.tremor = Math.min(TREMOR_CAP, this.player.tremor + GAS_TREMOR);
+      this.metrics.hazardHits++;
+      this.metrics.hazardDamage += dmg;
+      return;
+    }
+    if (type === TILE.UNSTABLE) {
+      if (this.rng() < UNSTABLE_TRIGGER_CHANCE) {
+        const dmg = Math.round((HAZARD_BASE_DMG + band * HAZARD_DMG_PER_BAND) * this.hazardMult());
+        this.player.hp -= dmg;
+        this.metrics.hazardHits++;
+        this.metrics.hazardDamage += dmg;
+      }
+      return;
+    }
+    // DIRT / ROCK: 何も起きない
+  }
+
+  private applyAttack(): void {
+    if (this.player.atkCd > 0) return;
+    let target: Enemy | null = null;
+    let bestDist = Infinity;
+    for (const e of this.enemies) {
+      const d = chebyshev(e.x, e.y, this.player.x, this.player.y);
+      if (d <= ATK_RANGE && d < bestDist) {
+        bestDist = d;
+        target = e;
+      }
+    }
+    if (!target) return;
+    this.player.atkCd = ATK_CD_MAX;
+    target.hp -= this.player.atk;
+    if (target.hp <= 0) this.killEnemy(target);
+  }
+
+  /** ダッシュ: 既に掘った道(FLOOR)しか通れない。壁に当たったらそこで止まる */
+  private applyDash(dir: Dir): void {
+    if (this.player.dashCd > 0) return;
+    this.player.dashCd = this.player.dashCdMax;
+    this.player.dashInvulnTicks = DASH_INVULN_TICKS;
+    this.metrics.dashUses++;
+    const [dx, dy] = DELTA[dir];
+    let { x, y } = this.player;
+    for (let i = 0; i < this.player.dashRange; i++) {
+      const nx = Math.max(0, Math.min(FIELD_WIDTH, x + dx));
+      const ny = clampLane(y + dy);
+      if (nx === x && ny === y) break;
+      if (this.tileAt(nx, ny) !== TILE.FLOOR) break;
+      x = nx;
+      y = ny;
+    }
+    this.player.x = x;
+    this.player.y = y;
+  }
+
+  private shopLevelOf(item: ShopItemId): number {
+    const p = this.player;
+    switch (item) {
+      case 'offense':
+        return p.offenseLv;
+      case 'mobility':
+        return p.mobilityLv;
+      case 'vitality':
+        return p.vitalityLv;
+      case 'drill':
+        return p.drillLv;
+      case 'fuel':
+        return p.fuelLv;
+      case 'brace':
+        return p.braceLv;
+      case 'digspeed':
+        return p.digspeedLv;
+      case 'lantern':
+        return p.lanternLv;
+      case 'hazardresist':
+        return p.hazardresistLv;
+      case 'capacity':
+        return p.capacityLv;
+      case 'teleport':
+        return p.teleportLv;
+      case 'basedefense':
+        return p.basedefenseLv;
+      case 'scanner':
+        return p.scannerLv;
+      case 'charge':
+        return p.chargeLv;
+      case 'appraisal':
+        return p.appraisalLv;
+    }
+  }
+  private shopCostOf(item: ShopItemId): number | null {
+    const def = SHOP_DEFS.find((d) => d.id === item)!;
+    if (!this.sells(item)) return null;
+    const level = this.shopLevelOf(item);
+    if (level >= def.maxLevel) return null;
+    return Math.round(def.baseCost * Math.pow(def.growth, level));
+  }
+
+  private applyBuy(item: ShopItemId): void {
+    if (!this.inBaseRadius(this.player.x)) return;
+    const cost = this.shopCostOf(item);
+    if (cost === null || this.player.money < cost) return;
+    this.player.money -= cost;
+    const p = this.player;
+    switch (item) {
+      case 'offense':
+        p.offenseLv++;
+        p.atk += 2;
+        break;
+      case 'mobility':
+        p.mobilityLv++;
+        p.dashCdMax = Math.max(12, p.dashCdMax - 3);
+        break;
+      case 'vitality':
+        p.vitalityLv++;
+        p.hp = Math.min(this.maxHp(), p.hp + 20);
+        break;
+      case 'drill':
+        p.drillLv++;
+        break;
+      case 'fuel':
+        p.fuelLv++;
+        break;
+      case 'brace':
+        p.braceLv++;
+        break;
+      case 'digspeed':
+        p.digspeedLv++;
+        break;
+      case 'lantern':
+        p.lanternLv++;
+        break;
+      case 'hazardresist':
+        p.hazardresistLv++;
+        break;
+      case 'capacity':
+        p.capacityLv++;
+        break;
+      case 'teleport':
+        p.teleportLv++;
+        break;
+      case 'basedefense':
+        p.basedefenseLv++;
+        break;
+      case 'scanner':
+        p.scannerLv++;
+        break;
+      case 'charge':
+        p.chargeLv++;
+        break;
+      case 'appraisal':
+        p.appraisalLv++;
+        break;
+    }
+    this.metrics.upgradesBought++;
+  }
+
+  /** バリケード設置（008パターン#6「建築を第三の選択肢にする」） */
+  private applyBuildBarricade(dir: Dir, lotIndex?: number): void {
+    const { nx, ny } = adjacentTile(this.player.x, this.player.y, dir);
+    const targetX = dir === 'left' || dir === 'right' ? Math.max(0, Math.min(FIELD_WIDTH, nx)) : this.player.x;
+    const targetY = dir === 'up' || dir === 'down' ? ny : this.player.y;
+    if (!this.inBounds(targetX, targetY)) return;
+    if (this.tileAt(targetX, targetY) !== TILE.FLOOR) return; // 既に掘った道にしか置けない
+    if (this.barricadeAt(targetX, targetY)) return;
+    const cost = Math.round(BARRICADE_BASE_COST * (1 + Math.max(0, bandAt(this.player.x)) * BARRICADE_BAND_MULT));
+    if (this.player.money < cost) return;
+    this.player.money -= cost;
+    // v2 FIX（v1バグ#2/#6）: バリケードはロットの品質が薄く（BARRICADE_QUALITY_SPREAD）しか効かない。使い捨ての
+    // 消耗品に強いばらつきを乗せると「足りないと防壁にならず余っても無駄」な凹の価値関数で鑑定なしプレイヤー
+    // へ純損失（pusher -13.6%）が出たため。一方でロットは消費するので、鑑定投資者は悪ロットをバリケードへ
+    // 逃がし、良ロットをタレット（品質^2が攻撃ダメージに効く）へ温存する選別が成立する
+    const { quality } = this.takeLot(lotIndex);
+    const effective = 1 + (quality - 1) * BARRICADE_QUALITY_SPREAD;
+    const maxHp = Math.round(BARRICADE_HP * effective);
+    this.barricades.push({ id: this.nextBarricadeId++, x: targetX, y: targetY, hp: maxHp, maxHp, quality: effective, linked: false });
+    this.metrics.barricadesBuilt++;
+    // 選別配置の加点(INFORMED_PLACEMENT_SCORE_BONUS)はタレットの選別だけが対象。バリケードへの悪ロット投棄は
+    // 1セッションで60〜80回あり、これを加点すると「lotIndexを指定するだけで+100点」の機械的な加点になって
+    // しまうため（v2で発見）、判断の重みが大きいタレット設置に限定する
+    this.recordPlacement(targetX, targetY, effective, false, false);
+  }
+
+  /** 指定拠点の保護半径内に現在設置されているタレット数（016新規、MAX_TURRETS_PER_BASEの判定用） */
+  private turretsAtBase(base: Base): number {
+    const r = this.radiusFor(base);
+    return this.turrets.filter((t) => Math.abs(t.x - base.x) <= r).length;
+  }
+
+  /** 指定x座標が属する拠点（あれば）の設置済みタレット数。0はどの拠点内でもない場合を含む */
+  private turretsAtCurrentBase(x: number): number {
+    const base = this.allBases().find((b) => Math.abs(x - b.x) <= this.radiusFor(b));
+    return base ? this.turretsAtBase(base) : 0;
+  }
+
+  /**
+   * 拠点防衛タレットの設置（016新規、015final提案(2)「拠点防衛設備の新規建築種」への対応）。
+   * バリケード（008パターン#6、フィールド上どこにでも置ける即席の壁）と異なり、拠点保護半径内のみ・
+   * 拠点ごとにMAX_TURRETS_PER_BASE基までという制約を設けることで、basedefense（015、恒久ステータス投資・
+   * 全拠点一括）とは別の「どの拠点にどれだけ配置するか」という空間的な意思決定を作る
+   */
+  private applyBuildTurret(dir: Dir, lotIndex?: number): void {
+    const { nx, ny } = adjacentTile(this.player.x, this.player.y, dir);
+    const targetX = dir === 'left' || dir === 'right' ? Math.max(0, Math.min(FIELD_WIDTH, nx)) : this.player.x;
+    const targetY = dir === 'up' || dir === 'down' ? ny : this.player.y;
+    if (!this.inBounds(targetX, targetY)) return;
+    if (this.tileAt(targetX, targetY) !== TILE.FLOOR) return; // 既に掘った道にしか置けない
+    if (this.obstacleAt(targetX, targetY)) return;
+    const base = this.allBases().find((b) => Math.abs(targetX - b.x) <= this.radiusFor(b));
+    if (!base) return; // 拠点保護半径内のみ設置可（basedefenseと同じく拠点の存在を前提にした投資）
+    const countAtBase = this.turretsAtBase(base);
+    if (countAtBase >= MAX_TURRETS_PER_BASE) return;
+    const cost = Math.round(
+      TURRET_BASE_COST * Math.pow(TURRET_COST_GROWTH, countAtBase) * (1 + Math.max(0, bandAt(this.player.x)) * TURRET_BAND_COST_MULT),
+    );
+    if (this.player.money < cost) return;
+    this.player.money -= cost;
+    const { quality, informed } = this.takeLot(lotIndex);
+    const maxHp = Math.round(TURRET_HP * quality);
+    this.turrets.push({ id: this.nextTurretId++, x: targetX, y: targetY, hp: maxHp, maxHp, atkCd: 0, quality, linked: false, height: 0, raiseProgress: 0 });
+    this.metrics.turretsBuilt++;
+    this.recordPlacement(targetX, targetY, quality, informed, true);
+  }
+
+  /**
+   * 前線拠点の建設（008パターン#7「目標を生む建築」）。013では拠点HPも新規付与し、
+   * 「建てるほど往復コストが下がる」メリットと「建てるほど夜に守るものが増える」リスクを両立させる
+   */
+  private applyBuildOutpost(): void {
+    const x = this.player.x;
+    if (this.tileAt(x, this.player.y) !== TILE.FLOOR) return;
+    if (this.nearestBaseDistance(x) < OUTPOST_MIN_GAP) return;
+    const band = Math.max(0, bandAt(x));
+    const cost = Math.round(OUTPOST_BASE_COST * (1 + band * OUTPOST_BAND_COST_MULT));
+    if (this.player.money < cost) return;
+    this.player.money -= cost;
+    const maxHp = Math.round(OUTPOST_BASE_MAX_HP * (1 + band * OUTPOST_HP_BAND_MULT));
+    this.outposts.push({ x, isHome: false, hp: maxHp, maxHp });
+    this.metrics.outpostsBuilt++;
+    // 拠点構成が変わったので予告も直ちに更新する（014新規）
+    if (this.phase === 'day') this.baseForecasts = this.computeBaseForecasts();
+  }
+
+  private applyTeleport(): void {
+    if (!this.canTeleport()) return;
+    if (this.resource === 'fuel') {
+      this.player.fuel -= TELEPORT_FUEL_COST;
+    } else {
+      // 026新規: 揺れ版は積荷の価値の1/4を失って帰る（揺れはホームで0に戻る）
+      const lost = Math.round(this.player.cargoValue * TELEPORT_CARGO_LOSS);
+      this.player.cargoValue -= lost;
+    }
+    this.stashDigging();
+    this.player.digging = null;
+    this.player.x = 0;
+    this.player.y = SPAWN_Y;
+  }
+
+  /** 詰みからの脱出手段（money版）: 拠点滞在中、最安の未購入強化すら買えない間だけ少額の収入を積む */
+  private tickStuckIncome(): void {
+    let minCost: number | null = null;
+    for (const def of SHOP_DEFS) {
+      if (!this.sells(def.id)) continue;
+      // v2 FIX（v1バグ#5）: 鑑定は任意の建築補助で成長の詰みには関与しないため、閾値の計算から除外する。
+      // v1では基礎コスト9の鑑定が加わったことで、鑑定を買わないプレイヤーの詰み救済収入の発生条件が
+      // 018より狭まり（money<9のみ）、018との無回帰比較が完全一致しなかった
+      if (def.id === 'appraisal') continue;
+      const cost = this.shopCostOf(def.id);
+      if (cost !== null && (minCost === null || cost < minCost)) minCost = cost;
+    }
+    if (minCost === null || this.player.money >= minCost) {
+      this.stuckIncomeTimer = 0;
+      return;
+    }
+    this.stuckIncomeTimer++;
+    if (this.stuckIncomeTimer >= STUCK_INCOME_INTERVAL) {
+      this.stuckIncomeTimer = 0;
+      this.player.money += STUCK_INCOME_AMOUNT;
+      this.metrics.stuckIncomeEarned += STUCK_INCOME_AMOUNT;
+    }
+  }
+
+  private recomputeScore(): void {
+    this.metrics.score = Math.round(
+      this.player.money +
+        this.player.cargoValue +
+        this.metrics.distanceReached * 3 +
+        this.metrics.oreMined * 2 +
+        this.metrics.kills * 5 +
+        this.metrics.outpostsBuilt * 60 +
+        this.metrics.barricadesBuilt * 2 +
+        this.metrics.turretsBuilt * 4 +
+        this.metrics.informedPlacements * INFORMED_PLACEMENT_SCORE_BONUS +
+        this.metrics.nightsSurvived * 80 -
+        this.metrics.outpostsLost * 40 +
+        (this.won ? 300 : 0),
+    );
+  }
+
+  step(action: Action = { type: 'wait' }): void {
+    if (this.over) return;
+    this.tick++;
+
+    // ---- 昼夜フェーズの進行（013新規）: 夜へ切り替わる瞬間にレイダーを一括スポーンさせる ----
+    this.phaseTicksLeft--;
+    if (this.phaseTicksLeft <= 0) {
+      if (this.phase === 'day') {
+        this.phase = 'night';
+        this.phaseTicksLeft = NIGHT_LENGTH;
+        this.spawnRaidWave();
+        // 予告は解決済みなので夜の間は空にする（014新規）
+        this.baseForecasts = [];
+      } else {
+        this.phase = 'day';
+        this.phaseTicksLeft = DAY_LENGTH;
+        this.metrics.nightsSurvived++;
+        // v2 FIX（v1バグ#1）: 夜が明けても倒し損ねたレイダーが消滅せず拠点に張り付き続け、
+        // 複数夜にまたがる累積ダメージでホームが陥落していた。「昼=安全」という設計意図を
+        // 成立させるため、日の出とともに残存レイダーは撤退（消滅）させる
+        this.enemies = this.enemies.filter((e) => !e.isRaider);
+        // 日の出直後に今夜の予告を最新の情報（今日一日で掘った道網はリセットされる）で再計算する（014新規）
+        this.baseForecasts = this.computeBaseForecasts();
+      }
+    } else if (this.phase === 'day' && this.tick % FORECAST_UPDATE_INTERVAL === 0) {
+      // 昼の間、掘削の進行に応じて予告を定期的に更新する（毎tick計算は不要なコストのため間引く）
+      this.baseForecasts = this.computeBaseForecasts();
+    }
+    this.regenBasesForDay();
+
+    // ---- 拠点処理: 換金・燃料全回復・HP自然回復・詰みからの脱出手段(money版) ----
+    const inBase = this.inBaseRadius(this.player.x);
+    if (inBase) {
+      if (!this.wasInBase && this.player.cargoUnits > 0) this.metrics.tripsToHome++;
+      if (this.player.cargoUnits > 0) {
+        this.player.money += this.player.cargoValue;
+        this.metrics.moneyEarned += this.player.cargoValue;
+        this.player.cargoValue = 0;
+        this.player.cargoUnits = 0;
+      }
+      if (this.resource === 'fuel') this.player.fuel = this.maxFuel();
+      else this.player.tremor = 0;
+      this.player.hp = Math.min(this.maxHp(), this.player.hp + BASE_REGEN_PER_TICK);
+      this.tickStuckIncome();
+      this.fieldRegenTimer = 0;
+    } else {
+      this.stuckIncomeTimer = 0;
+      // 詰みからの脱出手段(HP版): 拠点圏外・非戦闘中はごく僅かに自然回復する
+      const inCombat = this.enemies.some((e) => chebyshev(e.x, e.y, this.player.x, this.player.y) <= FIELD_REGEN_SAFE_RANGE);
+      if (this.player.hp < this.maxHp() && !inCombat) {
+        this.fieldRegenTimer++;
+        if (this.fieldRegenTimer >= FIELD_REGEN_INTERVAL) {
+          this.fieldRegenTimer = 0;
+          this.player.hp = Math.min(this.maxHp(), this.player.hp + FIELD_REGEN_AMOUNT);
+        }
+      } else {
+        this.fieldRegenTimer = 0;
+      }
+    }
+    this.wasInBase = inBase;
+
+    this.towerWork = null;
+    this.dugThisTick = false;
+    if (this.resource === 'fuel') {
+      // ---- 燃料の受動消費・燃料切れダメージ（燃料版＝024と同一） ----
+      if (this.player.fuel <= 0) {
+        this.player.hp -= FUEL_EMPTY_HP_DRAIN;
+        this.metrics.fuelEmptyTicks++;
+      }
+      // タレットのパトロール圏内では受動燃料消費が軽減される（022新規、帰路への投資が実際に燃料を節約する）
+      // 024新規: 梁で編まれた回廊内はさらに軽い（WOVEN_FUEL_DRAIN_MULT）
+      const coverage = this.patrolCoverage(this.player.x, this.player.y);
+      if (coverage !== 'none') this.metrics.patrolFuelSavedTicks++;
+      if (coverage === 'woven') this.metrics.wovenCorridorTicks++;
+      const patrolMult = coverage === 'woven' ? WOVEN_FUEL_DRAIN_MULT : coverage === 'lane' ? PATROL_FUEL_DRAIN_MULT : 1;
+      this.player.fuel = Math.max(0, this.player.fuel - PASSIVE_FUEL_DRAIN * this.lanternMult() * patrolMult);
+    }
+
+    // 026新規: 救助の手当て中は行動できない（時間の代償）
+    if (this.player.rescueDownTicks > 0) {
+      this.player.rescueDownTicks--;
+      action = { type: 'wait' };
+    }
+
+    switch (action.type) {
+      case 'move':
+        this.applyMove(action.dir);
+        break;
+      case 'attack':
+        this.applyAttack();
+        break;
+      case 'dash':
+        this.applyDash(action.dir);
+        break;
+      case 'buy':
+        this.applyBuy(action.item);
+        break;
+      case 'build':
+        if (action.target === 'barricade') this.applyBuildBarricade(action.dir, action.lotIndex);
+        else if (action.target === 'turret') this.applyBuildTurret(action.dir, action.lotIndex);
+        else this.applyBuildOutpost();
+        break;
+      case 'teleport':
+        this.applyTeleport();
+        break;
+      case 'raise':
+        this.applyRaise(action.dir);
+        break;
+      case 'beam':
+        this.applyBeam(action.dir);
+        break;
+      case 'wait':
+        break;
+    }
+
+    if (this.player.atkCd > 0) this.player.atkCd--;
+    if (this.player.dashCd > 0) this.player.dashCd--;
+    if (this.player.dashInvulnTicks > 0) this.player.dashInvulnTicks--;
+
+    this.maxXReached = Math.max(this.maxXReached, this.player.x);
+    if (this.resource === 'tremor') this.tickTremor();
+
+    if (!this.over && this.player.x >= FIELD_WIDTH) {
+      this.over = true;
+      this.won = true;
+    }
+
+    if (!this.over) {
+      if (this.phase === 'day') this.spawnEnemies();
+      const hpBeforeEnemies = this.player.hp;
+      this.stepEnemies();
+      if (this.phase === 'night' && !this.inBaseRadius(this.player.x)) this.metrics.nightFieldDamage += Math.max(0, hpBeforeEnemies - this.player.hp);
+      this.applyBaseAutoDefense();
+      this.applyTurretDefense();
+      this.tickTowers();
+      this.updateRiskTracking();
+      if (!this.over && this.player.hp <= 0) {
+        if (this.resource === 'tremor') {
+          // 026新規: HP0は即死ではなく救助（ゲームは続く。負けはホーム陥落だけ）
+          this.rescue();
+        } else {
+          this.over = true;
+          this.won = false;
+          this.loseReason = 'playerHp';
+          this.metrics.died = true;
+          this.metrics.deathPhase = this.deathPhaseAt();
+        }
+      }
+    }
+
+    this.metrics.distanceReached = this.maxXReached;
+    this.recomputeScore();
+  }
+
+  getState(): GameState {
+    const p = this.player;
+    const baseDist = this.nearestBaseDistance(p.x);
+    const shopPrices = { fuel: null, brace: null } as Record<ShopItemId, number | null>;
+    const shop: ShopItemState[] = SHOP_DEFS.filter((def) => this.sells(def.id)).map((def) => {
+      const level = this.shopLevelOf(def.id);
+      const nextCost = this.shopCostOf(def.id);
+      shopPrices[def.id] = nextCost;
+      return { id: def.id, name: def.name, desc: def.desc, level, maxLevel: def.maxLevel, nextCost };
+    });
+    return {
+      resource: this.resource,
+      tick: this.tick,
+      over: this.over,
+      won: this.won,
+      loseReason: this.loseReason,
+      phase: this.phase,
+      phaseTicksLeft: this.phaseTicksLeft,
+      nightWarning: this.phase === 'day' && this.phaseTicksLeft <= NIGHT_WARNING_TICKS,
+      player: {
+        x: p.x,
+        y: p.y,
+        hp: p.hp,
+        maxHp: this.maxHp(),
+        fuel: this.resource === 'fuel' ? p.fuel : 0,
+        maxFuel: this.resource === 'fuel' ? this.maxFuel() : 0,
+        tremor: p.tremor,
+        tremorCap: TREMOR_CAP,
+        tremorBonus: tremorBonusOf(p.tremor),
+        caveInChance100: 1 - Math.pow(1 - caveInProb(p.tremor), 100),
+        tremorRate: this.resource === 'tremor' ? this.tremorRateHere(p.x, p.y, false) : 0,
+        estTremorAtReturn: this.estTremorAtReturn(),
+        corridor: this.patrolCoverage(p.x, p.y),
+        dusk: this.resource === 'tremor' && this.isDusk() && !this.inBaseRadius(p.x),
+        rescueDownTicks: p.rescueDownTicks,
+        canTeleport: this.canTeleport(),
+        atk: p.atk,
+        atkCd: p.atkCd,
+        atkCdMax: ATK_CD_MAX,
+        atkRange: ATK_RANGE,
+        dashCd: p.dashCd,
+        dashCdMax: p.dashCdMax,
+        dashRange: p.dashRange,
+        money: p.money,
+        drillPower: this.drillPower(),
+        cargoUnits: p.cargoUnits,
+        maxCapacity: this.maxCapacity(),
+        cargoValue: p.cargoValue,
+        teleportUnlocked: this.teleportUnlocked(),
+        digging: p.digging ? { ...p.digging } : null,
+        estFuelToReturn: this.resource === 'fuel' ? this.estFuelToReturn() : null,
+        recommendedHp: this.recommendedHp(),
+        combatRiskLevel: this.combatRiskLevel(),
+        combatRiskBanner: this.combatRiskBannerTicks,
+        miningRiskLevel: this.lastMiningRisk,
+        miningRiskBanner: this.miningBanner ? { ...this.miningBanner } : null,
+        raidRiskLevel: this.lastRaidRisk,
+        raidRiskBanner: this.raidBanner ? { ...this.raidBanner } : null,
+        forecastRiskLevel: this.lastForecastRisk,
+        forecastRiskBanner: this.forecastBanner ? { ...this.forecastBanner } : null,
+        shopPrices,
+        buildCosts: {
+          barricade: Math.round(BARRICADE_BASE_COST * (1 + Math.max(0, bandAt(p.x)) * BARRICADE_BAND_MULT)),
+          outpost: Math.round(OUTPOST_BASE_COST * (1 + Math.max(0, bandAt(p.x)) * OUTPOST_BAND_COST_MULT)),
+          turret: Math.round(
+            TURRET_BASE_COST *
+              Math.pow(TURRET_COST_GROWTH, this.turretsAtCurrentBase(p.x)) *
+              (1 + Math.max(0, bandAt(p.x)) * TURRET_BAND_COST_MULT),
+          ),
+        },
+        canBuildOutpost: baseDist >= OUTPOST_MIN_GAP && this.tileAt(p.x, p.y) === TILE.FLOOR,
+        baseDistance: baseDist,
+        baseAutoDefenseDmg: this.baseAutoDefenseDmg(),
+        turretsAtCurrentBase: this.turretsAtCurrentBase(p.x),
+        maxTurretsPerBase: MAX_TURRETS_PER_BASE,
+        charge: p.charge,
+        maxCharge: maxChargeOf(p.chargeLv),
+        chargeReady: p.chargeLv >= 1 && p.charge >= maxChargeOf(p.chargeLv),
+        appraisalLv: p.appraisalLv,
+        buildLots: this.appraisedLots(),
+        inPatrolCorridor: this.inPatrolCorridor(p.x, p.y),
+        returnRiskLevel: this.lastReturnRisk,
+        returnRiskBanner: this.returnRiskBanner ? { ...this.returnRiskBanner } : null,
+        recommendedReturnLane: this.recommendedReturnLane(),
+        towerWork: this.towerWork ? { ...this.towerWork } : null,
+        coveringTowers: this.turrets.filter((t) => this.coversPlayer(t)).length,
+      },
+      map: {
+        width: FIELD_WIDTH,
+        laneCount: LANE_COUNT,
+        goalDistance: FIELD_WIDTH,
+        homeRadius: HOME_RADIUS,
+        outpostRadius: OUTPOST_RADIUS,
+        outpostMinGap: OUTPOST_MIN_GAP,
+        tiles: this.visibleTiles(),
+      },
+      enemies: this.enemies.map((e) => ({ ...e })),
+      barricades: this.barricades.map((b) => ({ ...b, linked: this.isLinked(b.x, b.y) })),
+      turrets: this.turrets.map((t) => ({
+        ...t,
+        linked: this.isLinked(t.x, t.y),
+        shielded: this.isShielded(t.x, t.y),
+        topBeamLevel: this.topBeamLevel(t),
+        freeLength: this.freeLengthOf(t),
+        slenderLimit: SLENDER_LIMIT,
+        overstress: this.overstressOf(t),
+        range: this.turretRange(t),
+        patrolRange: Math.round(this.turretPatrolRange(t) * 10) / 10,
+        corridorLanes: this.topBeamLevel(t) > 0 ? this.corridorLanes(t) : ([t.y, t.y] as [number, number]),
+        lone: this.isLoneTower(t),
+        raiseCost: this.raiseCostOf(t),
+      })),
+      beams: this.beams.map((b) => ({ ...b })),
+      towerRules: {
+        slenderLimit: SLENDER_LIMIT,
+        maxHeight: TOWER_MAX_HEIGHT,
+        raiseTicks: RAISE_TICKS,
+        beamTicks: BEAM_TICKS,
+        beamSpan: BEAM_SPAN,
+        rangeStep: TOWER_RANGE_STEP,
+        patrolHeightMult: PATROL_HEIGHT_MULT,
+        beamHp: BEAM_HP,
+        attractPerHeight: ATTRACT_PER_HEIGHT,
+        lureRaidStep: LURE_RAID_STEP,
+        coverRadiusBase: COVER_RADIUS_BASE,
+        watchLanes: WATCH_LANES,
+        loneCoverRadiusBonus: LONE_COVER_RADIUS_BONUS,
+        luredRewardMult: LURED_REWARD_MULT,
+      },
+      lureRaidCount: this.lureRaidCount(),
+      outposts: this.outposts.map((o) => o.x),
+      bases: this.allBases().map((b) => ({ ...b })),
+      baseForecasts: this.baseForecasts.map((f) => ({ ...f })),
+      shop,
+      metrics: { ...this.metrics },
+    };
+  }
+}
