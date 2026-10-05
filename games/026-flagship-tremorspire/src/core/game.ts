@@ -47,7 +47,6 @@ const TELEPORT_FUEL_COST = 25;
 // 高いほど掘った鉱石の売値が上がり（最大+60%）、同時に毎tick落盤しやすくなる。落盤はHPダメージ＋積荷の1/3を落とす部分損失で、
 // HP0は即死ではなく救助（ホームへ運ばれ、積荷全損＋所持金の15%＋手当ての時間）。拠点に入ると揺れは0に戻る
 export const TREMOR_CAP = 150;
-export const TREMOR_BONUS_MAX = 0.6;
 export const TREMOR_BONUS_FULL_AT = 100;
 /** 最寄りの拠点からの距離dで1tickにたまる揺れ = TREMOR_RATE_BASE + TREMOR_RATE_QUAD×(d/TREMOR_RATE_SCALE)² */
 const TREMOR_RATE_BASE = 0.08;
@@ -73,11 +72,47 @@ const CORRIDOR_RELIEF = 1.5;
 /** 回廊の中で掘っている間・梁なしの塔のレーン（lane）の中では、揺れのたまる速さがこの倍率（燃料版の0.5/0.65と同じ） */
 const WOVEN_TREMOR_MULT = 0.5;
 const PATROL_TREMOR_MULT = 0.65;
-/** 夕暮れ（夜の予告nightWarning中）に積荷を抱えて拠点の外にいると揺れのたまる速さがこの倍率（025の核石×3の翻案、低めから試す） */
-export const DUSK_TREMOR_MULT = 1.5;
-/** 救助: 所持金からの救助費の割合と、ホームで動けない手当ての時間 */
-const RESCUE_FEE_RATE = 0.15;
 export const RESCUE_DOWN_TICKS = 60;
+
+/**
+ * v2（サイクル32・2回目）の調整値。揺れ版だけに効く（燃料版＝024の対照群には一切触れない）。
+ * 検証のためsimulateの`--tune key=value`で上書きできるよう1つのオブジェクトにまとめた。既定値は2回目の掃引で決めた値
+ */
+export const TUNE = {
+  /**
+   * v1重大#1: 救助費。v1は所持金の15%で、お金をすぐ使う遊び方には平均0〜13しか効かなかった。
+   * v2は「その日（夜明けから）の稼ぎ×rescueDayRate＋その日の救助回数×rescueFeeStep」を取り、
+   * 所持金が足りなければ借金（所持金が負）になる。借金の間は何も買えず、稼ぎはまず返済に回る。
+   * 掃引の結果、お金はボットがすぐ使うので重さとしてはほぼ効かず（p01 score±5%）、段差は不採用（0）。
+   * 「倒れるとその日の稼ぎの半分を失う」を見せるために率だけ残した
+   */
+  rescueDayRate: 0.5,
+  rescueFeeStep: 0,
+  /** 1なら救助費の段差を「その日（夜明けから）の救助回数」で数える（0なら通算。通算は借金が雪だるまになり p01 score −10794） */
+  rescueStepDaily: 1,
+  /**
+   * v1重大#1(案D、2回目の掃引で追加): 救助隊はホームから出る。救助のたびにホームの耐久を
+   * rescueHomeDmg×(その日の救助回数+1)削る（ホームの最大250、昼に最大60回復）。お金はボットがすぐ使うので効かず、
+   * 唯一の敗北条件（ホーム陥落）に結びつけて「倒れ続けると負ける」を残す。0で無効。
+   * 掃引の結果、ホームは昼に回復するため40でもp01の陥落2/40しか変わらず、不採用（0）
+   */
+  rescueHomeDmg: 0,
+  /** v1重大#1(案B): 夜のフィールドで救助されたら、朝まで手当て（拠点の防衛に参加できない）。0なら昼と同じ60tick */
+  rescueNightUntilDawn: 1,
+  /**
+   * v1重大#1(案E、2回目の掃引で採用候補): 救助の手当てを「次の夜明けまでの時間×rescueTimeLoss」にする（最低60tick）。
+   * 1なら昼に倒れてもその日の残りと夜の防衛を失う。お金・ホームの耐久は使い切り・回復で吸収されたが、時間は取り戻せない
+   */
+  rescueTimeLoss: 1,
+  /** v1重大#2: 揺れボーナスを拠点の外での撃破報酬にも乗せる（揺れが高い所の敵は報酬が高い）。0で鉱石だけ（v1） */
+  killBonus: 1,
+  /** v1重大#2: 揺れ100での最大ボーナス（v1は0.6） */
+  bonusMax: 1.0,
+  /** v1中#3: 梁なしの塔のレーン（lane）でも掘らずにいる間は揺れが毎tickこれだけ下がる（回廊1.5の弱い踊り場）。0でv1 */
+  laneRelief: 0.3,
+  /** v1中#4: 夕暮れ（夜の予告中）に積荷を抱えて拠点の外にいると揺れのたまる速さがこの倍率（v1は1.5） */
+  duskMult: 2,
+};
 /** 揺れ版のテレポートは積荷の価値のこの割合を失う */
 const TELEPORT_CARGO_LOSS = 0.25;
 /** 帰還見積もり（estTremorAtReturn）に対する危険度ヒントの境界 */
@@ -97,7 +132,7 @@ export function caveInProb(t: number): number {
   return CAVEIN_COEF * k * k;
 }
 export function tremorBonusOf(t: number): number {
-  return (Math.min(t, TREMOR_BONUS_FULL_AT) / TREMOR_BONUS_FULL_AT) * TREMOR_BONUS_MAX;
+  return (Math.min(t, TREMOR_BONUS_FULL_AT) / TREMOR_BONUS_FULL_AT) * TUNE.bonusMax;
 }
 
 // ---- 危険度ヒント2種（008パターン#11。combat=HP/推奨HP、mining=燃料/帰還推定燃料） ----
@@ -654,6 +689,9 @@ export class Game {
   readonly resource: Resource;
   /** 落盤判定専用PRNG（026新規）。燃料版では消費されず、024の乱数列を一切乱さない */
   private quakeRng: Rng;
+  /** v2: 夜明けからの稼ぎ（救助費の基準） */
+  private todayEarned = 0;
+  private rescuesToday = 0;
   /** このtickに掘削を進めたか（026新規、回廊で揺れが下がるのは掘らずにいる時だけ） */
   private dugThisTick = false;
   tick = 0;
@@ -788,6 +826,12 @@ export class Game {
     rescueFees: 0,
     rescueLostValue: 0,
     corridorReliefTicks: 0,
+    laneReliefTicks: 0,
+    killBonusValue: 0,
+    rescueDownTicks: 0,
+    minMoney: 0,
+    rescueHomeDamage: 0,
+    homeFallByRescue: false,
     duskTicks: 0,
     maxTremor: 0,
     score: 0,
@@ -944,11 +988,13 @@ export class Game {
     if (this.inBaseRadius(x)) return 0;
     const coverage = this.patrolCoverage(x, y);
     if (coverage === 'woven' && !digging) return -CORRIDOR_RELIEF;
+    // v2（中#3）: 梁なしの塔のレーンも、掘らずにいる間は弱い踊り場（spireAllの見張り台に遠征の長所を足す）
+    if (coverage === 'lane' && !digging && TUNE.laneRelief > 0) return -TUNE.laneRelief;
     let rate = tremorRateAt(this.nearestBaseDistance(x)) * this.tremorGearMult();
     if (digging) rate *= DIG_TREMOR_MULT;
     if (coverage === 'woven') rate *= WOVEN_TREMOR_MULT;
     else if (coverage === 'lane') rate *= PATROL_TREMOR_MULT;
-    if (this.isDusk()) rate *= DUSK_TREMOR_MULT;
+    if (this.isDusk()) rate *= TUNE.duskMult;
     return rate;
   }
   /**
@@ -986,7 +1032,10 @@ export class Game {
     }
     const coverage = this.patrolCoverage(p.x, p.y);
     const rate = this.tremorRateHere(p.x, p.y, this.dugThisTick);
-    if (rate < 0) this.metrics.corridorReliefTicks++;
+    if (rate < 0) {
+      if (coverage === 'woven') this.metrics.corridorReliefTicks++;
+      else this.metrics.laneReliefTicks++;
+    }
     if (this.isDusk()) this.metrics.duskTicks++;
     if (coverage !== 'none') this.metrics.patrolFuelSavedTicks++;
     if (coverage === 'woven') this.metrics.wovenCorridorTicks++;
@@ -1019,9 +1068,13 @@ export class Game {
     else if (where === 'day-siege') this.metrics.rescueDaySiege++;
     else this.metrics.rescueInBase++;
     this.metrics.rescueLostValue += p.cargoValue;
-    const fee = Math.floor(p.money * RESCUE_FEE_RATE);
+    // v2（重大#1）: 救助費は「その日の稼ぎ」と救助回数で決まり、払えなければ借金になる（所持金が負＝何も買えない）
+    const fee = this.rescueFeeNow();
+    const homeDmg = TUNE.rescueHomeDmg * (this.rescuesToday + 1);
+    this.rescuesToday++;
     p.money -= fee;
     this.metrics.rescueFees += fee;
+    if (p.money < this.metrics.minMoney) this.metrics.minMoney = p.money;
     p.cargoUnits = 0;
     p.cargoValue = 0;
     this.stashDigging();
@@ -1030,8 +1083,26 @@ export class Game {
     p.y = SPAWN_Y;
     p.tremor = 0;
     p.hp = this.maxHp();
-    p.rescueDownTicks = RESCUE_DOWN_TICKS;
+    // v2（重大#1・案B）: 夜のフィールドで倒れたら朝まで手当て（拠点の防衛に参加できない）
+    const untilDawn = this.phase === 'night' ? this.phaseTicksLeft : this.phaseTicksLeft + NIGHT_LENGTH;
+    let down = Math.max(RESCUE_DOWN_TICKS, Math.round(untilDawn * TUNE.rescueTimeLoss));
+    if (where === 'night-field' && TUNE.rescueNightUntilDawn > 0 && this.phase === 'night') down = Math.max(down, this.phaseTicksLeft);
+    p.rescueDownTicks = down;
+    this.metrics.rescueDownTicks += p.rescueDownTicks;
     this.wasInBase = true;
+    if (homeDmg > 0) {
+      this.homeBase.hp -= homeDmg;
+      this.metrics.rescueHomeDamage += homeDmg;
+      if (this.homeBase.hp <= 0) {
+        this.metrics.homeFallByRescue = true;
+        this.destroyBase(this.homeBase);
+      }
+    }
+  }
+  /** 今倒れたら取られる救助費（HUD・ボットにも見せる） */
+  private rescueFeeNow(): number {
+    const count = TUNE.rescueStepDaily > 0 ? this.rescuesToday : this.metrics.rescues;
+    return Math.round(this.todayEarned * TUNE.rescueDayRate + count * TUNE.rescueFeeStep);
   }
 
   private allBases(): Base[] {
@@ -2005,9 +2076,17 @@ export class Game {
   private killEnemy(e: Enemy): void {
     this.metrics.kills++;
     if (e.isRaider) this.metrics.raidersKilled++;
-    const reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
+    let reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
+    // v2（重大#2）: 揺れが高い所で倒した敵は報酬が高い（鉱石の売値と同じボーナス）。拠点圏内は揺れ0なので乗らない
+    if (this.resource === 'tremor' && TUNE.killBonus > 0 && this.player.tremor > 0) {
+      const v = Math.round(reward * (1 + tremorBonusOf(this.player.tremor)));
+      this.metrics.killBonusValue += v - reward;
+      this.metrics.tremorBonusValue += v - reward;
+      reward = v;
+    }
     this.player.money += reward;
     this.metrics.moneyEarned += reward;
+    this.todayEarned += reward;
   }
 
   /** 敵の1マス移動: 既にFLOORの道しか通れない。obstacle（バリケード or タレット、016）に阻まれたらそれを返す */
@@ -2596,6 +2675,8 @@ export class Game {
         this.phase = 'day';
         this.phaseTicksLeft = DAY_LENGTH;
         this.metrics.nightsSurvived++;
+        this.todayEarned = 0;
+        this.rescuesToday = 0;
         // v2 FIX（v1バグ#1）: 夜が明けても倒し損ねたレイダーが消滅せず拠点に張り付き続け、
         // 複数夜にまたがる累積ダメージでホームが陥落していた。「昼=安全」という設計意図を
         // 成立させるため、日の出とともに残存レイダーは撤退（消滅）させる
@@ -2616,6 +2697,7 @@ export class Game {
       if (this.player.cargoUnits > 0) {
         this.player.money += this.player.cargoValue;
         this.metrics.moneyEarned += this.player.cargoValue;
+        this.todayEarned += this.player.cargoValue;
         this.player.cargoValue = 0;
         this.player.cargoUnits = 0;
       }
@@ -2768,6 +2850,7 @@ export class Game {
         corridor: this.patrolCoverage(p.x, p.y),
         dusk: this.resource === 'tremor' && this.isDusk() && !this.inBaseRadius(p.x),
         rescueDownTicks: p.rescueDownTicks,
+        rescueFee: this.resource === 'tremor' ? this.rescueFeeNow() : 0,
         canTeleport: this.canTeleport(),
         atk: p.atk,
         atkCd: p.atkCd,

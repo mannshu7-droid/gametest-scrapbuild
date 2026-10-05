@@ -49,13 +49,15 @@
 |---|---|
 | たまる速さ | `0.08 + 0.4×(d/40)²`/tick（dは最寄りの拠点からのx距離）× 掘削1.5 × 支保・ランタン × 回廊/圏 × 夕暮れ |
 | 上限 | 150 |
-| 売値ボーナス | 掘った瞬間の揺れで `min(T,100)/100 × 0.6` |
+| 売値ボーナス | 掘った瞬間の揺れで `min(T,100)/100 × 1.0`（v1は0.6）。**v2: 拠点の外で倒した敵の報酬にも同じボーナスが乗る** |
 | 落盤率 | T<20で0、以上で `0.00035×((T−20)/10)²`/tick（025と同じ） |
 | 落盤 | HP−(12+d×0.3)×危険耐性、積荷の1/3（価値は按分）、揺れ−20 |
 | 毒ガス | 揺れ+15（燃料版は燃料−15） |
-| 救助 | ホームへ、積荷全損、所持金の15%、HP全快、60tick行動不能 |
+| 救助 | ホームへ、積荷全損、HP全快。**v2: 救助費＝その日（夜明けから）の稼ぎの50%（払えなければ借金＝所持金が負）、手当て＝次の夜明けまで動けない（その日の残りと夜の防衛を失う）**。v1は所持金の15%＋60tick |
 | テレポート | 解禁済みならいつでも、積荷の価値の1/4を失う（燃料版は燃料25） |
 | 支保（brace、燃料タンクの置き換え） | 揺れのたまる速さ−10%/Lv（下限0.4倍）、6Lv、価格は燃料タンクと同じ（20×1.4^Lv） |
+| 梁なしの塔のレーン（lane、v2） | 掘らずにいる間は揺れ−0.3/tick（回廊1.5の弱い踊り場）。掘っている間は0.65倍のまま |
+| 夕暮れ（v2） | ×2（v1は×1.5） |
 | ランタン | 燃料版と同じく受動の消費（＝揺れ）−5%/Lv |
 | 帰着線 `estTremorAtReturn` | 今のレーンをホーム方向へ歩いて最寄りの拠点圏に入るまでに**揺れが最も高くなる値**（回廊に入ると下がるので回廊の手前がピーク） |
 | miningRiskLevel | 帰着線≥60でdanger、≥40でcaution（燃料版は燃料マージン） |
@@ -63,14 +65,16 @@
 
 ### 公開する状態（AIP）
 
-`GameState.resource`、`player.tremor/tremorCap/tremorBonus/caveInChance100/tremorRate/estTremorAtReturn/corridor/dusk/rescueDownTicks/canTeleport`。
-Metricsに`caveIns/caveInDamage/caveInLostValue/tremorBonusValue/rescues/rescueNightField/rescueDaySiege/rescueInBase/rescueByCaveIn/rescueFees/rescueLostValue/corridorReliefTicks/duskTicks/maxTremor`。
+`GameState.resource`、`player.tremor/tremorCap/tremorBonus/caveInChance100/tremorRate/estTremorAtReturn/corridor/dusk/rescueDownTicks/rescueFee/canTeleport`。
+Metricsに`caveIns/caveInDamage/caveInLostValue/tremorBonusValue/rescues/rescueNightField/rescueDaySiege/rescueInBase/rescueByCaveIn/rescueFees/rescueLostValue/corridorReliefTicks/duskTicks/maxTremor`、v2で`laneReliefTicks/killBonusValue/rescueDownTicks/minMoney/rescueHomeDamage/homeFallByRescue`。
 燃料版では揺れの値はすべて0、揺れ版では`fuel/maxFuel`は0。`shopPrices.fuel`は揺れ版でnull、`shopPrices.brace`は燃料版でnull。
 
 ### HUD（024-final課題#2: 行を増やさない）
 
 燃料の文字（1行目）と`miningRisk`行を、**揺れゲージ1本**に置き換えた。バー（色＝落盤しやすさ）に危険線（赤、60）と
-帰着線（白）を重ね、右に「揺れ・帰着・売値+%・落盤%/100t・▼回廊/△塔の圏/▲・夕暮れ×1.5」を1行で出す。行数は024と同じ。
+帰着線（白）を重ね、右に「揺れ・帰着・売値+%・落盤%/100t・▼回廊/▼塔の圏/△塔の圏/▲・夕暮れ×2」を1行で出す。行数は024と同じ。
+v2: 1行目（x・HP・ATK）の末尾に「倒れたら救助費N（借金M）」を足した（行は増やさない）。フィールドには回廊（水色）・梁なしの塔のレーン
+（薄い緑）の範囲を淡く塗る。救助の手当て中（朝まで）はブラウザ側で×12の早送りにする（coreの結果は変わらない）。
 
 ## タッチ操作の想定（iPad/Android、Capacitor移植時）
 
@@ -92,8 +96,11 @@ Metricsに`caveIns/caveInDamage/caveInLostValue/tremorBonusValue/rescues/rescueN
 | TREMOR_DANGER_AT / CAUTION_AT | 60 / 40 | 帰着線の危険線と注意線 |
 | CORRIDOR_RELIEF | 1.5/tick | 025の足場と同じ |
 | WOVEN / PATROL_TREMOR_MULT | 0.5 / 0.65 | 燃料版の回廊0.5・圏0.65をそのまま |
-| DUSK_TREMOR_MULT | 1.5 | 025の核石×3を低めから（025-final新規#1: 人の迷う時間が重い罰になる） |
-| RESCUE_FEE_RATE / DOWN_TICKS | 0.15 / 60 | 025の救助＋手当ての時間 |
+| TUNE.duskMult | 2（v1 1.5） | 025の核石×3を低めから。v2で×1.5〜×3を掃引したが、ボットは夜の予告で帰るためほぼ差が出ない |
+| TUNE.rescueDayRate / rescueTimeLoss / rescueNightUntilDawn | 0.5 / 1 / 1 | v2: 救助費はその日の稼ぎの半分、手当ては次の夜明けまで。お金の段差・ホームの耐久を削る案は効かず不採用（TUNEに0で残す） |
+| TUNE.killBonus / bonusMax | 1 / 1.0 | v2: 揺れボーナスを撃破報酬にも、最大+100% |
+| TUNE.laneRelief | 0.3 | v2: 梁なしの塔のレーンの弱い踊り場 |
+| RESCUE_DOWN_TICKS | 60 | 手当ての最短時間 |
 | BRACE_REDUCTION / MIN | 0.1 / 0.4 | 6Lvで0.4倍（燃料タンク6Lvの340/100の逆数≒0.29より控えめ） |
 | TELEPORT_CARGO_LOSS | 0.25 | 揺れ版のテレポートの代価 |
 
@@ -111,4 +118,17 @@ Metricsに`caveIns/caveInDamage/caveInLostValue/tremorBonusValue/rescues/rescueN
 - マルチプレイ（将来、協力して踊り場を作る・救助し合う形を検討。今回はシングルプレイのみ）
 - 新規ショップ項目（支保は燃料タンクの置き換え）・新しい敵種・新しい鉱石
 - 025の送り籠・巻き上げ機・足場アイテム・核石（足場は塔の回廊で代用する）
-- 救助の別ルール（夜だけ重いなど）。v1は025の救助をそのまま使い、重さはレビューで判断する
+- 救助の別ルール（夜だけ重いなど）。v1は025の救助をそのまま使い、重さはレビューで判断する（→v2で「朝まで手当て」を採用）
+
+## 2回目（v0.2.0）で実施した修正内容
+
+v1レビューの改善案5件すべてに対応した。調整値は`TUNE`（core/game.ts）にまとめ、simulateの`--tune key=value`で上書きして掃引できる。
+`--delay N`は帰還条件が成り立ってからN回の判断は気付かない反応遅延（人の「迷う時間」）。燃料版の出力は変更前と完全一致。
+
+1. **重大#1 救助の重さ**: 所持金（案A・C）・ホームの耐久（案D）・時間（案B・E）を順に掃引した。お金はボットがすぐ使い、
+   ホームの耐久は昼に回復するため効かず、通算で上がる救助費は借金が雪だるま式に膨らんだ（p01 score −10794）。
+   取り戻せない**時間**だけが効いたので、「救助されたら次の夜明けまで手当て」＋「その日の稼ぎの半分」を採用
+2. **重大#2 揺れの見返り**: 撃破報酬にも揺れボーナスを乗せ、最大を+100%にした
+3. **中#3 weaveとspireAll**: 梁なしの塔のレーンも掘らずにいると揺れ−0.3/tick（spireAll・spireに長所を足す）
+4. **中#4 夕暮れ**: ×2へ。ボットでは差が出ないことと、反応遅延の罰を測った
+5. **中#5 回廊の可視化**: 回廊・レーンの範囲をフィールドに淡く塗る

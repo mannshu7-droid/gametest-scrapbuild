@@ -1,4 +1,4 @@
-import { DAY_LENGTH, FIELD_WIDTH, LANE_COUNT, LENGTH, NIGHT_LENGTH } from '../core/game';
+import { DAY_LENGTH, FIELD_WIDTH, LANE_COUNT, LENGTH, NIGHT_LENGTH, TUNE } from '../core/game';
 import { TILE, type GameState } from '../core/types';
 
 const TILE_PX = 28;
@@ -131,6 +131,21 @@ export class Renderer {
       }
     }
 
+    // v2（中#5）: 揺れが下がる踊り場を地面に淡く塗る。梁で編んだ回廊（woven）は水色、梁なしの塔のレーン（lane）は薄い緑。
+    // HUDの行は増やさない（「▼回廊」の文字だけだった範囲を絵で見せる）
+    if (s.resource === 'tremor') {
+      for (const t of s.turrets) {
+        const range = Math.floor(t.patrolRange ?? 0);
+        const woven = (t.topBeamLevel ?? 0) > 0;
+        const [lo, hi] = woven ? (t.corridorLanes ?? [t.y, t.y]) : [t.y, t.y];
+        const x0 = Math.max(camLeft, t.x - range);
+        const x1 = Math.min(camLeft + VIEW_W - 1, t.x + range);
+        if (x1 < x0) continue;
+        ctx.fillStyle = woven ? 'rgba(120,200,255,0.16)' : 'rgba(140,230,140,0.10)';
+        ctx.fillRect((x0 - camLeft) * TILE_PX, fieldTop + lo * TILE_PX, (x1 - x0 + 1) * TILE_PX, (hi - lo + 1) * TILE_PX);
+      }
+    }
+
     // 拠点（ホーム + 前線拠点、保護範囲を縦帯で表示。HP割合で色を暗くする）
     for (const base of s.bases) {
       const r = base.isHome ? s.map.homeRadius : s.map.outpostRadius;
@@ -254,7 +269,7 @@ export class Renderer {
     ctx.fillStyle = '#fff';
     ctx.font = '12px monospace';
     ctx.fillText(
-      `x ${s.player.x}/${FIELD_WIDTH}  HP ${Math.max(0, Math.round(s.player.hp))}/${s.player.maxHp}  ATK ${s.player.atk}${s.resource === 'fuel' ? `  fuel ${Math.round(s.player.fuel)}/${s.player.maxFuel}` : ''}${s.player.rescueDownTicks > 0 ? `  救助の手当て中 ${s.player.rescueDownTicks}` : ''}`,
+      `x ${s.player.x}/${FIELD_WIDTH}  HP ${Math.max(0, Math.round(s.player.hp))}/${s.player.maxHp}  ATK ${s.player.atk}${s.resource === 'fuel' ? `  fuel ${Math.round(s.player.fuel)}/${s.player.maxFuel}` : ''}${s.player.rescueDownTicks > 0 ? `  救助の手当て中 ${s.player.rescueDownTicks}` : s.resource === 'tremor' ? `  倒れたら救助費${s.player.rescueFee}${s.player.money < 0 ? ` 借金${-s.player.money}` : ''}` : ''}`,
       6,
       hudY + 16,
     );
@@ -410,11 +425,11 @@ export class Renderer {
       ctx.fillRect(x + (w * Math.min(est, cap)) / cap - 1, y - 3, 2, h + 6);
     }
     const rate = s.player.tremorRate;
-    const arrow = rate < 0 ? '▼回廊' : s.player.corridor === 'lane' ? '△塔の圏' : rate > 0 ? '▲' : '';
+    const arrow = rate < 0 ? (s.player.corridor === 'woven' ? '▼回廊' : '▼塔の圏') : s.player.corridor === 'lane' ? '△塔の圏' : rate > 0 ? '▲' : '';
     ctx.fillStyle = RISK_COLOR[s.player.miningRiskLevel];
     ctx.font = '12px monospace';
     ctx.fillText(
-      `揺れ${Math.round(t)} 帰着${est ?? '-'} 売値+${Math.round(s.player.tremorBonus * 100)}% 落盤${Math.round(danger * 100)}%/100t ${arrow}${s.player.dusk ? ' 夕暮れ×1.5' : ''}`,
+      `揺れ${Math.round(t)} 帰着${est ?? '-'} 売値+${Math.round(s.player.tremorBonus * 100)}% 落盤${Math.round(danger * 100)}%/100t ${arrow}${s.player.dusk ? ` 夕暮れ×${TUNE.duskMult}` : ''}`,
       x + w + 8,
       y + 10,
     );

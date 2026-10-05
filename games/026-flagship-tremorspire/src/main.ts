@@ -4,6 +4,7 @@ import { Input } from './render/input';
 import { createAIP } from './aip';
 
 const TICK_MS = 100; // 10 tps
+const RESCUE_FAST_FORWARD = 12;
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const renderer = new Renderer(canvas);
@@ -34,6 +35,8 @@ setInterval(() => {
   if (aiControlled) return; // AIPが step() で進める
   const state = game.getState();
   if (!state.over) game.step(input.poll());
+  // v2: 救助の手当て中（朝まで動けない）は×RESCUE_FAST_FORWARDで早送りする（待たされる時間を短く。coreの結果は同じ）
+  for (let i = 1; i < RESCUE_FAST_FORWARD && !game.over && game.getState().player.rescueDownTicks > 0; i++) game.step({ type: 'wait' });
   renderer.draw(game.getState(), input.selectedLot);
 }, TICK_MS);
 
