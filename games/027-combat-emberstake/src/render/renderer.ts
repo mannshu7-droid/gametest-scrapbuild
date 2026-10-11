@@ -18,8 +18,12 @@ const ITEM_LABEL: Record<ShopItemId, string> = {
 };
 const ITEM_KEY: Record<ShopItemId, string> = { blade: '1', armor: '2', mend: '3', vitality: '4' };
 
-/** 熱の色: 0=灰青 → 50=橙 → 100=白熱 */
+/** 熱の色: 0=灰青 → 50=橙 → 100=白熱 → 100超=青白い過熱（v2で上限を250へ） */
 function heatColor(h: number): string {
+  if (h > 100) {
+    const k = Math.min(1, (h - 100) / 150);
+    return `rgb(${Math.round(255 - 95 * k)},${Math.round(250 - 50 * k)},255)`;
+  }
   if (h < 50) {
     const k = h / 50;
     return `rgb(${Math.round(120 + 135 * k)},${Math.round(130 + 20 * k)},${Math.round(160 - 120 * k)})`;
@@ -181,15 +185,16 @@ export class Renderer {
     const gw = HUD_W - 10;
     const grad = ctx.createLinearGradient(x0, 0, x0 + gw, 0);
     grad.addColorStop(0, heatColor(0));
-    grad.addColorStop(0.5, heatColor(50));
-    grad.addColorStop(1, heatColor(100));
+    grad.addColorStop(50 / s.heatMax, heatColor(50));
+    grad.addColorStop(Math.min(1, 100 / s.heatMax), heatColor(100));
+    grad.addColorStop(1, heatColor(s.heatMax));
     ctx.fillStyle = '#222';
     ctx.fillRect(x0, y - 12, gw, 14);
     ctx.fillStyle = grad;
-    ctx.fillRect(x0, y - 12, (gw * p.heat) / 100, 14);
-    for (const m of [25, 50, 75]) {
+    ctx.fillRect(x0, y - 12, (gw * p.heat) / s.heatMax, 14);
+    for (const m of [25, 50, 75, 100, 150, 200].filter((v) => v < s.heatMax)) {
       ctx.fillStyle = '#555';
-      ctx.fillRect(x0 + (gw * m) / 100, y - 12, 1, 14);
+      ctx.fillRect(x0 + (gw * m) / s.heatMax, y - 12, 1, 14);
     }
     y += 18;
     line(`報酬 ×${s.rewardMult.toFixed(2)}   被ダメ ×${s.damageMult.toFixed(2)}`, '#ffcf8a');
@@ -206,7 +211,8 @@ export class Renderer {
     // 篝火
     y += 6;
     if (s.onBrazier) {
-      line('篝火の上: B長押しで奉納（被弾で中断）', '#ffd76a');
+      line('篝火の上: B長押しで奉納（被弾で中断）。ここでは斬れない', '#ffd76a');
+      line(`多芸は高くつく: 持っている他の強化1種ごとに価格×${s.typePenalty}`, '#c9a', '11px monospace');
       for (const it of ['blade', 'armor', 'mend', 'vitality'] as ShopItemId[]) {
         const c = s.shopCosts[it];
         const can = c > 0 && p.embers >= c;

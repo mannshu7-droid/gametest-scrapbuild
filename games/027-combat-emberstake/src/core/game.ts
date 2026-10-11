@@ -23,6 +23,11 @@ export const TUNE = {
   brazierRadius: 1.6,
   /** 篝火の結界の余白（敵が近づける最短距離 = brazierRadius + wardMargin） */
   wardMargin: 0.3,
+  /**
+   * v2: 火を恐れる半径。プレイヤーが篝火の上にいる間、敵はこの半径より内へ入らない（押し出される）。
+   * 篝火の上では斬れないので、出ていく時と場所をプレイヤーが選ぶ。0で無効
+   */
+  fearRadius: 4,
   playerSpeed: 0.25,
   baseHp: 100,
   baseAtk: 10,
@@ -36,6 +41,7 @@ export const TUNE = {
   rewardDiv: 25,
   damageDiv: 45,
   damageExp: 2,
+  /** v2で250（上限撤廃）を試したが、篝火の内側から斬れなくすると熱が100を超える前にHPで戻るため差が出ず、100のままにした */
   heatMax: 100,
   /** 撃破が途切れて何tickで熱が冷め始めるか、冷める速さ（heat/tick） */
   heatGraceTicks: 40,
@@ -43,6 +49,8 @@ export const TUNE = {
   /** 時間による敵の強化: HPは difficulty 倍、攻撃は (1 + (difficulty-1) * dmgGrowthShare) 倍 */
   difficultyPerTick: 1 / 3000,
   dmgGrowthShare: 0.6,
+  /** v2: 敵の攻撃力の全体倍率（篝火の内側から斬れなくなった分の調整） */
+  enemyDmg: 0.5,
   spawnStart: 14,
   spawnEnd: 6,
   maxEnemies: 18,
@@ -53,6 +61,11 @@ export const TUNE = {
   shopBase: 40,
   shopGrowth: 1.9,
   shopMaxLevel: 8,
+  /**
+   * v2: 多芸は高くつく。価格 × typePenalty^(この強化以外に持っている強化の種類数)。
+   * v1では価格が強化ごとに上がるため均等に散らすのが常に安く、万能（4種）が全てに勝った。2種への特化と万能を選ばせる
+   */
+  typePenalty: 1.8,
   bladeAtk: 4,
   /** 防具1段ごとの被ダメージ係数（乗算） */
   armorMult: 0.88,
@@ -169,8 +182,10 @@ export class Game {
 
   shopCost(item: ShopItemId): number {
     const lv = this.player.levels[item];
-    if (lv >= this.tune.shopMaxLevel) return Infinity;
-    return Math.round(this.tune.shopBase * Math.pow(this.tune.shopGrowth, lv));
+    const t = this.tune;
+    if (lv >= t.shopMaxLevel) return Infinity;
+    const others = SHOP_ITEMS.filter((it) => it !== item && this.player.levels[it] > 0).length;
+    return Math.round(t.shopBase * Math.pow(t.shopGrowth, lv) * Math.pow(t.typePenalty, others));
   }
 
   onBrazier(): boolean {
@@ -208,7 +223,8 @@ export class Game {
         break;
       }
       case 'attack':
-        if (p.attackCd === 0) this.attack();
+        // v2: 篝火の上（結界の内側）では斬れない。結界の縁の敵を内側から一方的に斬る抜け穴を塞ぐ
+        if (p.attackCd === 0 && !this.onBrazier()) this.attack();
         break;
       case 'bank':
         if (this.onBrazier()) {
@@ -351,7 +367,7 @@ export class Game {
     const p = this.player;
     const t = this.tune;
     const diff = this.difficulty();
-    const dmgScale = (1 + (diff - 1) * t.dmgGrowthShare) * this.damageMult() * Math.pow(t.armorMult, p.levels.armor);
+    const dmgScale = t.enemyDmg * (1 + (diff - 1) * t.dmgGrowthShare) * this.damageMult() * Math.pow(t.armorMult, p.levels.armor);
     for (const e of this.enemies) {
       const def = ENEMY_DEFS[e.kind];
       if (e.cd > 0) e.cd--;
@@ -372,8 +388,9 @@ export class Game {
         }
       }
     }
-    // 篝火の結界: 敵は火の輪（半径brazierRadius+wardMargin）の内側へ入れない。中心にいれば敵の手は届かない
-    const ward = t.brazierRadius + t.wardMargin;
+    // 篝火の結界: 敵は火の輪（半径brazierRadius+wardMargin）の内側へ入れない。中心にいれば敵の手は届かない。
+    // v2: プレイヤーが篝火の上にいる間は、火を恐れて fearRadius より内へ来ない
+    const ward = this.onBrazier() && t.fearRadius > 0 ? t.fearRadius : t.brazierRadius + t.wardMargin;
     for (const e of this.enemies) {
       const d = Math.hypot(e.x, e.y);
       if (d < ward && d > 0.001) {
@@ -449,7 +466,9 @@ export class Game {
       lastRescue: this.lastRescue && { ...this.lastRescue },
       lastBank: this.lastBank && { ...this.lastBank },
       floats: this.floats.map((f) => ({ ...f })),
-      goals: [800, 2000, 4000],
+      goals: [2000, 5000, 8000],
+      heatMax: this.tune.heatMax,
+      typePenalty: this.tune.typePenalty,
       metrics: { ...this.metrics, downsByPhase: { ...this.metrics.downsByPhase } },
     };
   }

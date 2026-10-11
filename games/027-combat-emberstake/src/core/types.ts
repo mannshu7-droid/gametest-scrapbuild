@@ -37,7 +37,7 @@ export interface Player {
   dashCd: number;
   /** 無敵の残りtick（ダッシュ・救助直後） */
   iframes: number;
-  /** 0〜100。攻め続けるほど上がり、報酬倍率と被ダメージ倍率を同時に上げる（1本のダイヤル） */
+  /** 0〜heatMax（100）。攻め続けるほど上がり、報酬倍率と被ダメージ倍率を同時に上げる（1本のダイヤル） */
   heat: number;
   /** 最後に撃破してからのtick（熱の冷め始めの判定） */
   sinceKill: number;
@@ -108,8 +108,12 @@ export interface GameState {
   lastRescue: { tick: number; lostPool: number; lostHeat: number } | null;
   lastBank: { tick: number; amount: number; heat: number } | null;
   floats: FloatText[];
-  /** 当日の目標（累計奉納） */
+  /** 当日の目標（累計奉納）。v2で800/2000/4000→2000/5000/8000 */
   goals: number[];
+  /** 熱の上限（100。--tune heatMax で変えられる） */
+  heatMax: number;
+  /** 多芸は高くつく: 他の強化1種ごとの価格倍率 */
+  typePenalty: number;
   metrics: Metrics;
 }
 
@@ -122,7 +126,7 @@ export interface ActionSpecEntry {
 export const ACTION_SPEC: ActionSpecEntry[] = [
   { type: 'wait', description: '何もしない（1tick）' },
   { type: 'move', params: { dir: 'up|down|left|right' }, description: '移動（0.25タイル/tick）' },
-  { type: 'attack', description: '周囲（半径1.5）の敵全員を斬る。クールダウン6tick' },
+  { type: 'attack', description: '周囲（半径1.5）の敵全員を斬る。クールダウン6tick。篝火の上では斬れない' },
   { type: 'dash', params: { dir: 'up|down|left|right' }, description: '3タイル跳ぶ。4tick無敵、クールダウン30tick' },
   {
     type: 'bank',
