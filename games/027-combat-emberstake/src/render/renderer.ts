@@ -126,6 +126,15 @@ export class Renderer {
       ctx.stroke();
       ctx.lineWidth = 2;
     }
+    // v3: 踏ん張り（火の加護）の輪
+    if (p.grace > 0) {
+      ctx.strokeStyle = `rgba(155,231,255,${0.4 + (0.5 * p.grace) / 30})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(X(p.x), Y(p.y), 0.95 * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 2;
+    }
     // 奉納の詠唱
     if (p.channel > 0) {
       ctx.strokeStyle = '#ffd76a';
@@ -178,6 +187,8 @@ export class Renderer {
     ctx.fillRect(x0, y - 10, ((HUD_W - 10) * Math.max(0, p.hp)) / p.maxHp, 12);
     y += 8;
     line(`HP ${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}`);
+    if (p.grace > 0) line(`踏ん張り中 ${(p.grace / 10).toFixed(1)}秒 — 被ダメ半分。今のうちに戻れ`, '#9be7ff', 'bold 12px monospace');
+    else line(p.graceReady ? '踏ん張り: 残り1回（HP3割を切ると発動）' : '踏ん張り: 使用済み（奉納で戻る）', p.graceReady ? '#7ab' : '#755', '11px monospace');
 
     // 熱ゲージ: 報酬倍率と被ダメージ倍率を同じゲージに並べる
     y += 4;

@@ -54,9 +54,31 @@ export const TUNE = {
   spawnStart: 14,
   spawnEnd: 6,
   maxEnemies: 18,
+  /**
+   * v3: 熱は敵を呼ぶ。出現間隔 ÷ (1 + heatSpawn × heat/100)、上限 + heatCap × heat/100 体。
+   * 守りを厚くしても熱を上げ続けると敵が増える…はずが、敵の増加は撃破の増加（報酬）になり全ビルドが得をした。
+   * v3で試して不採用（0のまま。--tune heatSpawn=1,heatCap=6 で再現）
+   */
+  heatSpawn: 0,
+  heatCap: 0,
+  /**
+   * 熱が高いほど抱えた残り火が燃え尽きる。1tickごとに pool × poolLeak × (heat/100)^2 を失う。
+   * v3で試して不採用（0のまま）: 守り寄りは熱80に届く前にHPで戻るため、80以上の平らさは変わらず全体が下がるだけ
+   */
+  poolLeak: 0,
   /** 救助直後: 篝火の周りの敵を押し返す半径と、無敵tick */
   rescueClearRadius: 5,
   rescueIframes: 20,
+  /**
+   * v3: 踏ん張り（火の加護）。1回の出撃につき1度、HPが graceFrac を下回った瞬間に篝火が燃え上がり、
+   * 周り（半径 graceKnockRadius）の敵を押し返し、graceTicks の間は被ダメージ × graceDmgMult。
+   * 奉納か救助で再び使えるようになる。v2の新規重大#1（迷いの罰が崖、遅延3秒で−79%）への対応。graceTicks=0で無効
+   */
+  graceFrac: 0.3,
+  graceTicks: 30,
+  graceDmgMult: 0.5,
+  graceKnockRadius: 2.5,
+  graceKnockDist: 2.5,
   /** ショップ */
   shopBase: 40,
   shopGrowth: 1.9,
@@ -118,6 +140,7 @@ function emptyMetrics(): Metrics {
     damageTaken: 0,
     channelBreaks: 0,
     spent: 0,
+    graces: 0,
   };
 }
 
@@ -158,6 +181,8 @@ export class Game {
       channel: 0,
       embers: 0,
       levels: { blade: 0, armor: 0, mend: 0, vitality: 0 },
+      grace: 0,
+      graceReady: true,
     };
   }
 
@@ -203,6 +228,7 @@ export class Game {
     if (p.attackCd > 0) p.attackCd--;
     if (p.dashCd > 0) p.dashCd--;
     if (p.iframes > 0) p.iframes--;
+    if (p.grace > 0) p.grace--;
 
     let channeling = false;
     switch (action.type) {
@@ -248,6 +274,7 @@ export class Game {
     if (p.hp <= 0) this.rescue(channeling);
     else if (channeling && p.channel >= t.channelTicks) this.bank();
 
+    if (t.poolLeak > 0 && p.pool > 0) p.pool -= p.pool * t.poolLeak * Math.pow(p.heat / 100, 2);
     // 熱の冷め
     p.sinceKill++;
     if (p.sinceKill > t.heatGraceTicks && p.heat > 0) p.heat = Math.max(0, p.heat - t.heatDecay);
@@ -331,6 +358,34 @@ export class Game {
     p.heat = 0;
     p.channel = 0;
     p.hp = p.maxHp;
+    p.graceReady = true;
+    p.grace = 0;
+  }
+
+  /** v3: 踏ん張り。倒れる前の「戻れ」の合図と猶予（1出撃に1度） */
+  private triggerGrace(): void {
+    const p = this.player;
+    const t = this.tune;
+    p.graceReady = false;
+    p.grace = t.graceTicks;
+    this.metrics.graces++;
+    for (const e of this.enemies) {
+      const dx = e.x - p.x;
+      const dy = e.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d < t.graceKnockRadius) {
+        const a = d > 0.01 ? Math.atan2(dy, dx) : this.rng() * Math.PI * 2;
+        e.x += Math.cos(a) * t.graceKnockDist;
+        e.y += Math.sin(a) * t.graceKnockDist;
+        const r = Math.hypot(e.x, e.y);
+        const lim = t.arenaRadius - 0.3;
+        if (r > lim) {
+          e.x *= lim / r;
+          e.y *= lim / r;
+        }
+      }
+    }
+    this.floats.push({ x: p.x, y: p.y - 0.6, text: '踏ん張り！戻れ', color: '#9be7ff', ttl: 20 });
   }
 
   /** HP0: 死ではなく救助。失うのは未奉納の残り火と熱だけ（お金・時間・装備は失わない） */
@@ -349,6 +404,8 @@ export class Game {
     p.heat = 0;
     p.channel = 0;
     p.hp = p.maxHp;
+    p.graceReady = true;
+    p.grace = 0;
     p.x = 0;
     p.y = 0;
     p.iframes = t.rescueIframes;
@@ -381,10 +438,11 @@ export class Game {
       if (d <= def.reach && e.cd === 0) {
         e.cd = def.cd;
         if (p.iframes === 0) {
-          const dmg = def.dmg * dmgScale;
+          const dmg = def.dmg * dmgScale * (p.grace > 0 ? t.graceDmgMult : 1);
           p.hp -= dmg;
           this.metrics.damageTaken += dmg;
           this.hitThisTick = true;
+          if (p.graceReady && t.graceTicks > 0 && p.hp > 0 && p.hp < p.maxHp * t.graceFrac) this.triggerGrace();
         }
       }
     }
@@ -421,8 +479,9 @@ export class Game {
     const t = this.tune;
     if (--this.spawnTimer > 0) return;
     const frac = Math.min(1, this.tick / t.sessionTicks);
-    this.spawnTimer = Math.round(t.spawnStart + (t.spawnEnd - t.spawnStart) * frac);
-    if (this.enemies.length >= t.maxEnemies) return;
+    const hf = this.player.heat / 100;
+    this.spawnTimer = Math.max(1, Math.round((t.spawnStart + (t.spawnEnd - t.spawnStart) * frac) / (1 + t.heatSpawn * hf)));
+    if (this.enemies.length >= t.maxEnemies + Math.round(t.heatCap * hf)) return;
     const r = this.rng();
     // 序盤は雑兵中心、時間とともに走り屋・重兵が混ざる
     const kind: EnemyKind = r < 0.15 + 0.15 * frac ? 'brute' : r < 0.45 + 0.1 * frac ? 'runner' : 'grunt';
@@ -466,7 +525,7 @@ export class Game {
       lastRescue: this.lastRescue && { ...this.lastRescue },
       lastBank: this.lastBank && { ...this.lastBank },
       floats: this.floats.map((f) => ({ ...f })),
-      goals: [2000, 5000, 8000],
+      goals: [2000, 4000, 6000],
       heatMax: this.tune.heatMax,
       typePenalty: this.tune.typePenalty,
       metrics: { ...this.metrics, downsByPhase: { ...this.metrics.downsByPhase } },

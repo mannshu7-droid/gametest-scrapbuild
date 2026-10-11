@@ -48,6 +48,10 @@ export interface Player {
   /** 奉納済みで使える残り火（ショップ用） */
   embers: number;
   levels: Record<ShopItemId, number>;
+  /** v3: 踏ん張りの残りtick（>0の間は被ダメージが軽い） */
+  grace: number;
+  /** v3: この出撃でまだ踏ん張りを使っていないか（奉納・救助で戻る） */
+  graceReady: boolean;
 }
 
 /** 倒れた（救助された）ときの熱の帯。021/022の deathPhase に相当する027の主指標 */
@@ -77,6 +81,8 @@ export interface Metrics {
   /** 奉納の詠唱が被弾で途切れた回数 */
   channelBreaks: number;
   spent: number;
+  /** v3: 踏ん張りが発動した回数 */
+  graces: number;
 }
 
 export interface FloatText {
@@ -108,7 +114,7 @@ export interface GameState {
   lastRescue: { tick: number; lostPool: number; lostHeat: number } | null;
   lastBank: { tick: number; amount: number; heat: number } | null;
   floats: FloatText[];
-  /** 当日の目標（累計奉納）。v2で800/2000/4000→2000/5000/8000 */
+  /** 当日の目標（累計奉納）。v2で800/2000/4000→2000/5000/8000、v3で2000/4000/6000 */
   goals: number[];
   /** 熱の上限（100。--tune heatMax で変えられる） */
   heatMax: number;
