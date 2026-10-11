@@ -136,6 +136,7 @@ export interface RunResult {
   peakHeat: number;
   highHeatSec: number;
   channelBreaks: number;
+  graces: number;
   levels: Record<ShopItemId, number>;
 }
 
@@ -161,6 +162,7 @@ export function runOne(persona: Persona, seed: number, tune: Partial<Tune> = {},
     peakHeat: m.peakHeat,
     highHeatSec: m.ticksHighHeat / 10,
     channelBreaks: m.channelBreaks,
+    graces: m.graces,
     levels: { ...g.player.levels },
   };
 }
@@ -191,6 +193,7 @@ function summarize(rs: RunResult[]) {
     avgBankHeat: +mean(rs.map((r) => r.avgBankHeat)).toFixed(1),
     highHeatSec: +mean(rs.map((r) => r.highHeatSec)).toFixed(1),
     channelBreaks: +mean(rs.map((r) => r.channelBreaks)).toFixed(1),
+    graces: +mean(rs.map((r) => r.graces)).toFixed(2),
     levels: { blade: lv('blade'), armor: lv('armor'), mend: lv('mend'), vitality: lv('vitality') },
   };
 }
@@ -312,6 +315,7 @@ if (isMain) {
         lost: s.lostShare,
         bankHeat: s.avgBankHeat,
         hiSec: s.highHeatSec,
+        grace: s.graces,
         lv: `${s.levels.blade}/${s.levels.armor}/${s.levels.mend}/${s.levels.vitality}`,
       })),
     );
