@@ -614,6 +614,12 @@ let RETURN_AT: number | null = null;
 let RETURN_DELAY = 0;
 /** 028新規: 欲張り観察（--greedy N）。tick GREEDY_FROM以降の昼、揺れがNに届いた瞬間から倒れるか夜の予告まで帰らない */
 let GREEDY_AT: number | null = null;
+/**
+ * 2回目（v1重大#1(b)）: 慎重な戦略の帰還を注意線へ揃える。v1の固定閾値の掃引で、bare以外の8戦略はすべてT30（注意線）が最良だった。
+ * 攻める型（bare・pusher・p01）は危険線のまま。`--carefulLine 0`でv1（全戦略が危険線）。`--preset 026`では0（026と一致させる）
+ */
+let CAREFUL_LINE = true;
+const CAREFUL_STRATS: string[] = ['wall', 'mason', 'spire', 'spireAll', 'weave', 'p02', 'cautious', 'ranger', 'patroller', 'spireRisky', 'weaveLate', 'weaveEarly'];
 const GREEDY_FROM = 3000;
 
 export class Bot {
@@ -744,10 +750,12 @@ export class Bot {
       this.greedyStart = s.tick;
     }
     const greedy = this.greedyStart >= 0 && !this.greedyDone;
+    // 2回目（v1重大#1(b)）: 慎重な戦略は注意線（cautionAt=30、ゲージの黄線）で帰る。攻める戦略（bare・pusher・p01）は危険線（赤線）のまま
+    const lineHit = CAREFUL_LINE && CAREFUL_STRATS.includes(this.strategy) ? p.miningRiskLevel !== 'safe' : p.miningRiskLevel === 'danger';
     const criticalFuelRaw =
       !greedy &&
       (RETURN_AT === null
-        ? p.miningRiskLevel === 'danger'
+        ? lineHit
         : s.resource === 'tremor'
           ? (p.estTremorAtReturn ?? 0) >= RETURN_AT
           : p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + RETURN_AT);
@@ -973,6 +981,7 @@ interface RunResult {
   offenseLv: number;
   grits: number;
   gritRefills: number;
+  gritCatches: number;
   coverKeptValue: number;
   banks: number;
   bankTremorSum: number;
@@ -1150,6 +1159,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     offenseLv: s.shop.find((it) => it.id === 'offense')?.level ?? 0,
     grits: s.metrics.grits,
     gritRefills: s.metrics.gritRefills,
+    gritCatches: s.metrics.gritCatches,
     coverKeptValue: s.metrics.coverKeptValue,
     banks: s.metrics.banks,
     bankTremorSum: Math.round(s.metrics.bankTremorSum),
@@ -1185,6 +1195,7 @@ RETURN_DELAY = Number(argVal('delay') ?? 0);
 const PRESET = argVal('preset') ?? null;
 if (PRESET === '026') Object.assign(TUNE, PRESET_026);
 else if (PRESET !== null) throw new Error(`unknown preset: ${PRESET}`);
+CAREFUL_LINE = argVal('carefulLine') !== undefined ? argVal('carefulLine') !== '0' : PRESET !== '026';
 GREEDY_AT = argVal('greedy') !== undefined ? Number(argVal('greedy')) : null;
 for (const kv of (argVal('tune') ?? '').split(',').filter(Boolean)) {
   const [k, v] = kv.split('=');
@@ -1261,6 +1272,7 @@ function briefRow(strategy: string, rs: RunResult[]): Record<string, number | st
     bankT: +(rs.reduce((a, r) => a + r.bankTremorSum, 0) / Math.max(1, rs.reduce((a, r) => a + r.banks, 0))).toFixed(1),
     grits: f((r) => r.grits, 2),
     refills: f((r) => r.gritRefills, 2),
+    catches: f((r) => r.gritCatches, 2),
     bonus: f((r) => r.tremorBonusValue),
     bounty: f((r) => r.bountyCarried),
     fieldDmg: f((r) => r.fieldDamageTaken),
