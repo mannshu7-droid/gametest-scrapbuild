@@ -469,6 +469,9 @@ export class Renderer {
     // 危険線（帰着線がこれを超えるとminingRisk=danger）
     ctx.fillStyle = '#ff4d4d';
     ctx.fillRect(x + (w * TUNE.dangerAt) / cap - 1, y - 2, 2, h + 4);
+    // 3回目（v2中#3）: 注意線（帰着線がこれを超えるとminingRisk=caution）。慎重な遊び方の帰る目安
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillRect(x + (w * TUNE.cautionAt) / cap - 1, y - 2, 2, h + 4);
     // 帰着線
     const est = s.player.estTremorAtReturn;
     if (est !== null) {
@@ -480,9 +483,19 @@ export class Renderer {
     ctx.fillStyle = RISK_COLOR[s.player.miningRiskLevel];
     ctx.font = '12px monospace';
     ctx.fillText(
-      `揺れ${Math.round(t)} 帰着${est ?? '-'} 売値+${Math.round(s.player.tremorBonus * 100)}% 被ダメ×${s.player.dmgMult.toFixed(1)} 落盤${Math.round(danger * 100)}%/100t ${arrow}${s.player.dusk ? ` 夕暮れ×${TUNE.duskMult}` : ''}${s.player.stakeRescue && TUNE.gritTicks > 0 ? ` 踏ん張り${s.player.gritLeft}` : ''}`,
+      `揺れ${Math.round(t)} 帰着${est ?? '-'} 売値+${Math.round(s.player.tremorBonus * 100)}% 被ダメ×${s.player.dmgMult.toFixed(1)} 落盤${Math.round(danger * 100)}%/100t ${arrow}${s.player.dusk ? ` 夕暮れ×${TUNE.duskMult}` : ''}${s.player.stakeRescue && TUNE.gritTicks > 0 ? ` 踏ん張り${s.player.gritLeft}` : ''}${overLineText(s)}`,
       x + w + 8,
       y + 10,
     );
   }
+}
+
+/**
+ * 3回目（v2中#3）: 注意線の外で帰着線がまだ上がっていた時間（粘った時間。迷いの損を「見える」形にする）。遠征中は今の値、拠点では前の遠征の値。
+ * 倒れない慎重な遊び方では損が救助として出ないので、帰る目安を越えた秒数だけを出す
+ */
+function overLineText(s: GameState): string {
+  const p = s.player;
+  if (p.estTremorAtReturn !== null) return p.overLineTicks > 0 ? ` 注意線の外で粘った${(p.overLineTicks / 10).toFixed(1)}s` : '';
+  return p.lastTripOverLine > 0 ? ` 前の遠征: 注意線の外で粘った${(p.lastTripOverLine / 10).toFixed(1)}s` : '';
 }

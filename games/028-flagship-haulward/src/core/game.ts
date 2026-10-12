@@ -167,13 +167,24 @@ export const TUNE = {
   coverTrip: 1,
   /** v1重大#2（2回目）: 防具を多芸の代償の外に出す（1）。0ならv1と同じく身体の強化として×typePenalty */
   armorFree: 0,
-  /** v1重大#2（2回目）: 防具の基本価格（v1は20） */
-  armorBase: 20,
+  /** v1重大#2（2回目）: 防具の基本価格（v1・v2は20）。3回目: armorTower=1と組んで10（塔の無いbareは買えないので、安くしても支配が戻らない） */
+  armorBase: 10,
   /**
    * v1重大#2（2回目）: 防具が減らすのは揺れの凸の部分だけ（1）。被ダメージ×(1+(揺れ/dmgDiv)^dmgExp×armorMult^Lv)。
    * 0ならv1と同じく被ダメージ全体×armorMult^Lv（揺れ0の拠点の近くでも効く＝ただの耐久強化）
    */
   armorConvex: 0,
+  /**
+   * v2重大#1（3回目）: 防具は塔の見張りの下でだけ効く（1）。拠点圏の中・塔のパトロール圏の中・その遠征で圏を通った後
+   * （coverTripと同じ条件）でだけ被ダメージ×armorMult^Lv。塔が1本も無い間は防具を売らない。0ならv2と同じ（どこでも効く）。
+   * v2の測定では、防具を安くして上限を動かすと恩恵が塔に払わないbareに集まり、全戦略に勝った
+   */
+  armorTower: 1,
+  /**
+   * v2重大#2（3回目）: 撃破の揺れボーナス（懸賞の上乗せ）は塔の見張りの下でだけ乗る（1）。条件はarmorTowerと同じ。
+   * 0ならv2と同じ（どこでも乗る）。bareの稼ぎの中心は懸賞×揺れボーナス
+   */
+  killBonusTower: 1,
   /**
    * v1中#4（2回目）: 踏ん張りの受け止め。1なら、HP3割以上から一撃で3割を割る時、その一撃はHPをgritFrac/2より下げない
    * （凸の被ダメージで窓を飛び越えて倒れるのを防ぐ）。0ならv1
@@ -203,6 +214,8 @@ export const PRESET_026: Partial<typeof TUNE> = {
   armorBase: 20,
   armorConvex: 0,
   gritCatch: 0,
+  armorTower: 0,
+  killBonusTower: 0,
 };
 /** 多芸の代償が掛かる身体の強化 */
 const BODY_ITEMS: ShopItemId[] = ['offense', 'vitality', 'armor', 'mobility'];
@@ -846,6 +859,10 @@ export class Game {
   private wasInBase = true;
   /** 2回目: この遠征（拠点を出てから）で塔のパトロール圏を通ったか（coverTrip） */
   private tripCovered = false;
+  /** 3回目（v2中#3）: この遠征で注意線の外で粘ったtick数／前の遠征の値（見える損の表示用。規則には効かない） */
+  private tripOverLine = 0;
+  private lastTripOverLine = 0;
+  private lastEst = 0;
   private prevCombatSeverity = 0;
   private combatRiskBannerTicks = 0;
   private lastMiningRisk: RiskLevel = 'safe';
@@ -949,6 +966,7 @@ export class Game {
     grits: 0,
     gritRefills: 0,
     gritCatches: 0,
+    overCautionTicks: 0,
     coverKeptValue: 0,
     banks: 0,
     bankTremorSum: 0,
@@ -1103,7 +1121,7 @@ export class Game {
   private sells(item: ShopItemId): boolean {
     if (item === 'fuel') return this.resource === 'fuel';
     if (item === 'brace') return this.resource === 'tremor';
-    if (item === 'armor') return this.resource === 'tremor' && TUNE.armorMult < 1;
+    if (item === 'armor') return this.resource === 'tremor' && TUNE.armorMult < 1 && (TUNE.armorTower <= 0 || this.turrets.length > 0 || this.player.armorLv > 0);
     return true;
   }
   /** 揺れのたまる速さの倍率（支保とランタン。ランタンは燃料版と同じく受動の消費＝揺れを-5%/Lv） */
@@ -1172,6 +1190,15 @@ export class Game {
     if (coverage !== 'none') this.tripCovered = true;
     p.tremor = Math.max(0, Math.min(TREMOR_CAP, p.tremor + rate));
     this.lastFieldTremor = p.tremor;
+    if (this.phase === 'day') {
+      // 帰り道（帰着線が上がらない）は数えず、注意線の外で帰着線がまだ上がっている間＝粘っている時間だけを数える
+      const est = this.estTremorAtReturn();
+      if (est !== null && est >= TUNE.cautionAt && est > this.lastEst) {
+        this.tripOverLine++;
+        this.metrics.overCautionTicks++;
+      }
+      this.lastEst = est ?? 0;
+    }
     // 028: 梁で編んだ回廊（踊り場）に入ると、使った踏ん張りを1日に1回だけ戻す
     if (coverage === 'woven' && TUNE.gritRefill > 0 && TUNE.gritTicks > 0 && p.gritLeft < TUNE.gritPerDay && !p.gritRefilledToday) {
       p.gritLeft++;
@@ -1197,11 +1224,16 @@ export class Game {
     if (p.hp <= 0) this.metrics.rescueByCaveIn++;
   }
   // ---- 028新規: 揺れの凸の被ダメージ・防具・踏ん張り ----
+  /** 3回目: 塔の見張りの下にいるか（拠点圏の中・塔のパトロール圏の中・この遠征で圏を通った後） */
+  private underWatch(): boolean {
+    const p = this.player;
+    return this.inBaseRadius(p.x) || this.tripCovered || this.patrolCoverage(p.x, p.y) !== 'none';
+  }
   /** 今受ける被ダメージの倍率。拠点の中は揺れ0なので防具だけ */
   private dmgMult(): number {
     const p = this.player;
     let m = 1;
-    const armor = p.armorLv > 0 ? Math.pow(TUNE.armorMult, p.armorLv) : 1;
+    const armor = p.armorLv > 0 && (TUNE.armorTower <= 0 || this.underWatch()) ? Math.pow(TUNE.armorMult, p.armorLv) : 1;
     // 2回目（armorConvex）: 防具は揺れの凸の部分（(揺れ/dmgDiv)^dmgExp）だけを減らす。揺れ0では効かず、揺れが高いほど効く
     const convexArmor = TUNE.armorConvex > 0 ? armor : 1;
     if (this.resource === 'tremor' && TUNE.tremorDmg > 0 && p.tremor > 0) m *= 1 + Math.pow(p.tremor / TUNE.dmgDiv, TUNE.dmgExp) * convexArmor;
@@ -1315,6 +1347,8 @@ export class Game {
     this.metrics.rescueDownTicks += p.rescueDownTicks;
     this.wasInBase = true;
     this.tripCovered = false;
+    this.lastTripOverLine = this.tripOverLine;
+    this.tripOverLine = 0;
     if (homeDmg > 0) {
       this.homeBase.hp -= homeDmg;
       this.metrics.rescueHomeDamage += homeDmg;
@@ -2303,7 +2337,7 @@ export class Game {
     if (e.isRaider) this.metrics.raidersKilled++;
     let reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
     // v2（重大#2）: 揺れが高い所で倒した敵は報酬が高い（鉱石の売値と同じボーナス）。拠点圏内は揺れ0なので乗らない
-    if (this.resource === 'tremor' && TUNE.killBonus > 0 && this.player.tremor > 0) {
+    if (this.resource === 'tremor' && TUNE.killBonus > 0 && this.player.tremor > 0 && (TUNE.killBonusTower <= 0 || this.underWatch())) {
       const v = Math.round(reward * (1 + tremorBonusOf(this.player.tremor)));
       this.metrics.killBonusValue += v - reward;
       this.metrics.tremorBonusValue += v - reward;
@@ -2996,6 +3030,10 @@ export class Game {
         this.fieldRegenTimer = 0;
       }
     }
+    if (inBase && !this.wasInBase) {
+      this.lastTripOverLine = this.tripOverLine;
+      this.tripOverLine = 0;
+    }
     this.wasInBase = inBase;
     if (inBase) this.tripCovered = false;
 
@@ -3101,7 +3139,9 @@ export class Game {
       const level = this.shopLevelOf(def.id);
       const nextCost = this.shopCostOf(def.id);
       shopPrices[def.id] = nextCost;
-      return { id: def.id, name: def.name, desc: def.desc, level, maxLevel: def.maxLevel, nextCost };
+      // 3回目: armorTower=1なら防具は塔の見張りの下でだけ効く
+      const desc = def.id === 'armor' && TUNE.armorTower > 0 ? '塔の見張りの下で被ダメージ×0.88（拠点・塔の圏・圏を通った遠征）' : def.desc;
+      return { id: def.id, name: def.name, desc, level, maxLevel: def.maxLevel, nextCost };
     });
     return {
       resource: this.resource,
@@ -3135,6 +3175,8 @@ export class Game {
         gritTicks: p.gritTicks,
         coverKeepNow:
           TUNE.stakeRescue > 0 && !this.inBaseRadius(p.x) && (this.patrolCoverage(p.x, p.y) !== 'none' || (TUNE.coverTrip > 0 && this.tripCovered)) ? TUNE.coverKeep : 0,
+        overLineTicks: this.tripOverLine,
+        lastTripOverLine: this.lastTripOverLine,
         stakeRescue: this.resource === 'tremor' && TUNE.stakeRescue > 0,
         canTeleport: this.canTeleport(),
         atk: p.atk,

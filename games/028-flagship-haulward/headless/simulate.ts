@@ -982,6 +982,8 @@ interface RunResult {
   grits: number;
   gritRefills: number;
   gritCatches: number;
+  /** 3回目: 帰着線が注意線の外でまだ上がっていた（粘った）tickの合計（迷いの損の見える形） */
+  overCautionTicks: number;
   coverKeptValue: number;
   banks: number;
   bankTremorSum: number;
@@ -1160,6 +1162,7 @@ function runOne(seed: number, strategy: Strategy, maxTicks: number): RunResult {
     grits: s.metrics.grits,
     gritRefills: s.metrics.gritRefills,
     gritCatches: s.metrics.gritCatches,
+    overCautionTicks: s.metrics.overCautionTicks,
     coverKeptValue: s.metrics.coverKeptValue,
     banks: s.metrics.banks,
     bankTremorSum: Math.round(s.metrics.bankTremorSum),
@@ -1273,6 +1276,7 @@ function briefRow(strategy: string, rs: RunResult[]): Record<string, number | st
     grits: f((r) => r.grits, 2),
     refills: f((r) => r.gritRefills, 2),
     catches: f((r) => r.gritCatches, 2),
+    overLineSec: f((r) => r.overCautionTicks / 10, 0),
     bonus: f((r) => r.tremorBonusValue),
     bounty: f((r) => r.bountyCarried),
     fieldDmg: f((r) => r.fieldDamageTaken),
