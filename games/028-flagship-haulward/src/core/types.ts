@@ -322,6 +322,8 @@ export interface Metrics {
   gritRefills: number;
   /** 2回目: 踏ん張りの受け止め（gritCatch）で一撃の被ダメージを止めた回数 */
   gritCatches: number;
+  /** 3回目: 帰着線が注意線の外でまだ上がっていた（粘った）tickの合計 */
+  overCautionTicks: number;
   coverKeptValue: number;
   /** 028新規: 積荷を抱えて拠点へ戻った回数と、戻る直前の揺れの合計（平均＝帰着の揺れ） */
   banks: number;
@@ -398,6 +400,9 @@ export interface GameState {
     gritLeft: number;
     gritTicks: number;
     coverKeepNow: number;
+    /** 3回目（v2中#3）: この遠征で帰着線が注意線の外でまだ上がっていた（粘った）tick数と、前の遠征（拠点に戻った時点）の値 */
+    overLineTicks: number;
+    lastTripOverLine: number;
     stakeRescue: boolean;
     canTeleport: boolean;
     atk: number;
