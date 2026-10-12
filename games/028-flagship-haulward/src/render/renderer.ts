@@ -36,10 +36,10 @@ const RESCUE_REPORT_TICKS = 60;
 function rescueHint(fee: number): string {
   return fee > 0 ? `倒れたら朝まで＋救助費${fee}` : '倒れたら朝まで（救助費は今日の稼ぎの半分）';
 }
-/** 028: 救助で失う物は抱えた積荷（懸賞を含む）だけ。塔の圏の中なら一部を守れる */
+/** 028: 救助で失う物は抱えた積荷（懸賞を含む）だけ。その遠征で塔の圏を通っていれば一部を守れる（2回目） */
 function stakeHint(s: GameState): string {
   const p = s.player;
-  const keep = p.coverKeepNow > 0 ? `（塔の圏: ${Math.round(p.coverKeepNow * 100)}%守る）` : '';
+  const keep = p.coverKeepNow > 0 ? `（塔の見張り: ${Math.round(p.coverKeepNow * 100)}%守る）` : '';
   return `倒れたら積荷¥${p.cargoValue}を失う${keep}`;
 }
 

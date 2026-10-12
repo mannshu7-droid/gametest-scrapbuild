@@ -320,6 +320,8 @@ export interface Metrics {
   /** 028新規: 踏ん張りの発動回数・回廊で戻した回数・倒れた時に塔の圏で守られた積荷の価値 */
   grits: number;
   gritRefills: number;
+  /** 2回目: 踏ん張りの受け止め（gritCatch）で一撃の被ダメージを止めた回数 */
+  gritCatches: number;
   coverKeptValue: number;
   /** 028新規: 積荷を抱えて拠点へ戻った回数と、戻る直前の揺れの合計（平均＝帰着の揺れ） */
   banks: number;
