@@ -1,4 +1,4 @@
-import { CORE_TREMOR_MULT, DEPTH, RIFT_LINE, SCAFFOLD_RELIEF, TREMOR_BONUS_FULL_AT, TREMOR_CAP, WIDTH, caveInChanceOver } from '../core/game';
+import { CORE_TREMOR_MULT, DEPTH, SCAFFOLD_RELIEF, TREMOR_BONUS_FULL_AT, TREMOR_CAP, WIDTH, caveInChanceOver } from '../core/game';
 import { TILE, type GameState } from '../core/types';
 
 const TILE_PX = 32;
@@ -87,6 +87,8 @@ export class Renderer {
       ctx.fillStyle = '#000';
       ctx.font = 'bold 9px monospace';
       ctx.fillText(`${(left / 10).toFixed(1)}`, r.x * TILE_PX + 2, row * TILE_PX + 30);
+      // v0.2.0: 売値（揺れボーナスなし、開いたときの線からの高さで決まる）
+      ctx.fillText(`¥${r.value}`, r.x * TILE_PX + 2, row * TILE_PX + 10);
     }
 
     // 落盤直後は縦穴全体を赤く揺らす
@@ -197,7 +199,19 @@ export class Renderer {
     ctx.font = '9px monospace';
     // 核石を抱えている間は見出しを差し替える（HUDに行を足さない）
     ctx.fillStyle = p.hasCore ? '#e05ad8' : '#999';
-    ctx.fillText(p.hasCore ? `核石で揺れ×${CORE_TREMOR_MULT}` : p.overLine ? '注意線の上: 割れ目が開く' : `注意線${RIFT_LINE}の上で割れ目`, gx + 30, 15);
+    // v0.2.0: 開く確率（毎秒）・同時数・今開いたときの売値を見出しに出す（C1）。割れ目に揺れボーナスは乗らない（C2）
+    const perSec = Math.round((1 - Math.pow(1 - p.riftChance, 10)) * 100);
+    ctx.fillText(
+      p.hasCore
+        ? `核石で揺れ×${CORE_TREMOR_MULT}`
+        : p.overLine
+          ? p.riftChance > 0
+            ? `割れ目 ${perSec}%/秒 最大${p.riftMax} ¥${p.riftValueHere}`
+            : '割れ目: 背負子が満杯'
+          : `注意線${p.riftLine}の上で割れ目`,
+      gx + 30,
+      15,
+    );
     // 背景の帯: 色の段階＋ボーナス上限の線
     for (let t = 0; t < TREMOR_CAP; t += 5) {
       ctx.fillStyle = tremorColor(t);
@@ -222,7 +236,7 @@ export class Renderer {
     }
     // 029: 注意線（割れ目が開く線）。ここから上でだけ割れ目の鉱脈が開く
     {
-      const yy = toY(RIFT_LINE);
+      const yy = toY(p.riftLine);
       ctx.strokeStyle = '#fff27a';
       ctx.lineWidth = 2;
       ctx.beginPath();

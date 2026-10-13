@@ -3,12 +3,18 @@
  * 実行: npm run simulate [-- --seeds 1,2,3 --maxTicks 30000 --sweep --verbose]
  *
  * 029新規（riftseam）:
- * - 割れ目の鉱脈（揺れが注意線45を越えている間だけ開き、数秒で閉じる）を追う戦略と、対照群 line（割れ目を無視し、帰着線の揺れが
- *   注意線45に届いたら帰る）を並べる。割れ目を追う戦略は、割れ目に限って帰還閾値を riftSlack だけ越えて取りに行く
+ * - 割れ目の鉱脈（揺れが注意線45を越えている間だけ開き、数秒で閉じる）を追う戦略と、対照群 line（割れ目を無視して
+ *   自分の山で帰る）を並べる。割れ目を追う戦略は、割れ目に限って帰還閾値を riftSlack だけ越えて取りに行く
  * - --delay N: 反応遅延。帰還条件（揺れ）が成り立ってからN回の判断は気付かずに掘り続ける（028の型）
  * - --preset 025: 割れ目なし・楔を買わない（025と同じ規則とボット）。無回帰の確認と対照に使う
  * - --strategies a,b: 走らせる戦略を絞る（並列ジョブ用）。--horizon H: 稼ぎを比べる固定tick（既定1000。ほぼ全ランがクリア前）
  * - --sweep [--noWedge]: 固定閾値の掃引（standardの購入順）。投資（楔）の有無で最良の閾値が動くかを見る
+ *
+ * v0.2.0（029-v1レビュー対応）:
+ * - 各戦略の帰還線を自分の山に揃えた（line・cautiousは80、standard・bankerは90、pusherは110）
+ * - --preset v1: v0.1.0の規則（注意線45・売値は深さだけ・楔は寿命・満杯でも開く）
+ * - --rule key=value: 規則の掃引（riftLine / riftValue=flat|height / riftSpan / wedge=life|max|chance|steep / riftNeedSpace）
+ * - --ignoreRifts: ボットが割れ目を見ない（掃引で対照群lineの山を測る）
  *
  * 以下は025の説明:
  *
@@ -26,7 +32,7 @@
  * 地上ではなく足場へ戻って休み、揺れが下がったら掘りに戻る。--noScaffold で足場を買わない対照群になる
  * --seeds は 1,2,3 と 1..40 の両方の書き方を受け付ける
  */
-import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules } from '../src/core/game';
+import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1 } from '../src/core/game';
 import { TILE, type Action, type Dir, type GameState, type UpgradeId } from '../src/core/types';
 
 interface BotConfig {
@@ -62,10 +68,14 @@ const PLACE_AT = [40, 75, 100];
 const SLACK = 20;
 
 export const STRATEGIES: BotConfig[] = [
-  // 対照群: 割れ目を無視し、帰着線の揺れが注意線（45）に届いたら帰る（今の揺れは注意線を越えない＝割れ目をほぼ見ない）
-  { name: 'line', tRet: 45, priority: LINE_PRIORITY, useBasket: false, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: false, riftSlack: 0 },
-  { name: 'cautious', tRet: 45, priority: BASE_PRIORITY, useBasket: false, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: true, riftSlack: SLACK },
-  { name: 'standard', tRet: 70, priority: BASE_PRIORITY, useBasket: false, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: true, riftSlack: SLACK },
+  // v0.2.0（v1中#4）: 各戦略の帰還線を自分の山に揃える。掃引の山は「割れ目を見ないボット」で80（025と同じ）、「割れ目を追うボット」で90
+  // 対照群: 割れ目を無視し、自分の山（帰着線の揺れ80）で帰る
+  { name: 'line', tRet: 80, priority: LINE_PRIORITY, useBasket: false, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: false, riftSlack: 0 },
+  // 慎重: lineと同じ線（80）で帰るが、線の内側で拾える割れ目だけ拾う（越えるのは+5まで）
+  { name: 'cautious', tRet: 80, priority: BASE_PRIORITY, useBasket: false, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: true, riftSlack: 5 },
+  // 標準: 割れ目を追うボットの山（90）で帰り、割れ目は+20まで追う
+  { name: 'standard', tRet: 90, priority: BASE_PRIORITY, useBasket: false, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: true, riftSlack: SLACK },
+  // 越えすぎ: 山の向こうの代表（v1と同じ110）
   { name: 'pusher', tRet: 110, priority: BASE_PRIORITY, useBasket: false, hpGuard: 0, adaptive: true, placeAt: PLACE_AT, rifts: true, riftSlack: SLACK },
   { name: 'banker', tRet: 90, priority: BANKER_PRIORITY, useBasket: true, hpGuard: 1, adaptive: true, placeAt: PLACE_AT, rifts: true, riftSlack: SLACK },
 ];
@@ -654,6 +664,16 @@ if (isMain) {
   const preset = argVal('preset');
   // 029: --preset 025 は割れ目なし・楔を買わない・割れ目を追わない（025と同じ規則とボット）
   if (preset === '025') setRules({ rifts: false });
+  // v0.2.0: --preset v1 は v0.1.0 の規則（注意線45・売値は深さだけ・楔は寿命・満杯でも開く）
+  if (preset === 'v1') setRules(RULES_V1);
+  // 掃引用: --rule key=value（riftLine=65, riftValue=flat|height, wedge=life|max|chance|steep, riftNeedSpace=true|false）
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== '--rule') continue;
+    const [k, v] = args[i + 1].split('=');
+    setRules({ [k]: v === 'true' ? true : v === 'false' ? false : isNaN(Number(v)) ? v : Number(v) } as never);
+  }
+  // --ignoreRifts: ボットが割れ目を見ない（対照群lineと同じ。掃引でlineの山を測る）
+  const ignoreRifts = args.includes('--ignoreRifts');
   const noWedge = preset === '025' || args.includes('--noWedge');
   setReturnDelay(Number(argVal('delay') ?? 0));
   HORIZON = Number(argVal('horizon') ?? 1000);
@@ -661,7 +681,7 @@ if (isMain) {
     let c = cfg;
     if (noScaffold) c = { ...c, name: `${c.name}-noScaffold`, priority: c.priority.filter((id) => id !== 'scaffold') };
     if (noWedge) c = { ...c, priority: c.priority.filter((id) => id !== 'wedge') };
-    if (preset === '025') c = { ...c, rifts: false, riftSlack: 0 };
+    if (preset === '025' || ignoreRifts) c = { ...c, rifts: false, riftSlack: 0 };
     return c;
   };
   const maxTicks = Number(argVal('maxTicks') ?? 30000);
@@ -669,7 +689,7 @@ if (isMain) {
   const only = argVal('strategies')?.split(',');
   console.log(
     `# Riftseam headless simulation (shaft ${WIDTH}x${DEPTH - 1}, maxTicks=${maxTicks}, seeds=${seeds.length}, horizon=${HORIZON}` +
-      `${preset ? `, preset=${preset}` : ''}${RETURN_DELAY > 0 ? `, delay=${RETURN_DELAY}` : ''}${noWedge ? ', noWedge' : ''})`,
+      `, rules=${JSON.stringify(RULES)}${preset ? `, preset=${preset}` : ''}${RETURN_DELAY > 0 ? `, delay=${RETURN_DELAY}` : ''}${noWedge ? ', noWedge' : ''})`,
   );
   if (args.includes('--sweep')) {
     const std = STRATEGIES.find((s) => s.name === 'standard')!;
