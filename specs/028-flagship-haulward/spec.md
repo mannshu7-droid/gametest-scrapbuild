@@ -1,7 +1,7 @@
 # 仕様書: 028-flagship-haulward（抱えた積荷だけを賭ける遠征と塔の見張り）
 
 - 作成日: 2026-10-12
-- ステータス: PLAYABLE（サイクル34・3回目、v0.3.0）
+- ステータス: PLAYABLE（サイクル34完了、v0.3.0。総括は [reviews/028-flagship-haulward-final.md](../../reviews/028-flagship-haulward-final.md)、判定FIX）
 - 元になったレビュー: [reviews/027-combat-emberstake-final.md](../../reviews/027-combat-emberstake-final.md)（提案(1)、採用すべき部分1〜6）、
   [reviews/026-flagship-tremorspire-final.md](../../reviews/026-flagship-tremorspire-final.md)（ベース。新規重大#1「bareの支配」）、
   routine-state.md「現在位置」（サイクル34の引き継ぎ事項）
