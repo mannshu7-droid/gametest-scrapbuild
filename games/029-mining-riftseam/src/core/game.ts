@@ -29,6 +29,14 @@ import {
  * - 積荷に空きがある間だけ開く（v1中#5: 満杯の帰り道に取れない割れ目が光る）
  * - `--preset v1`（RULES_V1）で v0.1.0 の規則に戻る
  *
+ * v0.3.0（029-v2レビュー対応）:
+ * - **割れ目を掘ると揺れが10抜ける**（割れ目は岩盤の圧の逃げ道）。v2では「線の向こうほど高い割れ目」が迷いを先へ誘い、
+ *   割れ目を追う型の3秒の遅延の罰が−10〜−26%だった（v2重大#1）。値の側（上限×2・掘った瞬間の値・籠5割・上の線で崩れる）を
+ *   掃引しても罰は−9〜−31%のまま動かず、獲物そのものを「取ると楽になる物」にした案だけが罰を−5〜−8%に縮めた
+ * - 割れ目の基本値×0.7・高さ倍率の上限×2.5（割れ目の取り分 約5割→4割強、v2重大#2）
+ * - 強化の価格×1.3（v2中#4: P01のクリア 1636→約1890tick）
+ * - 掃引用の規則（`--rule`）: riftPriceAt / riftBasketRate / riftCeil / wedgeFrom / wedge=relief ほか。`--preset v2` で v0.2.0 の規則に戻る
+ *
  * 以下は025の説明（土台）:
  *
  * 主題は「リスクとリターンの連続的なカーブ」。017-forkshaftの燃料（帰れるか帰れないかが確定的に決まる）を捨て、
@@ -89,6 +97,8 @@ export const RIFT_RANGE = 4;
 export const RIFT_HEIGHT_MIN = 0.5;
 export const RIFT_HEIGHT_SPAN = 30;
 export const RIFT_HEIGHT_MAX = 3;
+/** v0.3.0: 割れ目を掘ると抜ける揺れ（割れ目は岩盤の圧の逃げ道） */
+export const RIFT_RELIEF = 10;
 
 /**
  * 規則の切り替え（対照用・掃引用）。
@@ -103,31 +113,82 @@ export const RULES: {
   rifts: boolean;
   riftLine: number;
   riftValue: 'flat' | 'height';
-  wedge: 'life' | 'max' | 'chance' | 'steep';
+  wedge: 'life' | 'max' | 'chance' | 'steep' | 'relief';
   riftNeedSpace: boolean;
   riftSpan: number;
-} = { rifts: true, riftLine: 45, riftValue: 'height', wedge: 'steep', riftNeedSpace: true, riftSpan: RIFT_HEIGHT_SPAN };
+  /** v0.3.0: 高さ倍率の下限（線のすぐ上）と上限 */
+  riftHeightMin: number;
+  riftHeightMax: number;
+  /** v0.3.0: 売値を決める揺れ。'open'=開いた瞬間（v0.2.0）／'dig'=掘った瞬間 */
+  riftPriceAt: 'open' | 'dig';
+  /** v0.3.0: 送り籠で送った割れ目の換金率（鉱石は0.8のまま） */
+  riftBasketRate: number;
+  /** v0.3.0: 割れ目の基本売値の倍率 */
+  riftBaseMult: number;
+  /** v0.3.0: 楔（steep）の伸びが効き始める揺れ（0なら注意線から） */
+  wedgeFrom: number;
+  /** v0.3.0: 強化の価格の倍率 */
+  costMult: number;
+  /** v0.3.0: 割れ目を掘ると抜ける揺れ（割れ目は岩盤の圧の逃げ道） */
+  riftRelief: number;
+  /** v0.3.0: 楔（relief）1Lvごとに、割れ目を掘ると抜ける揺れに足す量 */
+  wedgeRelief: number;
+  /** v0.3.0: 揺れがこれを越えると割れ目は開かず、開いている割れ目も崩れて閉じる（0なら無し） */
+  riftCeil: number;
+} = {
+  rifts: true,
+  riftLine: 45,
+  riftValue: 'height',
+  wedge: 'steep',
+  riftNeedSpace: true,
+  riftSpan: RIFT_HEIGHT_SPAN,
+  riftHeightMin: RIFT_HEIGHT_MIN,
+  // v0.3.0（029-v2レビュー対応）: 上限×3→×2.5、基本値×0.7（割れ目の取り分を約半分→4割前後へ）
+  riftHeightMax: 2.5,
+  riftPriceAt: 'open',
+  riftBasketRate: BASKET_RATE,
+  riftBaseMult: 0.7,
+  wedgeFrom: 0,
+  // v0.3.0: 強化の価格×1.3（割れ目の稼ぎで強化が早く揃いセッションが短すぎた）
+  costMult: 1.3,
+  // v0.3.0: 割れ目を掘ると揺れが10抜ける（迷いの罰が割れ目を追う型に乗った v2重大#1 への対策）
+  riftRelief: RIFT_RELIEF,
+  wedgeRelief: 5,
+  riftCeil: 0,
+};
 export function setRules(r: Partial<typeof RULES>): void {
   Object.assign(RULES, r);
 }
+/** v0.2.0の規則（`--preset v2`） */
+export const RULES_V2: typeof RULES = {
+  ...RULES,
+  riftHeightMax: RIFT_HEIGHT_MAX,
+  riftBaseMult: 1,
+  costMult: 1,
+  riftRelief: 0,
+};
 /** v0.1.0の規則（`--preset v1`） */
-export const RULES_V1 = { rifts: true, riftLine: RIFT_LINE_V1, riftValue: 'flat' as const, wedge: 'life' as const, riftNeedSpace: false, riftSpan: RIFT_HEIGHT_SPAN };
+export const RULES_V1 = { ...RULES_V2, riftValue: 'flat' as const, wedge: 'life' as const, riftNeedSpace: false };
 
 /** 深さyの割れ目の基本売値（揺れボーナスは乗らない） */
-export function riftBaseValue(y: number): number {
-  return 12 + y * 0.5;
+export function riftBaseValue(y: number, baseMult = 1): number {
+  return (12 + y * 0.5) * baseMult;
 }
 
-/** 揺れtで開いた割れ目の「線からの高さ」倍率（flatなら1） */
-export function riftHeightMult(t: number, line: number, mode: 'flat' | 'height', steepLv = 0, span = RIFT_HEIGHT_SPAN): number {
-  if (mode === 'flat') return 1;
-  const k = (t - line) / span;
-  return Math.min(RIFT_HEIGHT_MAX, RIFT_HEIGHT_MIN + k * (1 + 0.5 * steepLv));
+/** 揺れtの割れ目の「線からの高さ」倍率（flatなら1）。楔（steepLv）の伸びは揺れwedgeFromより上の分にだけ効く */
+export function riftHeightMult(t: number, ru: typeof RULES, steepLv = 0): number {
+  if (ru.riftValue === 'flat') return 1;
+  const k = Math.max(0, t - ru.riftLine) / ru.riftSpan;
+  const from = Math.max(ru.riftLine, ru.wedgeFrom);
+  const kw = Math.max(0, t - from) / ru.riftSpan;
+  // 楔は上限も同じだけ持ち上げる（上限で頭打ちのまま伸びが消えないように）
+  const w = ru.wedgeFrom > 0 ? 0.5 * steepLv : 0;
+  return Math.min(ru.riftHeightMax + w, ru.riftHeightMin + k + kw * 0.5 * steepLv);
 }
 
-/** 深さy・揺れtで開いた割れ目の売値 */
-export function riftValue(y: number, t: number, line: number, mode: 'flat' | 'height', steepLv = 0, span = RIFT_HEIGHT_SPAN): number {
-  return Math.round(riftBaseValue(y) * riftHeightMult(t, line, mode, steepLv, span));
+/** 深さy・揺れtの割れ目の売値 */
+export function riftValue(y: number, t: number, ru: typeof RULES, steepLv = 0): number {
+  return Math.round(riftBaseValue(y, ru.riftBaseMult) * riftHeightMult(t, ru, steepLv));
 }
 
 export function riftChance(t: number, line: number, chanceMult = 1): number {
@@ -213,12 +274,13 @@ export function wedgeDesc(mode: (typeof RULES)['wedge']): string {
   if (mode === 'life') return `割れ目が開いている時間+${WEDGE_LIFE / 10}秒`;
   if (mode === 'max') return '同時に開いていられる割れ目+1（線の上に長く居るほど多く拾える）';
   if (mode === 'chance') return '割れ目が開く確率+50%';
+  if (mode === 'relief') return `割れ目を掘ると抜ける揺れ+${RULES.wedgeRelief}`;
   return '割れ目の売値の「線からの高さ」の伸び+50%（高く粘るほど得）';
 }
 
-export function upgradeCost(def: UpgradeDef, level: number): number | null {
+export function upgradeCost(def: UpgradeDef, level: number, costMult = 1): number | null {
   if (level >= def.maxLevel) return null;
-  return Math.round(def.baseCost * Math.pow(def.growth, level));
+  return Math.round(def.baseCost * costMult * Math.pow(def.growth, level));
 }
 
 function clamp01(v: number): number {
@@ -290,6 +352,7 @@ function emptyMetrics(): Metrics {
     riftsMined: 0,
     riftValueBanked: 0,
     riftsClosed: 0,
+    riftRelief: 0,
     overLineTicks: 0,
     clearedTick: null,
     score: 0,
@@ -415,10 +478,14 @@ export class Game {
   private get riftChanceMult(): number {
     return this.rules.wedge === 'chance' ? 1 + 0.5 * this.levels.wedge : 1;
   }
+  /** v0.3.0: 割れ目を掘ると抜ける揺れ（楔=reliefならLvごとに足す） */
+  private get riftRelief(): number {
+    return this.rules.riftRelief + (this.rules.wedge === 'relief' ? this.rules.wedgeRelief * this.levels.wedge : 0);
+  }
   /** 今の揺れのまま深さyに割れ目が開いたときの売値 */
   private riftValueHere(y: number): number {
     const ru = this.rules;
-    return riftValue(y, this.tremor, ru.riftLine, ru.riftValue, ru.wedge === 'steep' ? this.levels.wedge : 0, ru.riftSpan);
+    return riftValue(y, this.tremor, ru, ru.wedge === 'steep' ? this.levels.wedge : 0);
   }
 
   tileAt(x: number, y: number): number {
@@ -480,6 +547,15 @@ export class Game {
   private updateRifts(): void {
     const ru = this.rules;
     if (!ru.rifts) return;
+    if (ru.riftCeil > 0 && this.tremor > ru.riftCeil) {
+      // v0.3.0: 揺れが上の線を越えると割れ目は崩れて閉じる
+      for (const r of this.rifts) if (this.tiles[r.y * WIDTH + r.x] === TILE.RIFT) {
+        this.tiles[r.y * WIDTH + r.x] = r.prev;
+        this.metrics.riftsClosed++;
+      }
+      this.rifts = [];
+      return;
+    }
     // v0.2.0: 積荷に空きがある間だけ開く（満杯の帰り道に取れない割れ目が光らない）
     if (ru.riftNeedSpace && (this.cargo.length >= this.maxCapacity || this.hasCore)) return;
     const chance = riftChance(this.tremor, ru.riftLine, this.riftChanceMult);
@@ -582,7 +658,15 @@ export class Game {
       const r = this.rifts.find((rf) => rf.x === x && rf.y === y)!;
       this.rifts = this.rifts.filter((rf) => rf !== r);
       if (this.cargo.length >= this.maxCapacity) return;
-      this.cargo.push({ tile: TILE.RIFT, value: r.value, bonus: 0, rift: true });
+      // v0.3.0: 'dig'なら掘った瞬間の揺れで値が決まる（取りに行く間に落盤して揺れが下がれば安くなる）
+      const value = this.rules.riftPriceAt === 'dig' ? this.riftValueHere(y) : r.value;
+      this.cargo.push({ tile: TILE.RIFT, value, bonus: 0, rift: true });
+      const relief = this.riftRelief;
+      if (relief > 0) {
+        const before = this.tremor;
+        this.tremor = Math.max(0, this.tremor - relief);
+        this.metrics.riftRelief += before - this.tremor;
+      }
       this.metrics.riftsMined++;
       this.metrics.oreMined++;
       return;
@@ -609,13 +693,14 @@ export class Game {
     if (!wasUnder && y > 0) this.basketsLeft = this.levels.basket;
   }
 
-  private bank(entries: CargoEntry[], rate: number): number {
+  private bank(entries: CargoEntry[], rate: number, riftRate = rate): number {
     let total = 0;
     let bonus = 0;
     for (const c of entries) {
-      total += Math.floor(c.value * rate);
-      bonus += Math.floor(c.bonus * rate);
-      if (c.rift) this.metrics.riftValueBanked += Math.floor(c.value * rate);
+      const r = c.rift ? riftRate : rate;
+      total += Math.floor(c.value * r);
+      bonus += Math.floor(c.bonus * r);
+      if (c.rift) this.metrics.riftValueBanked += Math.floor(c.value * r);
     }
     this.money += total;
     this.metrics.moneyEarned += total;
@@ -646,7 +731,7 @@ export class Game {
     if (this.y !== 0) return;
     const def = UPGRADES.find((u) => u.id === item);
     if (!def) return;
-    const cost = upgradeCost(def, this.levels[item]);
+    const cost = upgradeCost(def, this.levels[item], this.rules.costMult);
     if (cost === null || this.money < cost) return;
     this.money -= cost;
     this.levels[item]++;
@@ -658,7 +743,7 @@ export class Game {
   private handleSend(): void {
     this.digging = null;
     if (this.y === 0 || this.basketsLeft <= 0 || this.cargo.length === 0) return;
-    const got = this.bank(this.cargo, BASKET_RATE);
+    const got = this.bank(this.cargo, BASKET_RATE, this.rules.riftBasketRate);
     this.metrics.basketsSent++;
     this.metrics.basketValue += got;
     this.metrics.peakTremorBanked = Math.max(this.metrics.peakTremorBanked, Math.round(this.tremor));
@@ -792,7 +877,7 @@ export class Game {
       desc: def.id === 'wedge' ? wedgeDesc(this.rules.wedge) : def.desc,
       level: this.levels[def.id],
       maxLevel: def.maxLevel,
-      nextCost: upgradeCost(def, this.levels[def.id]),
+      nextCost: upgradeCost(def, this.levels[def.id], this.rules.costMult),
     }));
     const r2 = (v: number) => Math.round(v * 100) / 100;
     return {
@@ -829,6 +914,7 @@ export class Game {
         riftLine: this.rules.riftLine,
         riftChance: this.rules.rifts && this.y > 0 && !(this.rules.riftNeedSpace && (this.cargo.length >= this.maxCapacity || this.hasCore)) ? Math.round(riftChance(this.tremor, this.rules.riftLine, this.riftChanceMult) * 1000) / 1000 : 0,
         riftMax: this.rules.rifts ? this.riftMax : 0,
+        riftRelief: this.rules.rifts ? this.riftRelief : 0,
         riftValueHere: this.rules.rifts && this.y > 0 && this.tremor >= this.rules.riftLine ? this.riftValueHere(this.y) : null,
       },
       map: {
@@ -836,7 +922,7 @@ export class Game {
         depth: DEPTH,
         tiles: this.tiles.slice(),
         scaffolds: this.scaffolds.map((sc) => ({ ...sc })),
-        rifts: this.rifts.map((r) => ({ x: r.x, y: r.y, closesAt: r.closesAt, value: r.value })),
+        rifts: this.rifts.map((r) => ({ x: r.x, y: r.y, closesAt: r.closesAt, value: this.rules.riftPriceAt === 'dig' ? this.riftValueHere(r.y) : r.value })),
       },
       lastCaveIn: this.lastCaveIn ? { ...this.lastCaveIn } : null,
       shop,

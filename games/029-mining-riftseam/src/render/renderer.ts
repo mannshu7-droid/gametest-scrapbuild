@@ -200,6 +200,7 @@ export class Renderer {
     // 核石を抱えている間は見出しを差し替える（HUDに行を足さない）
     ctx.fillStyle = p.hasCore ? '#e05ad8' : '#999';
     // v0.2.0: 開く確率（毎秒）・同時数・今開いたときの売値を見出しに出す（C1）。割れ目に揺れボーナスは乗らない（C2）
+    // v0.3.0: 割れ目を掘ると抜ける揺れも出す
     const perSec = Math.round((1 - Math.pow(1 - p.riftChance, 10)) * 100);
     ctx.fillText(
       p.hasCore
@@ -212,6 +213,8 @@ export class Renderer {
       gx + 30,
       15,
     );
+    // v0.3.0: 割れ目を掘ると抜ける揺れ（見出しの2行目、ゲージの右）
+    if (!p.hasCore && p.riftRelief > 0 && p.y > 0) ctx.fillText(`割れ目を掘ると揺れ-${p.riftRelief}`, gx + 30, 26);
     // 背景の帯: 色の段階＋ボーナス上限の線
     for (let t = 0; t < TREMOR_CAP; t += 5) {
       ctx.fillStyle = tremorColor(t);

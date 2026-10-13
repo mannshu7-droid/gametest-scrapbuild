@@ -16,6 +16,10 @@
  * - --rule key=value: 規則の掃引（riftLine / riftValue=flat|height / riftSpan / wedge=life|max|chance|steep / riftNeedSpace）
  * - --ignoreRifts: ボットが割れ目を見ない（掃引で対照群lineの山を測る）
  *
+ * v0.3.0（029-v2レビュー対応）:
+ * - --preset v2: v0.2.0の規則（割れ目で揺れが抜けない・基本値×1・上限×3・強化は元の価格）。--preset 025 は強化の価格も025に戻す
+ * - 地下で300判断のあいだ1つも掘れなければ地上へ帰る（ボットの計画の行き来で張り付くランの対策）
+ *
  * 以下は025の説明:
  *
  * 025の核心は「揺れ（tremor）をどこまで粘るか」が連続的なリスクとリターンのカーブになっているか。
@@ -32,7 +36,7 @@
  * 地上ではなく足場へ戻って休み、揺れが下がったら掘りに戻る。--noScaffold で足場を買わない対照群になる
  * --seeds は 1,2,3 と 1..40 の両方の書き方を受け付ける
  */
-import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1 } from '../src/core/game';
+import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1, RULES_V2 } from '../src/core/game';
 import { TILE, type Action, type Dir, type GameState, type UpgradeId } from '../src/core/types';
 
 interface BotConfig {
@@ -327,6 +331,9 @@ export class Bot {
   private riftsSeen = 0;
   /** 029: 反応遅延で帰還を見送った判断回数 */
   delayedTicks = 0;
+  /** v0.3.0: 地下で掘れていない判断の連続回数（計画の行き来の検出） */
+  private stuckTicks = 0;
+  private oreAtStuck = -1;
   /** 029: 反応遅延で帰還条件に気付いていない判断中か */
   private unaware = false;
 
@@ -361,6 +368,14 @@ export class Bot {
       this.plan = s.phase === 'mine' && !p.hasCore ? this.makePlan(s) : [];
     }
     this.unaware = false;
+    // v0.3.0: 地下で300判断のあいだ1つも掘れていなければ地上へ帰る（足場の前後で計画が行き来して
+    // 3万tick地下に張り付くランがv2・v0.3.0とも80シード中1つあった。ボットの計画の不整合で、ゲームの規則の問題ではない）
+    if (s.phase === 'mine' && s.metrics.oreMined === this.oreAtStuck) this.stuckTicks++;
+    else {
+      this.stuckTicks = 0;
+      this.oreAtStuck = s.metrics.oreMined;
+    }
+    if (s.phase === 'mine' && this.stuckTicks > 300 && this.restTarget === null) return this.returnAction(s);
     if (s.phase === 'shop') {
       this.plan.length = 0;
       // 優先度リストのうち買えるものを最も安い順に買う（偏りすぎないように）
@@ -481,7 +496,7 @@ class GameView {
 function spentOn(id: UpgradeId, level: number): number {
   const def = UPGRADES.find((u) => u.id === id)!;
   let sum = 0;
-  for (let l = 0; l < level; l++) sum += upgradeCost(def, l)!;
+  for (let l = 0; l < level; l++) sum += upgradeCost(def, l, RULES.costMult)!;
   return sum;
 }
 
@@ -663,9 +678,11 @@ if (isMain) {
   const noScaffold = args.includes('--noScaffold');
   const preset = argVal('preset');
   // 029: --preset 025 は割れ目なし・楔を買わない・割れ目を追わない（025と同じ規則とボット）
-  if (preset === '025') setRules({ rifts: false });
+  if (preset === '025') setRules({ rifts: false, costMult: 1 });
   // v0.2.0: --preset v1 は v0.1.0 の規則（注意線45・売値は深さだけ・楔は寿命・満杯でも開く）
   if (preset === 'v1') setRules(RULES_V1);
+  // v0.3.0: --preset v2 は v0.2.0 の規則（高さ倍率の上限×3・開いた瞬間の値・籠8割・楔は線から・強化は元の価格）
+  if (preset === 'v2') setRules(RULES_V2);
   // 掃引用: --rule key=value（riftLine=65, riftValue=flat|height, wedge=life|max|chance|steep, riftNeedSpace=true|false）
   for (let i = 0; i < args.length; i++) {
     if (args[i] !== '--rule') continue;
