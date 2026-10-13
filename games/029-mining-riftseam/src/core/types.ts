@@ -97,6 +97,8 @@ export interface Metrics {
   riftsMined: number;
   riftValueBanked: number;
   riftsClosed: number;
+  /** v0.3.0: 割れ目を掘って抜けた揺れの合計 */
+  riftRelief: number;
   /** 029: 揺れが注意線を越えていたtick数（線の外で過ごした時間） */
   overLineTicks: number;
   clearedTick: number | null;
@@ -154,6 +156,8 @@ export interface GameState {
     riftMax: number;
     /** v0.2.0: 今の揺れのまま今の深さに割れ目が開いたときの売値（線の下ならnull） */
     riftValueHere: number | null;
+    /** v0.3.0: 割れ目を掘ると抜ける揺れ（楔込み） */
+    riftRelief: number;
   };
   map: {
     width: number;
