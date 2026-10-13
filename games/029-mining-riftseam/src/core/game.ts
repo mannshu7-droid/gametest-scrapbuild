@@ -17,10 +17,17 @@ import {
 /**
  * 029-mining-riftseam のコアロジック（描画から完全分離・決定論）。025-tremorveinの揺れのダイヤルをそのまま土台にし、
  * 「注意線の向こうにだけある稼ぎ」を足した（028-final提案(1)）:
- * - 揺れが注意線（RIFT_LINE=45）を越えている間だけ、近くの壁に**割れ目の鉱脈**（RIFT）が開く。数秒（RIFT_LIFE）で閉じて元の岩に戻る。
+ * - 揺れが注意線（RULES.riftLine=45）を越えている間だけ、近くの壁に**割れ目の鉱脈**（RIFT）が開く。数秒（RIFT_LIFE）で閉じて元の岩に戻る。
  *   割れ目は1tickで掘れ、売値は深さで決まる（揺れボーナスは乗らない＝倍率の上乗せではなく「その時だけ掘れる物」）
  * - 生存投資の代わりに**楔（wedge）**: 割れ目が開いている時間を延ばす（上限の向こうの稼ぎに効く投資）
  * - `setRules({ rifts: false })`（simulateの`--preset 025`）で025の規則に戻る（同じコードで対照を取るため）
+ *
+ * v0.2.0（029-v1レビュー対応）:
+ * - 割れ目の売値を「開いた瞬間の揺れが注意線からどれだけ上か」で決める（×0.5＋(揺れ−45)/30、上限×3）。線のすぐ上は安く、
+ *   山を越えた先ほど高い（v1重大#1: 一様のボーナスで山が動かなかった）。注意線を55〜70へ上げる案は稼ぎが減るだけで山を動かさなかった
+ * - 楔は「高さの伸び+50%/Lv」（v1重大#2: 寿命は制約になっていなかった。寿命・同時数・確率・高さの伸びの4案を掃引して選んだ）
+ * - 積荷に空きがある間だけ開く（v1中#5: 満杯の帰り道に取れない割れ目が光る）
+ * - `--preset v1`（RULES_V1）で v0.1.0 の規則に戻る
  *
  * 以下は025の説明（土台）:
  *
@@ -66,33 +73,66 @@ export const BASE_HP = 60;
 export const HP_PER_LEVEL = 20;
 export const BASE_CAPACITY = 6;
 
-/** 029: 割れ目が開く注意線（今の揺れ）。100tickで落盤する確率は約20%の位置 */
-export const RIFT_LINE = 45;
+/** 029: 割れ目が開く注意線（今の揺れ）。v0.2.0の既定はRULES.riftLine（v0.1.0は45） */
+export const RIFT_LINE_V1 = 45;
 /** 注意線の上で1tickに割れ目が開く確率＝BASE＋PER×（揺れ−注意線） */
 export const RIFT_CHANCE_BASE = 0.04;
 export const RIFT_CHANCE_PER = 0.002;
 /** 同時に開いていられる割れ目の数 */
 export const RIFT_MAX = 2;
-/** 割れ目が開いている時間（tick）と、楔1Lvごとの延長 */
+/** 割れ目が開いている時間（tick）と、楔1Lvごとの延長（v0.1.0の楔） */
 export const RIFT_LIFE = 40;
 export const WEDGE_LIFE = 20;
 /** 割れ目が開く範囲（プレイヤーからのマンハッタン距離） */
 export const RIFT_RANGE = 4;
+/** v0.2.0: 割れ目の売値の「線からの高さ」倍率＝MIN＋（揺れ−注意線）/SPAN（上限MAX）。線のすぐ上は安く、山を越えた先ほど高い */
+export const RIFT_HEIGHT_MIN = 0.5;
+export const RIFT_HEIGHT_SPAN = 30;
+export const RIFT_HEIGHT_MAX = 3;
 
-/** 規則の切り替え（対照用）。rifts=falseで025と同じ規則になる */
-export const RULES = { rifts: true };
+/**
+ * 規則の切り替え（対照用・掃引用）。
+ * - rifts=false で025と同じ規則になる（`--preset 025`）
+ * - riftLine: 割れ目が開く注意線（今の揺れ）
+ * - riftValue: 'flat'=深さだけ（v0.1.0）／'height'=深さ×線からの高さ倍率（v0.2.0）
+ * - wedge: 楔の効き方。'life'=寿命+2秒/Lv（v0.1.0）／'max'=同時に開く数+1/Lv／'chance'=開く確率×(1+0.5Lv)／'steep'=高さ倍率の伸び+50%/Lv
+ * - riftSpan: 高さ倍率が+1になる揺れの幅（小さいほど急）
+ * - riftNeedSpace: 積荷に空きがある間だけ割れ目が開く（v0.2.0、帰り道のノイズを減らす）
+ */
+export const RULES: {
+  rifts: boolean;
+  riftLine: number;
+  riftValue: 'flat' | 'height';
+  wedge: 'life' | 'max' | 'chance' | 'steep';
+  riftNeedSpace: boolean;
+  riftSpan: number;
+} = { rifts: true, riftLine: 45, riftValue: 'height', wedge: 'steep', riftNeedSpace: true, riftSpan: RIFT_HEIGHT_SPAN };
 export function setRules(r: Partial<typeof RULES>): void {
   Object.assign(RULES, r);
 }
+/** v0.1.0の規則（`--preset v1`） */
+export const RULES_V1 = { rifts: true, riftLine: RIFT_LINE_V1, riftValue: 'flat' as const, wedge: 'life' as const, riftNeedSpace: false, riftSpan: RIFT_HEIGHT_SPAN };
 
-/** 深さyの割れ目の売値（揺れボーナスは乗らない） */
-export function riftValue(y: number): number {
-  return Math.round(12 + y * 0.5);
+/** 深さyの割れ目の基本売値（揺れボーナスは乗らない） */
+export function riftBaseValue(y: number): number {
+  return 12 + y * 0.5;
 }
 
-export function riftChance(t: number): number {
-  if (t < RIFT_LINE) return 0;
-  return RIFT_CHANCE_BASE + RIFT_CHANCE_PER * (t - RIFT_LINE);
+/** 揺れtで開いた割れ目の「線からの高さ」倍率（flatなら1） */
+export function riftHeightMult(t: number, line: number, mode: 'flat' | 'height', steepLv = 0, span = RIFT_HEIGHT_SPAN): number {
+  if (mode === 'flat') return 1;
+  const k = (t - line) / span;
+  return Math.min(RIFT_HEIGHT_MAX, RIFT_HEIGHT_MIN + k * (1 + 0.5 * steepLv));
+}
+
+/** 深さy・揺れtで開いた割れ目の売値 */
+export function riftValue(y: number, t: number, line: number, mode: 'flat' | 'height', steepLv = 0, span = RIFT_HEIGHT_SPAN): number {
+  return Math.round(riftBaseValue(y) * riftHeightMult(t, line, mode, steepLv, span));
+}
+
+export function riftChance(t: number, line: number, chanceMult = 1): number {
+  if (t < line) return 0;
+  return (RIFT_CHANCE_BASE + RIFT_CHANCE_PER * (t - line)) * chanceMult;
 }
 export const CAPACITY_PER_LEVEL = 3;
 
@@ -167,6 +207,14 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'scaffold', name: '足場', desc: '地下に据える（P）。上で休むと揺れが下がる', maxLevel: 3, baseCost: 260, growth: 1.85 },
   { id: 'wedge', name: '楔', desc: `割れ目が開いている時間+${WEDGE_LIFE / 10}秒（注意線の向こうの稼ぎを拾いやすく）`, maxLevel: 3, baseCost: 40, growth: 1.9 },
 ];
+
+/** 楔の説明（RULES.wedgeの効き方に合わせる） */
+export function wedgeDesc(mode: (typeof RULES)['wedge']): string {
+  if (mode === 'life') return `割れ目が開いている時間+${WEDGE_LIFE / 10}秒`;
+  if (mode === 'max') return '同時に開いていられる割れ目+1（線の上に長く居るほど多く拾える）';
+  if (mode === 'chance') return '割れ目が開く確率+50%';
+  return '割れ目の売値の「線からの高さ」の伸び+50%（高く粘るほど得）';
+}
 
 export function upgradeCost(def: UpgradeDef, level: number): number | null {
   if (level >= def.maxLevel) return null;
@@ -308,7 +356,8 @@ export class Game {
   /** 割れ目専用の乱数（落盤の乱数列を乱さない＝割れ目の有無で落盤の引きが変わらない） */
   private riftRng: Rng;
   private rifts: Rift[] = [];
-  private readonly riftsOn: boolean;
+  /** 生成時の規則（途中でsetRulesしても同じゲームの中では変わらない） */
+  readonly rules: typeof RULES;
   tick = 0;
   over = false;
   private tiles: number[];
@@ -332,7 +381,7 @@ export class Game {
     this.rng = mulberry32(seed);
     this.tiles = generateMap(this.rng);
     this.riftRng = mulberry32((seed ^ 0x9e3779b9) >>> 0);
-    this.riftsOn = RULES.rifts;
+    this.rules = { ...RULES };
   }
 
   get phase(): Phase {
@@ -355,6 +404,21 @@ export class Game {
   }
   private get cargoValue(): number {
     return this.cargo.reduce((a, c) => a + c.value, 0);
+  }
+  /** 029: 楔の効き方（RULES.wedge）ごとの割れ目の寿命・同時数・開く確率の倍率 */
+  private get riftLife(): number {
+    return RIFT_LIFE + (this.rules.wedge === 'life' ? WEDGE_LIFE * this.levels.wedge : 0);
+  }
+  private get riftMax(): number {
+    return RIFT_MAX + (this.rules.wedge === 'max' ? this.levels.wedge : 0);
+  }
+  private get riftChanceMult(): number {
+    return this.rules.wedge === 'chance' ? 1 + 0.5 * this.levels.wedge : 1;
+  }
+  /** 今の揺れのまま深さyに割れ目が開いたときの売値 */
+  private riftValueHere(y: number): number {
+    const ru = this.rules;
+    return riftValue(y, this.tremor, ru.riftLine, ru.riftValue, ru.wedge === 'steep' ? this.levels.wedge : 0, ru.riftSpan);
   }
 
   tileAt(x: number, y: number): number {
@@ -402,7 +466,7 @@ export class Game {
         this.tremor = Math.min(TREMOR_CAP, this.tremor + rate);
       }
       if (this.hasCore) this.metrics.coreCarryTicks++;
-      if (this.tremor >= RIFT_LINE) this.metrics.overLineTicks++;
+      if (this.tremor >= this.rules.riftLine) this.metrics.overLineTicks++;
       this.updateRifts();
       // 乱数は地下にいる毎tick必ず1回引く（揺れに関わらず消費量を一定にして決定論の見通しを良くする）
       const roll = this.rng();
@@ -414,9 +478,12 @@ export class Game {
 
   /** 029: 注意線の上にいる間、近くの露出した壁に割れ目が開く */
   private updateRifts(): void {
-    if (!this.riftsOn) return;
-    const chance = riftChance(this.tremor);
-    if (chance <= 0 || this.rifts.length >= RIFT_MAX) return;
+    const ru = this.rules;
+    if (!ru.rifts) return;
+    // v0.2.0: 積荷に空きがある間だけ開く（満杯の帰り道に取れない割れ目が光らない）
+    if (ru.riftNeedSpace && (this.cargo.length >= this.maxCapacity || this.hasCore)) return;
+    const chance = riftChance(this.tremor, ru.riftLine, this.riftChanceMult);
+    if (chance <= 0 || this.rifts.length >= this.riftMax) return;
     if (this.riftRng() >= chance) return;
     const cands: number[] = [];
     for (let y = Math.max(1, this.y - RIFT_RANGE); y <= Math.min(DEPTH - 1, this.y + RIFT_RANGE); y++) {
@@ -434,7 +501,7 @@ export class Game {
     const i = cands[Math.floor(this.riftRng() * cands.length)];
     const x = i % WIDTH;
     const y = Math.floor(i / WIDTH);
-    this.rifts.push({ x, y, closesAt: this.tick + RIFT_LIFE + WEDGE_LIFE * this.levels.wedge, value: riftValue(y), prev: this.tiles[i] });
+    this.rifts.push({ x, y, closesAt: this.tick + this.riftLife, value: this.riftValueHere(y), prev: this.tiles[i] });
     this.tiles[i] = TILE.RIFT;
     this.metrics.riftsOpened++;
   }
@@ -722,7 +789,7 @@ export class Game {
     const shop: ShopItemState[] = UPGRADES.map((def) => ({
       id: def.id,
       name: def.name,
-      desc: def.desc,
+      desc: def.id === 'wedge' ? wedgeDesc(this.rules.wedge) : def.desc,
       level: this.levels[def.id],
       maxLevel: def.maxLevel,
       nextCost: upgradeCost(def, this.levels[def.id]),
@@ -758,7 +825,11 @@ export class Game {
         onScaffold: this.onScaffold(),
         estScaffoldTremor,
         nearestScaffoldY,
-        overLine: this.y > 0 && this.tremor >= RIFT_LINE,
+        overLine: this.y > 0 && this.tremor >= this.rules.riftLine,
+        riftLine: this.rules.riftLine,
+        riftChance: this.rules.rifts && this.y > 0 && !(this.rules.riftNeedSpace && (this.cargo.length >= this.maxCapacity || this.hasCore)) ? Math.round(riftChance(this.tremor, this.rules.riftLine, this.riftChanceMult) * 1000) / 1000 : 0,
+        riftMax: this.rules.rifts ? this.riftMax : 0,
+        riftValueHere: this.rules.rifts && this.y > 0 && this.tremor >= this.rules.riftLine ? this.riftValueHere(this.y) : null,
       },
       map: {
         width: WIDTH,

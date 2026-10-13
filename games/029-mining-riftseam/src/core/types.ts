@@ -146,6 +146,14 @@ export interface GameState {
     nearestScaffoldY: number | null;
     /** 029: 揺れが注意線（割れ目が開く線）を越えているか */
     overLine: boolean;
+    /** v0.2.0: 割れ目が開く注意線（今の揺れ） */
+    riftLine: number;
+    /** v0.2.0: 今の揺れで1tickに割れ目が開く確率（線の下・地上・満杯なら0の場合あり） */
+    riftChance: number;
+    /** v0.2.0: 同時に開いていられる割れ目の数（楔込み） */
+    riftMax: number;
+    /** v0.2.0: 今の揺れのまま今の深さに割れ目が開いたときの売値（線の下ならnull） */
+    riftValueHere: number | null;
   };
   map: {
     width: number;
