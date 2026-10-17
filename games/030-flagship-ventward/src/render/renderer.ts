@@ -279,6 +279,13 @@ export class Renderer {
     const psy = fieldTop + s.player.y * TILE_PX;
     ctx.fillStyle = s.player.dashCd === 0 ? '#f1c40f' : '#f5f5f5';
     ctx.fillRect(psx + 1, psy + 1, TILE_PX - 2, TILE_PX - 2);
+    // 2回目（v1軽微#5）: 金鉱石・割れ目の近くでも見分けられるよう白い縁取りと黒い芯
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(psx + 1, psy + 1, TILE_PX - 2, TILE_PX - 2);
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#111';
+    ctx.fillRect(psx + TILE_PX / 2 - 2, psy + TILE_PX / 2 - 2, 4, 4);
     // 028: 踏ん張りの発動中は青い輪と残り秒数
     if (s.player.gritTicks > 0) {
       ctx.strokeStyle = '#4da6ff';
@@ -429,7 +436,9 @@ export class Renderer {
     // 注意線の外＝割れ目が開く帯（割れ目が無効なら塗らない）
     if (p.riftRelief > 0) {
       ctx.fillStyle = 'rgba(176,92,255,0.18)';
-      ctx.fillRect(X(TUNE.cautionAt), gy, x + gw - X(TUNE.cautionAt), h);
+      // 2回目: 割れ目に上限（riftCeil）があれば、帯は上限までで切る
+      const bandEnd = TUNE.riftCeil > 0 ? X(TUNE.riftCeil) : x + gw;
+      ctx.fillRect(X(TUNE.cautionAt), gy, bandEnd - X(TUNE.cautionAt), h);
     }
     const t = p.tremor;
     const danger = p.caveInChance100;
@@ -464,6 +473,9 @@ export class Renderer {
     }
     ctx.fillStyle = '#f1c40f';
     ctx.fillText('注意', X(TUNE.cautionAt) - 22, gy + h + 11);
+    // 2回目（v1軽微#6）: 危険線の札はゲージの中、線の右（下の×2の目盛りと重ならない）
+    ctx.fillStyle = '#ff4d4d';
+    ctx.fillText('危険', X(TUNE.dangerAt) + 3, gy + h - 3);
     // 踏ん張りの点（残り回数）
     if (p.stakeRescue && TUNE.gritTicks > 0) {
       for (let i = 0; i < TUNE.gritPerDay; i++) {
