@@ -222,8 +222,16 @@ export const TUNE = {
    * 開発中の観察: どこでも開くと、線の外に長く居る攻勢（bare・pusher・p01）ほど割れ目を取り、遅延0でbareが5戦略に過半数で勝った（028は1〜2）
    */
   riftTower: 1,
-  /** 帰着線がこれ以上だと割れ目は開かない（開いている割れ目も閉じる）。0なら上限なし */
-  riftCeil: 0,
+  /**
+   * 帰着線がこれ以上だと割れ目は開かない（開いている割れ目も閉じる）。0なら上限なし（v1）。
+   * 2回目（v1重大#1）: 危険線45を既定に。割れ目は注意線と危険線の間（帰着線30〜45）だけの帯になり、帰還線45の攻勢も窓が慎重な型と同じ幅になる
+   */
+  riftCeil: 45,
+  /**
+   * 2回目（v1重大#1）: 1回の遠征で掘った割れ目の数kに応じて、抜ける揺れが riftRelief×riftReliefDecay^k に減る（拠点に戻るか救助で元に戻る）。
+   * 1なら減らない（v1）。割れ目は「迷った時の逃げ道」で、「危険線まで粘り続ける燃料」にはしない
+   */
+  riftReliefDecay: 0.7,
 };
 /** `--preset 026`（026-tremorspire v0.3.0と同じ規則）で上書きする値。対照群として同じコードに残す */
 export const PRESET_026: Partial<typeof TUNE> = {
@@ -840,6 +848,8 @@ export class Game {
   /** 030新規: 開いている割れ目と、積荷の中の割れ目の価値（換金時に riftValueBanked へ数える） */
   private rifts: { x: number; y: number; closesAt: number; value: number; prev: number }[] = [];
   private riftCargo = 0;
+  /** 2回目: この遠征で掘った割れ目の数（抜ける揺れの減衰に使う。拠点・救助で0） */
+  private riftTrip = 0;
   /** v2: 夜明けからの稼ぎ（救助費の基準） */
   private todayEarned = 0;
   private rescuesToday = 0;
@@ -1344,7 +1354,11 @@ export class Game {
       return false;
     });
   }
-  /** 割れ目を掘る: 積荷に1つ乗り、揺れがriftRelief抜ける */
+  /** 2回目: 次に掘る割れ目で抜ける揺れ（この遠征で掘った数だけ減る） */
+  private riftReliefNow(): number {
+    return TUNE.riftRelief * Math.pow(TUNE.riftReliefDecay, this.riftTrip);
+  }
+  /** 割れ目を掘る: 積荷に1つ乗り、揺れがriftReliefNow()抜ける */
   private mineRift(x: number, y: number): void {
     const i = x * LANE_COUNT + y;
     const r = this.rifts.find((q) => q.x === x && q.y === y);
@@ -1359,7 +1373,8 @@ export class Game {
       this.metrics.riftValue += value;
     }
     const before = p.tremor;
-    p.tremor = Math.max(0, p.tremor - TUNE.riftRelief);
+    p.tremor = Math.max(0, p.tremor - this.riftReliefNow());
+    this.riftTrip++;
     this.metrics.riftRelief += before - p.tremor;
     this.metrics.riftsMined++;
   }
@@ -1470,6 +1485,7 @@ export class Game {
     p.cargoUnits = 0;
     p.cargoValue = 0;
     this.riftCargo = 0;
+    this.riftTrip = 0;
     this.stashDigging();
     p.digging = null;
     p.x = 0;
@@ -3168,6 +3184,7 @@ export class Game {
       }
       if (this.resource === 'fuel') this.player.fuel = this.maxFuel();
       else this.player.tremor = 0;
+      this.riftTrip = 0;
       this.player.hp = Math.min(this.maxHp(), this.player.hp + BASE_REGEN_PER_TICK);
       this.tickStuckIncome();
       this.fieldRegenTimer = 0;
@@ -3387,7 +3404,7 @@ export class Game {
         coveringTowers: this.turrets.filter((t) => this.coversPlayer(t)).length,
         riftOpenNow: this.riftOpenNow(),
         riftChance: this.riftChanceNow(),
-        riftRelief: TUNE.rifts > 0 ? TUNE.riftRelief : 0,
+        riftRelief: TUNE.rifts > 0 ? Math.round(this.riftReliefNow() * 10) / 10 : 0,
         riftValueHere: this.riftValueAt(p.x),
       },
       map: {

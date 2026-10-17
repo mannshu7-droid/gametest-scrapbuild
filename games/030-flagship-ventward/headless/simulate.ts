@@ -631,6 +631,13 @@ const GREEDY_FROM = 3000;
  */
 let RIFT_CHASE = true;
 let RIFT_SLACK = 10;
+/**
+ * 030 2回目（v1重大#0）: 戦略ごとの帰還線（帰着線の揺れ≥Nで帰る）。`--lines wall=40,p01=45`で上書き。
+ * 指定の無い戦略は従来どおり（慎重な型は注意線、攻める型は危険線）。--returnAt（全戦略の固定閾値）が優先
+ */
+const BOT_LINES_030: Record<string, number> = { wall: 40, mason: 35, spire: 35, spireAll: 35, weave: 35, p02: 35, p01: 40, pusher: 35 };
+/** 2回目の既定: 030 v0.2.0の掃引（40シード、T30〜60）で各戦略の山に揃えた値。bare（対照群）は危険線のまま。`--lines none`でv1（注意線／危険線） */
+const BOT_LINES: Record<string, number> = { ...BOT_LINES_030 };
 const RIFT_SEARCH = 6;
 
 /** 030: 開いている割れ目へ掘った道だけを通って向かう次の一手（隣なら割れ目へ）。閉じる前に着けなければnull */
@@ -809,7 +816,13 @@ export class Bot {
     }
     const greedy = this.greedyStart >= 0 && !this.greedyDone;
     // 2回目（v1重大#1(b)）: 慎重な戦略は注意線（cautionAt=30、ゲージの黄線）で帰る。攻める戦略（bare・pusher・p01）は危険線（赤線）のまま
-    const lineHit = CAREFUL_LINE && CAREFUL_STRATS.includes(this.strategy) ? p.miningRiskLevel !== 'safe' : p.miningRiskLevel === 'danger';
+    const ownLine = BOT_LINES[this.strategy];
+    const lineHit =
+      ownLine !== undefined && s.resource === 'tremor'
+        ? (p.estTremorAtReturn ?? 0) >= ownLine
+        : CAREFUL_LINE && CAREFUL_STRATS.includes(this.strategy)
+          ? p.miningRiskLevel !== 'safe'
+          : p.miningRiskLevel === 'danger';
     const criticalFuelRaw =
       !greedy &&
       (RETURN_AT === null
@@ -824,7 +837,7 @@ export class Bot {
     // 030: 割れ目を追う（HPが危険・積荷が満杯・夜の予告中は追わない）。帰還線＋RIFT_SLACKまでは帰還より優先する
     if (RIFT_CHASE && !criticalHp && !cargoFull && !s.nightWarning && s.map.rifts.length > 0) {
       const careful = CAREFUL_LINE && CAREFUL_STRATS.includes(this.strategy);
-      const line = RETURN_AT ?? (careful ? TUNE.cautionAt : TUNE.dangerAt);
+      const line = RETURN_AT ?? BOT_LINES[this.strategy] ?? (careful ? TUNE.cautionAt : TUNE.dangerAt);
       if ((p.estTremorAtReturn ?? 0) < line + RIFT_SLACK) {
         const dir = riftStep(s);
         if (dir) {
@@ -1289,6 +1302,12 @@ else if (PRESET !== null) throw new Error(`unknown preset: ${PRESET}`);
 // 030新規: --ignoreRifts でボットが割れ目を見ない（割れ目は開くが取らない）、--riftSlack N で割れ目を追う余裕
 RIFT_CHASE = !args.includes('--ignoreRifts');
 RIFT_SLACK = Number(argVal('riftSlack') ?? 10);
+// `--preset 026/028`では帰還線をその版のまま（028と全フィールド一致させる）
+if (PRESET !== null || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
+for (const kv of (argVal('lines') ?? '').split(',').filter((x) => x && x !== 'none')) {
+  const [k, v] = kv.split('=');
+  BOT_LINES[k] = Number(v);
+}
 CAREFUL_LINE = argVal('carefulLine') !== undefined ? argVal('carefulLine') !== '0' : PRESET !== '026';
 GREEDY_AT = argVal('greedy') !== undefined ? Number(argVal('greedy')) : null;
 for (const kv of (argVal('tune') ?? '').split(',').filter(Boolean)) {
