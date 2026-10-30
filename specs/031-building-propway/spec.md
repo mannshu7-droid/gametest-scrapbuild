@@ -1,7 +1,7 @@
 # 仕様書: 031-building-propway（帰り道を建てて平らにする支柱の坑道）
 
 - 作成日: 2026-10-30
-- ステータス: PLAYABLE（v0.1.0、サイクル37・1回目）
+- ステータス: サイクル完了（v0.3.0、サイクル37・4回目で総括、判定FIX。[final](../../reviews/031-building-propway-final.md)）
 - 元になったレビュー: [reviews/030-flagship-ventward-final.md](../../reviews/030-flagship-ventward-final.md)（提案(1)「帰り道を建てて迷い直しを減らす」、提案(3)「遅延は2種で測る」）、
   routine-state.md「現在位置」（サイクル37の引き継ぎ事項）
 
