@@ -616,6 +616,12 @@ let RESOURCE: Resource = 'tremor';
 let RETURN_AT: number | null = null;
 /** v2新規: 反応遅延（--delay N）。帰還条件（揺れ/燃料）が成り立ってからN回の判断は気付かずに今の行動を続ける＝人の「迷う時間」 */
 let RETURN_DELAY = 0;
+/**
+ * 030 3回目（v2中#4）: 反応遅延の数え方。'sum'＝その遠征で帰還条件が成り立っていた判断回数の合計（帰着線が一度下がっても
+ * 数え直さず、拠点に入ると戻す）。'first'＝初めて成り立った時からの判断回数（線の内側に戻っていた時間も数える）。
+ * 'reset'＝v2まで（条件が切れるたびに0から数え直す）。遅延0では3つとも同じ。`--delayFrom reset`でv2
+ */
+let DELAY_FROM: 'sum' | 'first' | 'reset' = 'sum';
 /** 028新規: 欲張り観察（--greedy N）。tick GREEDY_FROM以降の昼、揺れがNに届いた瞬間から倒れるか夜の予告まで帰らない */
 let GREEDY_AT: number | null = null;
 /**
@@ -689,7 +695,7 @@ function riftStep(s: GameState): Dir | null {
 
 export class Bot {
   constructor(private strategy: Strategy) {}
-  /** v2: 帰還条件が連続で成り立っている判断回数（反応遅延用） */
+  /** v2: 帰還条件が連続で成り立っている判断回数（反応遅延用）。3回目: DELAY_FROMで数え方を選ぶ */
   private returnSeen = 0;
   /** 028: 欲張り観察の状態（開始tick、終わったか） */
   greedyStart = -1;
@@ -830,7 +836,9 @@ export class Bot {
         : s.resource === 'tremor'
           ? (p.estTremorAtReturn ?? 0) >= RETURN_AT
           : p.estFuelToReturn !== null && p.fuel <= p.estFuelToReturn + RETURN_AT);
-    this.returnSeen = criticalFuelRaw ? this.returnSeen + 1 : 0;
+    if (DELAY_FROM === 'reset') this.returnSeen = criticalFuelRaw ? this.returnSeen + 1 : 0;
+    else if (inBaseRadius(s)) this.returnSeen = 0;
+    else if (criticalFuelRaw || (DELAY_FROM === 'first' && this.returnSeen > 0)) this.returnSeen++;
     const criticalFuel = criticalFuelRaw && this.returnSeen > RETURN_DELAY;
     const criticalHp = !greedy && p.hp < p.maxHp * HP_RETREAT_THRESHOLD[this.strategy];
     const cargoFull = !greedy && p.cargoUnits >= p.maxCapacity;
@@ -1294,6 +1302,7 @@ RESOURCE = argVal('resource') === 'fuel' ? 'fuel' : 'tremor';
 RETURN_AT = argVal('returnAt') !== undefined ? Number(argVal('returnAt')) : null;
 // v2新規: --delay N で帰還の反応遅延、--tune key=value[,key=value] で揺れ版の調整値（core TUNE）を上書きする
 RETURN_DELAY = Number(argVal('delay') ?? 0);
+DELAY_FROM = (['reset', 'first'] as const).find((v) => v === argVal('delayFrom')) ?? 'sum';
 // 028新規: --preset 026 で026 v0.3.0と同じ規則（救助は朝まで手当て＋その日の稼ぎの半分、凸の被ダメージ・防具・踏ん張り・多芸の代償なし）
 const PRESET = argVal('preset') ?? null;
 if (PRESET === '026') Object.assign(TUNE, PRESET_026);
