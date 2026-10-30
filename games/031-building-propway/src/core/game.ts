@@ -41,6 +41,13 @@ export const TUNE = {
   scaffoldDamp: 0.35,
   /** 1: 足場で休んだら、その遠征はもう掘れない（休み＝帰還の宣言） */
   restCommit: 1,
+  /**
+   * 中継点: 帰り道で足場のマスに入ると、その遠征で1回だけ base が relayRelief 下がる（足場から先の帰り道が短くなる）。
+   * 帰着線は「帰り道で一番高くなる揺れ」なので、足場を飛び石に置くと帰り道のコストが区切られる
+   */
+  relayRelief: 6,
+  /** 帰着線の見積もりで、1マス歩く間にたまる揺れを何tick分と数えるか（実際の移動は1tickに1マス） */
+  returnTickEst: 1,
   /** 1: 足場の上では帰着線が危険線に届くと、掘る手が止まり休みになる */
   autoRest: 0,
   caution: 35,
@@ -51,6 +58,10 @@ export const TUNE = {
   /** 支えのないマスの落盤は×caveBareMul */
   caveBareMul: 2,
   caveDamage: 35,
+  /** >0: 落盤のダメージを caveDamage×(揺れ/caveDamageRef) にする（揺れに比例） */
+  caveDamageRef: 0,
+  /** 救助のとき失う積荷の割合 */
+  rescueCargoLoss: 0.25,
   caveCargoLoss: 1 / 3,
   caveRelief: 8,
   /** 落盤のとき、そのマスを支える支柱が折れる確率 */
@@ -90,6 +101,8 @@ export class Game {
   /** この遠征で足場に休んだか（restCommit のとき掘れない） */
   committed = false;
   private restedThisTick = false;
+  /** この遠征で中継点として使った足場 */
+  relayUsed: boolean[];
   metrics: Metrics = {
     moneyEarned: 0,
     moneySpent: 0,
@@ -110,6 +123,8 @@ export class Game {
     supportedSteps: 0,
     bareSteps: 0,
     peakTremorBanked: 0,
+    relays: 0,
+    relayRelief: 6,
     score: 0,
   };
 
@@ -120,6 +135,12 @@ export class Game {
     this.wavePhase = this.rng() * Math.PI * 2;
     this.props = new Array(TUNE.length + 1).fill(false);
     this.scaffolds = new Array(TUNE.length + 1).fill(false);
+    this.relayUsed = new Array(TUNE.length + 1).fill(false);
+  }
+
+  /** 帰り道で i に入った時に中継点が効くか */
+  relayAt(i: number): boolean {
+    return TUNE.relayRelief > 0 && i > 0 && i < this.x && this.scaffolds[i] && !this.relayUsed[i];
   }
 
   supported(x: number): boolean {
@@ -149,13 +170,26 @@ export class Game {
     return TUNE.baseRate + TUNE.depthRate * x;
   }
 
-  /** 帰り道のコスト: x から拠点まで、1マスごとの揺れ＋歩く2tickの間にたまる揺れ */
+  /**
+   * 帰り道のコスト: x から拠点まで、1マスごとの揺れ＋歩く間にたまる揺れを足し、中継点で下げる。
+   * 今の揺れからの上乗せの最大値（帰り道で一番高くなる所）を返す。中継点が無ければ拠点に着いた時の上乗せと同じ
+   */
   returnCost(): number {
     let c = 0;
+    let peak = 0;
+    let b = this.base;
     for (let i = this.x; i >= 1; i--) {
-      c += (this.supported(i) ? TUNE.stepCostSupported : TUNE.stepCost) + 2 * this.rate(i);
+      const add = (this.supported(i) ? TUNE.stepCostSupported : TUNE.stepCost) + TUNE.returnTickEst * this.rate(i);
+      b += add;
+      c += add;
+      if (c > peak) peak = c;
+      if (this.relayAt(i - 1)) {
+        const r = Math.min(b, TUNE.relayRelief);
+        b -= r;
+        c -= r;
+      }
     }
-    return c;
+    return peak;
   }
 
   returnLine(): number {
@@ -217,6 +251,13 @@ export class Game {
           else this.metrics.bareSteps++;
         }
         if (this.x === 0 && nx > 0) this.metrics.trips++;
+        if (action.dir === 'left' && this.relayAt(nx)) {
+          const r = Math.min(this.base, TUNE.relayRelief);
+          this.base -= r;
+          this.relayUsed[nx] = true;
+          this.metrics.relays++;
+          this.metrics.relayRelief += r;
+        }
         this.x = nx;
         this.moveCd = 1;
         if (this.x > this.metrics.maxDepth) this.metrics.maxDepth = this.x;
@@ -279,7 +320,8 @@ export class Game {
   private caveIn(): void {
     const lost = this.cargo * TUNE.caveCargoLoss;
     this.cargo -= lost;
-    this.hp -= TUNE.caveDamage;
+    const damage = TUNE.caveDamageRef > 0 ? Math.round((TUNE.caveDamage * this.tremor()) / TUNE.caveDamageRef) : TUNE.caveDamage;
+    this.hp -= damage;
     this.base = Math.max(0, this.base - TUNE.caveRelief);
     this.spike = 0;
     this.metrics.caveIns++;
@@ -302,11 +344,12 @@ export class Game {
       }
     }
     const rescued = this.hp <= 0;
-    this.lastCaveIn = { tick: this.tick, x: this.x, damage: TUNE.caveDamage, lostValue: lost, propBroken, brokenX, rescued };
+    this.lastCaveIn = { tick: this.tick, x: this.x, damage, lostValue: lost, propBroken, brokenX, rescued };
     if (rescued) {
       this.metrics.rescues++;
-      this.metrics.rescueLost += this.cargo;
-      this.cargo = 0;
+      const rl = this.cargo * TUNE.rescueCargoLoss;
+      this.metrics.rescueLost += rl;
+      this.cargo -= rl;
       this.x = 0;
       this.arriveHome();
       this.busy = { kind: 'rescue', remaining: TUNE.rescueTicks, total: TUNE.rescueTicks };
@@ -325,6 +368,7 @@ export class Game {
     this.spike = 0;
     this.hp = TUNE.maxHp;
     this.committed = false;
+    this.relayUsed.fill(false);
   }
 
   private finishTick(): void {
@@ -340,7 +384,7 @@ export class Game {
   getState(): GameState {
     const cells: Cell[] = [];
     for (let i = 0; i <= TUNE.length; i++) {
-      cells.push({ x: i, prop: this.props[i], scaffold: this.scaffolds[i], supported: this.supported(i), damp: i > 0 ? this.damp(i) : 0 });
+      cells.push({ x: i, prop: this.props[i], scaffold: this.scaffolds[i], supported: this.supported(i), damp: i > 0 ? this.damp(i) : 0, relayUsed: this.relayUsed[i] });
     }
     const t = this.tremor();
     const d = this.x > 0 ? this.damp(this.x) : 0;
@@ -372,6 +416,7 @@ export class Game {
       tunnel: { length: TUNE.length, cells },
       nextPropCost: this.propCost(),
       scaffoldCost: TUNE.scaffoldCost,
+      relayRelief: TUNE.relayRelief,
       lastCaveIn: this.lastCaveIn ? { ...this.lastCaveIn } : null,
       metrics: { ...this.metrics },
     };

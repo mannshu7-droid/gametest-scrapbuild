@@ -28,6 +28,9 @@ export interface Strategy {
   propFrom: number;
   /** propFrom を depth−propSpan から数える（坑道の奥だけ支える） */
   propSpan?: number;
+  /** 中継点の足場の間隔（0=建てない）と最初の位置（帰り道に置く飛び石） */
+  relayEvery?: number;
+  relayFrom?: number;
   /** 掘る場所に足場を建て、帰還条件で休む回数 */
   scaffold: boolean;
   maxRests: number;
@@ -55,15 +58,23 @@ export const STRATEGIES: Record<string, Strategy> = {
   /** 坑道を全部支える */
   props: { ...base, name: 'props', depth: 35, th: 40, propEvery: 5 },
   /** 掘る場所の手前10マスだけ支える（安い） */
-  propsFace: { ...base, name: 'propsFace', depth: 35, th: 50, propEvery: 5, propSpan: 10 },
+  propsFace: { ...base, name: 'propsFace', depth: 35, th: 40, propEvery: 5, propSpan: 10 },
   /** 足場だけ（掘る場所で休む） */
   scaffold: { ...base, name: 'scaffold', depth: 30, th: 45, scaffold: true, maxRests: 2 },
   /** 支柱＋足場 */
   mixed: { ...base, name: 'mixed', depth: 40, th: 45, propEvery: 5, scaffold: true, maxRests: 2 },
   /** 足場を作業台にする（掘る場所に建てるが休まない） */
   bench: { ...base, name: 'bench', depth: 30, th: 40, scaffold: true, maxRests: 0 },
+  /** 足場を飛び石（中継点）に置くだけ。支柱は建てない */
+  relay: { ...base, name: 'relay', depth: 40, th: 40, relayEvery: 8 },
+  /** 飛び石＋掘る場所の手前10マスだけ支柱 */
+  relayFace: { ...base, name: 'relayFace', depth: 50, th: 40, propEvery: 5, propSpan: 10, relayEvery: 8 },
+  /** 全部支える＋飛び石 */
+  propsRelay: { ...base, name: 'propsRelay', depth: 40, th: 40, propEvery: 5, relayEvery: 8 },
   /** P01（野望型）: 深く・全部建てて・高めの線まで粘る */
-  p01: { ...base, name: 'p01', depth: 50, th: 50, propEvery: 5, scaffold: true, maxRests: 3 },
+  p01: { ...base, name: 'p01', depth: 50, th: 45, propEvery: 5, scaffold: true, maxRests: 3 },
+  /** P01の型＋飛び石（休みと中継点が重なるかの確認） */
+  p01Relay: { ...base, name: 'p01Relay', depth: 50, th: 45, propEvery: 5, scaffold: true, maxRests: 3, relayEvery: 8 },
   /** P02（あき型）: 線ちょうど（注意線35）で帰る。支柱は建てる */
   p02: { ...base, name: 'p02', depth: 25, th: 35, propEvery: 5 },
 };
@@ -86,6 +97,17 @@ export class Bot {
 
   constructor(s: Strategy) {
     this.s = s;
+  }
+
+  private wantRelay(st: GameState): boolean {
+    const s = this.s;
+    if (!s.relayEvery) return false;
+    const x = st.player.x;
+    const from = s.relayFrom ?? s.relayEvery;
+    if (x < from || x >= s.depth) return false;
+    if ((x - from) % s.relayEvery !== 0) return false;
+    if (st.tunnel.cells[x].scaffold) return false;
+    return st.player.money >= st.scaffoldCost + s.reserve;
   }
 
   private wantProp(st: GameState): boolean {
@@ -150,6 +172,7 @@ export class Bot {
     if (this.acc > 0) this.delayedTicks++;
 
     if (this.wantProp(st)) return { type: 'prop' };
+    if (this.wantRelay(st)) return { type: 'scaffold' };
     if (p.x < s.depth) return { type: 'move', dir: 'right' };
     if (s.scaffold && !cell.scaffold && p.money >= st.scaffoldCost + s.reserve) return { type: 'scaffold' };
     return { type: 'work' };
