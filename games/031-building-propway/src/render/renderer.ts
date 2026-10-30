@@ -18,7 +18,7 @@ const HIST_LEN = 600; // 帰着線の履歴（60秒）
  */
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
-  private hist: { tick: number; line: number; supported: boolean }[] = [];
+  private hist: { tick: number; line: number; calm: boolean }[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     canvas.width = W;
@@ -36,7 +36,7 @@ export class Renderer {
     const t = s.tremor;
     if (this.hist.length && this.hist[this.hist.length - 1].tick > s.tick) this.hist = [];
     if (!this.hist.length || this.hist[this.hist.length - 1].tick !== s.tick) {
-      this.hist.push({ tick: s.tick, line: t.returnLine, supported: s.tunnel.cells[p.x]?.supported ?? false });
+      this.hist.push({ tick: s.tick, line: t.returnLine, calm: p.x > 0 && (s.tunnel.cells[p.x]?.damp ?? 1) < 1 });
       if (this.hist.length > HIST_LEN) this.hist.shift();
     }
 
@@ -50,7 +50,8 @@ export class Renderer {
       p.x > 0
         ? `帰着線 ${t.returnLine.toFixed(0)}（揺れ${t.value.toFixed(0)}＋帰り道${t.returnCost.toFixed(0)}）  落盤 ${(t.caveChance * 1000).toFixed(1)}%/秒`
         : '拠点（積荷を換金し、揺れ0・HP全快）';
-    ctx.fillText(head, 20, 22);
+    if (p.committed && p.x > 0) ctx.fillStyle = '#7fd8e8';
+    ctx.fillText(p.committed && p.x > 0 ? `${head}  休んだ→帰るだけ` : head, 20, 22);
 
     // 坑道: 天井・床・支柱・足場・主人公
     const x0 = (W - (s.tunnel.length + 1) * TILE_W) / 2;
@@ -71,6 +72,13 @@ export class Renderer {
         ctx.fillRect(px, TUNNEL_TOP + TUNNEL_H - 22, TILE_W - 1, 4);
         ctx.fillRect(px + 1, TUNNEL_TOP + TUNNEL_H - 18, 2, 14);
         ctx.fillRect(px + TILE_W - 4, TUNNEL_TOP + TUNNEL_H - 18, 2, 14);
+      }
+      // 落盤で折れた支柱の跡（4秒光らせる）
+      if (s.lastCaveIn && s.lastCaveIn.brokenX === c.x && s.tick - s.lastCaveIn.tick < 40) {
+        ctx.fillStyle = (s.tick >> 2) % 2 ? '#ff6b5a' : '#7a2a20';
+        ctx.fillRect(px - 2, TUNNEL_TOP + 10, TILE_W + 3, TUNNEL_H - 14);
+        ctx.font = '10px monospace';
+        ctx.fillText('折', px, TUNNEL_TOP - 3);
       }
       if (c.x % 10 === 0) {
         ctx.fillStyle = '#888';
@@ -103,7 +111,7 @@ export class Renderer {
       ctx.fillStyle = '#ff6b5a';
       ctx.font = '12px monospace';
       ctx.fillText(
-        `落盤! HP−${c.damage} 積荷−${Math.round(c.lostValue)}${c.propBroken ? ' 支柱が折れた' : ''}${c.rescued ? ' → 救助（積荷全損）' : ''}`,
+        `落盤! HP−${c.damage} 積荷−${Math.round(c.lostValue)}${c.propBroken ? ` x${c.brokenX}の支柱が折れた` : ''}${c.rescued ? ' → 救助（積荷全損）' : ''}`,
         20,
         TUNNEL_TOP + TUNNEL_H + 28,
       );
@@ -117,8 +125,8 @@ export class Renderer {
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.fillRect(this.gx(t.value), GAUGE_Y, Math.max(0, this.gx(t.returnLine) - this.gx(t.value)), GAUGE_H);
     for (const [v, col, label] of [
-      [t.caution, '#ffd166', '注意30'],
-      [t.danger, '#ff6b5a', '危険45'],
+      [t.caution, '#ffd166', `注意${t.caution}`],
+      [t.danger, '#ff6b5a', `危険${t.danger}`],
     ] as const) {
       ctx.fillStyle = col;
       ctx.fillRect(this.gx(v) - 1, GAUGE_Y - 6, 2, GAUGE_H + 12);
@@ -145,7 +153,7 @@ export class Renderer {
     for (let i = 1; i < n; i++) {
       const a = this.hist[i - 1];
       const b = this.hist[i];
-      ctx.strokeStyle = b.supported ? '#6fb6ff' : '#e0a03d';
+      ctx.strokeStyle = b.calm ? '#6fb6ff' : '#e0a03d';
       ctx.beginPath();
       ctx.moveTo(20 + ((i - 1 + HIST_LEN - n) / HIST_LEN) * (W - 40), hy(a.line));
       ctx.lineTo(20 + ((i + HIST_LEN - n) / HIST_LEN) * (W - 40), hy(b.line));
@@ -153,7 +161,7 @@ export class Renderer {
     }
     ctx.fillStyle = '#888';
     ctx.font = '10px monospace';
-    ctx.fillText('帰着線の履歴 60秒（青=支柱の下 / 橙=支えなし）', 24, HIST_Y + 12);
+    ctx.fillText('帰着線の履歴 60秒（青=支柱の下・足場 / 橙=支えなし＝落盤2倍）', 24, HIST_Y + 12);
 
     // 下段HUD（2行）
     ctx.font = '13px monospace';
@@ -166,7 +174,7 @@ export class Renderer {
     );
     ctx.fillStyle = '#aaa';
     ctx.fillText(
-      `次の支柱 ¥${s.nextPropCost}（前後2マスの帰り道を1/3に・揺れの波を0.35倍）  足場 ¥${s.scaffoldCost}（上で休むと揺れ↓）`,
+      `支柱 ¥${s.nextPropCost}（前後2マス 帰り道1/3・波0.35倍）  足場 ¥${s.scaffoldCost}（波0.35倍・休むと↓→帰る）`,
       20,
       H - 14,
     );
