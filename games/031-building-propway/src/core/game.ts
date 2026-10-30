@@ -37,11 +37,19 @@ export const TUNE = {
   /** 足場の上で休むと base が1tickに restRelief 下がり、余震が×restSpikeDecay で引く */
   restRelief: 0.35,
   restSpikeDecay: 0.95,
-  caution: 30,
+  /** 足場のマスでは波と余震が×scaffoldDamp（支柱の下と重なれば小さい方） */
+  scaffoldDamp: 0.35,
+  /** 1: 足場で休んだら、その遠征はもう掘れない（休み＝帰還の宣言） */
+  restCommit: 1,
+  /** 1: 足場の上では帰着線が危険線に届くと、掘る手が止まり休みになる */
+  autoRest: 0,
+  caution: 35,
   danger: 45,
   /** 落盤: 揺れ>caveFrom で 1tickに caveK×(揺れ−caveFrom)² */
   caveFrom: 25,
   caveK: 0.00002,
+  /** 支えのないマスの落盤は×caveBareMul */
+  caveBareMul: 2,
   caveDamage: 35,
   caveCargoLoss: 1 / 3,
   caveRelief: 8,
@@ -79,6 +87,9 @@ export class Game {
   propsStanding = 0;
   lastCaveIn: CaveInEvent | null = null;
   private wasOver = false;
+  /** この遠征で足場に休んだか（restCommit のとき掘れない） */
+  committed = false;
+  private restedThisTick = false;
   metrics: Metrics = {
     moneyEarned: 0,
     moneySpent: 0,
@@ -125,7 +136,8 @@ export class Game {
 
   /** 揺れの上下する成分（波＋余震）に掛ける係数 */
   damp(x: number): number {
-    return this.supported(x) ? TUNE.supportDamp : 1;
+    const s = this.supported(x) ? TUNE.supportDamp : 1;
+    return this.scaffolds[x] ? Math.min(s, TUNE.scaffoldDamp) : s;
   }
 
   tremor(): number {
@@ -157,7 +169,8 @@ export class Game {
 
   caveChance(): number {
     const t = this.tremor();
-    return t > TUNE.caveFrom ? TUNE.caveK * (t - TUNE.caveFrom) ** 2 : 0;
+    if (t <= TUNE.caveFrom) return 0;
+    return TUNE.caveK * (this.supported(this.x) ? 1 : TUNE.caveBareMul) * (t - TUNE.caveFrom) ** 2;
   }
 
   step(action: Action): void {
@@ -183,11 +196,14 @@ export class Game {
       this.act(action);
     }
 
-    this.ambient(action);
+    this.ambient();
     this.finishTick();
   }
 
   private act(action: Action): void {
+    if (action.type === 'work' && TUNE.autoRest && this.x > 0 && this.scaffolds[this.x] && this.returnLine() >= TUNE.danger) {
+      action = { type: 'wait' };
+    }
     switch (action.type) {
       case 'move': {
         if (this.moveCd > 0) return;
@@ -208,7 +224,7 @@ export class Game {
         return;
       }
       case 'work': {
-        if (this.x <= 0) return;
+        if (this.x <= 0 || this.committed) return;
         const inc = (TUNE.incomeBase + TUNE.incomeDepth * this.x) * (1 + this.tremor() / TUNE.incomeTremor);
         this.cargo += inc;
         this.base += TUNE.workRate;
@@ -238,7 +254,9 @@ export class Game {
           this.base -= r;
           this.spike *= TUNE.restSpikeDecay;
           this.metrics.restTicks++;
+          this.restedThisTick = true;
           this.metrics.restRelief += r;
+          if (TUNE.restCommit) this.committed = true;
         }
         return;
       }
@@ -246,9 +264,10 @@ export class Game {
   }
 
   /** 拠点の外で揺れがたまり、余震が起き、落盤を判定する */
-  private ambient(action: Action): void {
+  private ambient(): void {
+    const resting = this.restedThisTick;
+    this.restedThisTick = false;
     if (this.x <= 0 || this.busy?.kind === 'rescue') return;
-    const resting = action.type === 'wait' && !this.busy && this.scaffolds[this.x];
     if (!resting) this.base += this.rate(this.x);
     this.spike *= TUNE.spikeDecay;
     if (this.rng() < TUNE.spikeChance) {
@@ -266,6 +285,7 @@ export class Game {
     this.metrics.caveIns++;
     this.metrics.caveInLost += lost;
     let propBroken = false;
+    let brokenX = -1;
     if (this.supported(this.x)) {
       // 一番近い支柱が折れることがある
       let best = -1;
@@ -278,10 +298,11 @@ export class Game {
         this.propsStanding--;
         this.metrics.propsBroken++;
         propBroken = true;
+        brokenX = best;
       }
     }
     const rescued = this.hp <= 0;
-    this.lastCaveIn = { tick: this.tick, x: this.x, damage: TUNE.caveDamage, lostValue: lost, propBroken, rescued };
+    this.lastCaveIn = { tick: this.tick, x: this.x, damage: TUNE.caveDamage, lostValue: lost, propBroken, brokenX, rescued };
     if (rescued) {
       this.metrics.rescues++;
       this.metrics.rescueLost += this.cargo;
@@ -303,6 +324,7 @@ export class Game {
     this.base = 0;
     this.spike = 0;
     this.hp = TUNE.maxHp;
+    this.committed = false;
   }
 
   private finishTick(): void {
@@ -318,7 +340,7 @@ export class Game {
   getState(): GameState {
     const cells: Cell[] = [];
     for (let i = 0; i <= TUNE.length; i++) {
-      cells.push({ x: i, prop: this.props[i], scaffold: this.scaffolds[i], supported: this.supported(i) });
+      cells.push({ x: i, prop: this.props[i], scaffold: this.scaffolds[i], supported: this.supported(i), damp: i > 0 ? this.damp(i) : 0 });
     }
     const t = this.tremor();
     const d = this.x > 0 ? this.damp(this.x) : 0;
@@ -334,6 +356,7 @@ export class Game {
         money: this.money,
         cargo: this.cargo,
         busy: this.busy ? { ...this.busy } : null,
+        committed: this.committed,
       },
       tremor: {
         value: t,

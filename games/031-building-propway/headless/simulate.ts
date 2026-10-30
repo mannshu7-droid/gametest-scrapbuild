@@ -51,19 +51,21 @@ const base: Omit<Strategy, 'name'> = {
 /** 戦略の一覧。帰還線 th は v1 の掃引の山に揃える（030の学び） */
 export const STRATEGIES: Record<string, Strategy> = {
   /** 対照群: 何も建てない */
-  bare: { ...base, name: 'bare', depth: 25, th: 50 },
+  bare: { ...base, name: 'bare', depth: 25, th: 45 },
   /** 坑道を全部支える */
   props: { ...base, name: 'props', depth: 35, th: 40, propEvery: 5 },
   /** 掘る場所の手前10マスだけ支える（安い） */
   propsFace: { ...base, name: 'propsFace', depth: 35, th: 50, propEvery: 5, propSpan: 10 },
   /** 足場だけ（掘る場所で休む） */
-  scaffold: { ...base, name: 'scaffold', depth: 30, th: 50, scaffold: true, maxRests: 2 },
+  scaffold: { ...base, name: 'scaffold', depth: 30, th: 45, scaffold: true, maxRests: 2 },
   /** 支柱＋足場 */
-  mixed: { ...base, name: 'mixed', depth: 40, th: 40, propEvery: 5, scaffold: true, maxRests: 2 },
+  mixed: { ...base, name: 'mixed', depth: 40, th: 45, propEvery: 5, scaffold: true, maxRests: 2 },
+  /** 足場を作業台にする（掘る場所に建てるが休まない） */
+  bench: { ...base, name: 'bench', depth: 30, th: 40, scaffold: true, maxRests: 0 },
   /** P01（野望型）: 深く・全部建てて・高めの線まで粘る */
-  p01: { ...base, name: 'p01', depth: 50, th: 45, propEvery: 5, scaffold: true, maxRests: 3 },
-  /** P02（あき型）: 線ちょうど（注意線30）で帰る。支柱は建てる */
-  p02: { ...base, name: 'p02', depth: 25, th: 30, propEvery: 5 },
+  p01: { ...base, name: 'p01', depth: 50, th: 50, propEvery: 5, scaffold: true, maxRests: 3 },
+  /** P02（あき型）: 線ちょうど（注意線35）で帰る。支柱は建てる */
+  p02: { ...base, name: 'p02', depth: 25, th: 35, propEvery: 5 },
 };
 
 let DELAY_TICKS = 0;
@@ -123,6 +125,11 @@ export class Bot {
         this.resting = false;
         this.rests++;
         this.acc = 0;
+        // 休み＝帰還の宣言の規則では、休んだら帰る
+        if (TUNE.restCommit) {
+          this.returning = true;
+          return { type: 'move', dir: 'left' };
+        }
       } else return { type: 'wait' };
     }
 

@@ -21,10 +21,10 @@ export interface ActionSpecEntry {
 
 export const ACTION_SPEC: ActionSpecEntry[] = [
   { type: 'move', params: { dir: "'left' | 'right'" }, description: '坑道を1マス動く（2tickに1マス）。x=0が拠点で、着くと積荷を換金し揺れ0・HP全快' },
-  { type: 'wait', description: '何もしない。足場の上なら休み、揺れが下がる' },
-  { type: 'work', description: '今のマスで掘り出す。深いほど・揺れが高いほど稼げるが、揺れが速くたまる' },
+  { type: 'wait', description: '何もしない。足場の上なら休み、揺れが下がる。一度休むとその遠征ではもう掘れない（休み＝帰還の宣言）' },
+  { type: 'work', description: '今のマスで掘り出す。深いほど・揺れが高いほど稼げるが、揺れが速くたまる。支えのないマスの落盤は2倍' },
   { type: 'prop', description: '今のマスに支柱を建てる（費用は建てた数で上がる、15tick）。前後2マスの帰り道の揺れが1/3強になり、揺れの波と余震が0.35倍になる' },
-  { type: 'scaffold', description: '今のマスに足場を建てる（費用40、25tick）。上でwaitすると揺れが下がる' },
+  { type: 'scaffold', description: '今のマスに足場を建てる（費用40、25tick）。足場のマスでは揺れの波と余震が0.35倍。上でwaitすると揺れが下がる（休んだらその遠征は帰るだけ）' },
 ];
 
 /** 坑道の1マス */
@@ -36,6 +36,8 @@ export interface Cell {
   scaffold: boolean;
   /** いずれかの支柱に支えられているか（前後2マス） */
   supported: boolean;
+  /** 揺れの波と余震に掛かる係数（支柱の下・足場で小さい） */
+  damp: number;
 }
 
 export interface Busy {
@@ -50,6 +52,8 @@ export interface CaveInEvent {
   damage: number;
   lostValue: number;
   propBroken: boolean;
+  /** 折れた支柱の位置（折れなければ -1） */
+  brokenX: number;
   rescued: boolean;
 }
 
@@ -92,6 +96,8 @@ export interface GameState {
     money: number;
     cargo: number;
     busy: Busy | null;
+    /** この遠征で足場に休んだ（もう掘れない＝帰還の宣言） */
+    committed: boolean;
   };
   tremor: {
     /** 今の揺れ（たまった分＋波＋余震、支えの下では波と余震が縮む） */
