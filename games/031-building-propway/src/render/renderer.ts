@@ -68,7 +68,8 @@ export class Renderer {
         ctx.fillRect(px - 2, TUNNEL_TOP + 10, TILE_W + 3, 4);
       }
       if (c.scaffold) {
-        ctx.fillStyle = '#7fd8e8';
+        // この遠征で中継点として使った足場は暗く
+        ctx.fillStyle = c.relayUsed ? '#3d6670' : '#7fd8e8';
         ctx.fillRect(px, TUNNEL_TOP + TUNNEL_H - 22, TILE_W - 1, 4);
         ctx.fillRect(px + 1, TUNNEL_TOP + TUNNEL_H - 18, 2, 14);
         ctx.fillRect(px + TILE_W - 4, TUNNEL_TOP + TUNNEL_H - 18, 2, 14);
@@ -174,7 +175,7 @@ export class Renderer {
     );
     ctx.fillStyle = '#aaa';
     ctx.fillText(
-      `支柱 ¥${s.nextPropCost}（前後2マス 帰り道1/3・波0.35倍）  足場 ¥${s.scaffoldCost}（波0.35倍・休むと↓→帰る）`,
+      `支柱 ¥${s.nextPropCost}（前後2マス 帰り道1/3・波0.35倍）  足場 ¥${s.scaffoldCost}（掘る所: 休むと↓→帰る / 帰り道: 通ると揺れ−${s.relayRelief}）`,
       20,
       H - 14,
     );
