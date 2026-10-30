@@ -492,6 +492,18 @@ export class Renderer {
       ctx.fillStyle = '#c77dff';
       ctx.fillRect(X(TUNE.cautionAt) + 4 + i * 26, gy + h - 3, 22 * left, 3);
     });
+    // 3回目（v2軽微#5）: 逃げ道の残り。注意線の下に、この遠征で次に掘る割れ目から抜ける揺れ（10・7・4.9…）を点の大きさで並べ、
+    // 使った段は暗くする（拠点に戻るか救助で戻る）
+    if (p.riftRelief > 0 && TUNE.riftReliefDecay < 1) {
+      const used = Math.round(Math.log(p.riftRelief / TUNE.riftRelief) / Math.log(TUNE.riftReliefDecay));
+      const x0 = X(TUNE.cautionAt) + 8;
+      for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = i < used ? '#444' : '#c77dff';
+        ctx.beginPath();
+        ctx.arc(x0 + i * 10, gy + h + 7, 1.5 + 2.5 * Math.pow(TUNE.riftReliefDecay, i), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
     // 見出し（1行に収める）
     const rate = p.tremorRate;
     const arrow = rate < 0 ? (p.corridor === 'woven' ? '▼回廊' : '▼塔の圏') : p.corridor === 'lane' ? '△塔の圏' : rate > 0 ? '▲' : '';
