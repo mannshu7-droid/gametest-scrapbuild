@@ -371,7 +371,10 @@ export class Renderer {
     // 1行目: 抱えた物（倒れたら失う物）と被ダメ倍率
     ctx.fillStyle = p.dmgMult >= 2 ? '#ff6b6b' : '#fff';
     this.fitText(
-      `積荷 ${p.cargoUnits}/${p.maxCapacity} ¥${p.cargoValue}${p.coverKeepNow > 0 ? ` 盾${Math.round(p.coverKeepNow * 100)}%` : ''}  被ダメ×${p.dmgMult.toFixed(1)}  ` +
+      `積荷 ${p.cargoUnits}/${p.maxCapacity} ¥${p.cargoValue}${p.coverKeepNow > 0 ? ` 盾${Math.round(p.coverKeepNow * 100)}%` : ''}` +
+        // 3回目: 無傷の帰還（HPが境目以上で積荷を入れるとscore+N）
+        (p.cargoValue > 0 && p.soundHpAt > 0 ? (p.soundNow > 0 ? ` 今帰れば無傷+${p.soundNow}点` : ` (HP${p.soundHpAt}↑なら無傷)`) : '') +
+        `  被ダメ×${p.dmgMult.toFixed(1)}  ` +
         // 032: 帰還の宣言の後は「帰るだけ」を最優先で出す
         (p.returnOnly ? (p.returnOnlyBy === 'rest' ? '休んだ＝帰るだけ（もう掘れない）' : '割れ目で帰るだけ（もう掘れない）') : '') +
         // 2回目: 踊り場の上では休んだ時の下がり方と代償（帰るだけ・帰り道の割れ目も無し）を先に見せる
