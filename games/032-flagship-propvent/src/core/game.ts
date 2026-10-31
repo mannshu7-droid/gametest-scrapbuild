@@ -276,6 +276,20 @@ export const TUNE = {
    * 踊り場（回廊・レーン）の休みと違って帰還の宣言にならない。0なら無効（v1）
    */
   propHeal: 0,
+  /**
+   * 3回目（v2重大#1）: 無傷の帰還。拠点に積荷を入れた時のHPが最大HP×soundHp以上なら、その積荷の売値×(1+soundBonus)。
+   * 下位の型（HP45%で早めに引くp02）の「早めに帰る」行動そのものに報酬を付ける（効き目を足すと上位の型の方が得をしたため）。0で無効（v2）
+   */
+  soundBonus: 0,
+  soundHp: 0.4,
+  /**
+   * 3回目: 無傷の帰還1回ごとのscoreの直接加点（お金にしない＝強化に化けない）。0で無効。
+   * 売値の上乗せ（soundBonus 0.1・0.2）は強化の購入に化け、攻勢の方が得をしてp02の順位を動かさなかった（40シード）。
+   * 加点3でp02が遅延0の2位・reset 3秒の1位、5で全条件1位（40シード）。80シード×2組で2はp02が7勝（2位）、1.5は5〜7勝なので1.5
+   */
+  soundScore: 1.5,
+  /** 3回目（v2中#5、spireAllの全勝の切り分け）: 1なら支えの下の割れ目の床は塔のパトロール圏の外だけ。0ならv2（どこでも） */
+  propFloorOutside: 0,
 };
 /** `--preset 026`（026-tremorspire v0.3.0と同じ規則）で上書きする値。対照群として同じコードに残す */
 export const PRESET_026: Partial<typeof TUNE> = {
@@ -312,6 +326,8 @@ export const PRESET_030: Partial<typeof TUNE> = {
   props: 0,
   restCommit: 0,
   riftCommit: 0,
+  soundBonus: 0,
+  soundScore: 0,
 };
 /** 多芸の代償が掛かる身体の強化 */
 const BODY_ITEMS: ShopItemId[] = ['offense', 'vitality', 'armor', 'mobility'];
@@ -1103,6 +1119,8 @@ export class Game {
     propWorkTicks: 0,
     restCommits: 0,
     propHealed: 0,
+    soundBanks: 0,
+    soundBonusValue: 0,
     riftCommits: 0,
     digBlockedTicks: 0,
     rescueHomeDamage: 0,
@@ -1392,7 +1410,10 @@ export class Game {
   }
   /** 2回目: 割れ目が開き始める帰着線（支えの下はpropRiftFloorだけ低い） */
   private riftFloorHere(): number {
-    return TUNE.propRiftFloor > 0 && this.supportedAt(this.player.x) ? TUNE.cautionAt - TUNE.propRiftFloor : TUNE.cautionAt;
+    if (TUNE.propRiftFloor <= 0 || !this.supportedAt(this.player.x)) return TUNE.cautionAt;
+    // 3回目（v2中#5）: propFloorOutside=1なら、塔のパトロール圏（レーン・回廊）の中の支柱には床を付けない
+    if (TUNE.propFloorOutside > 0 && this.patrolCoverage(this.player.x, this.player.y) !== 'none') return TUNE.cautionAt;
+    return TUNE.cautionAt - TUNE.propRiftFloor;
   }
   /** 深さ（バンド）だけで決まる割れ目の売値（揺れボーナスは乗らない。029-v2の「越えるほど高い」は迷いを先へ誘ったので使わない） */
   private riftValueAt(x: number): number {
@@ -3263,6 +3284,7 @@ export class Game {
         this.metrics.barricadesBuilt * 2 +
         this.metrics.turretsBuilt * 4 +
         this.metrics.informedPlacements * INFORMED_PLACEMENT_SCORE_BONUS +
+        this.metrics.soundBanks * TUNE.soundScore +
         this.metrics.nightsSurvived * 80 -
         this.metrics.outpostsLost * 40 +
         (this.won ? 300 : 0),
@@ -3338,6 +3360,13 @@ export class Game {
         if (!this.wasInBase && this.player.cargoUnits > 0) {
           this.metrics.banks++;
           this.metrics.bankTremorSum += this.lastFieldTremor;
+        }
+        // 3回目: 無傷の帰還（入った瞬間のHPで判定。拠点の回復の前。懸賞だけを抱えた帰還にも乗る）
+        if (!this.wasInBase && (TUNE.soundBonus > 0 || TUNE.soundScore > 0) && this.player.hp >= this.maxHp() * TUNE.soundHp && this.player.cargoValue > 0) {
+          const bonus = Math.round(this.player.cargoValue * TUNE.soundBonus);
+          this.player.cargoValue += bonus;
+          this.metrics.soundBanks++;
+          this.metrics.soundBonusValue += bonus;
         }
         this.player.money += this.player.cargoValue;
         this.metrics.moneyEarned += this.player.cargoValue;
@@ -3590,6 +3619,8 @@ export class Game {
         propCost: this.propCostNow(),
         supported: this.supportedAt(p.x),
         restRelief: Math.max(0, -this.tremorRateHere(p.x, p.y, false, true, false)),
+        soundNow: TUNE.soundScore > 0 && p.hp >= this.maxHp() * TUNE.soundHp ? TUNE.soundScore : 0,
+        soundHpAt: TUNE.soundScore > 0 ? Math.ceil(this.maxHp() * TUNE.soundHp) : 0,
         propWork: this.propWork ? { ...this.propWork } : null,
       },
       map: {

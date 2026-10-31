@@ -64,6 +64,7 @@
  *   要約表に支柱（建てた/折れた）・建築費・帰着線が注意線を下から越えた回数（1ラン・1往復あたり）・宣言の回数を足した
  * - 032 2回目: 戦略名に`+R`で休む型（帰還条件で踊り場にいれば揺れ0まで休んでから帰る）。要約表に遠征を終えた理由（ret＝帰還線/HP/積荷/宣言）・
  *   休んだ秒・支柱の下の手当て（`propHeal>0`の時だけ）を足した
+ * - 032 3回目: 無傷の帰還（HP40%以上で積荷を入れるとscore+1.5）。各ランのJSON行に`soundBanks/soundBonusValue`、要約表に`sound`（回数/上乗せ）
  */
 import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type DeathPhase, type Dir, type Enemy, type GameState, type ShopItemId, type TileId, type Turret } from '../src/core/types';
@@ -1173,6 +1174,9 @@ interface RunResult {
   restTicks: number;
   healTicks: number;
   propHealed: number;
+  /** 3回目: 無傷の帰還（回数・上乗せの合計） */
+  soundBanks: number;
+  soundBonusValue: number;
   /** 030新規: 割れ目 */
   riftsOpened: number;
   riftsMined: number;
@@ -1387,6 +1391,8 @@ function runOne(seed: number, strategy: string, maxTicks: number): RunResult {
     restTicks: bot.rests,
     healTicks: bot.heals,
     propHealed: Math.round(s.metrics.propHealed),
+    soundBanks: s.metrics.soundBanks,
+    soundBonusValue: s.metrics.soundBonusValue,
     greedyStart,
     greedyTremor,
     greedyCargo,
@@ -1528,6 +1534,8 @@ function briefRow(strategy: string, rs: RunResult[]): Record<string, number | st
     ret: `${f((r) => r.reasons.line, 1)}/${f((r) => r.reasons.hp, 1)}/${f((r) => r.reasons.cargo, 1)}/${f((r) => r.reasons.commit, 1)}`,
     restSec: f((r) => r.restTicks / 10, 1),
     heal: `${f((r) => r.healTicks / 10, 0)}s/${f((r) => r.propHealed, 0)}hp`,
+    // 3回目: 無傷の帰還（回数/上乗せ、1ランあたり）
+    sound: `${f((r) => r.soundBanks, 1)}/${f((r) => r.soundBonusValue, 0)}`,
   };
 }
 function pairTable(names: string[], all: Record<string, RunResult[]>, n: number): void {

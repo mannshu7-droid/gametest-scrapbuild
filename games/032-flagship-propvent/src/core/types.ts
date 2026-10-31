@@ -358,6 +358,9 @@ export interface Metrics {
   restCommits: number;
   /** 2回目: 支柱の下で立ち止まって戻したHPの合計 */
   propHealed: number;
+  /** 3回目: 無傷の帰還（HPがsoundHp以上で積荷を入れた回数・上乗せした売値の合計） */
+  soundBanks: number;
+  soundBonusValue: number;
   riftCommits: number;
   digBlockedTicks: number;
   score: number;
@@ -510,6 +513,9 @@ export interface GameState {
     supported: boolean;
     /** 2回目: ここで休むと1tickに下がる揺れ（回廊・塔のレーンの踊り場。0なら休んでも下がらない） */
     restRelief: number;
+    /** 3回目: 今拠点に入れば無傷の帰還で入るscore（HPが足りなければ0）・その境目のHP（規則が無効なら0） */
+    soundNow: number;
+    soundHpAt: number;
     propWork: { x: number; progress: number; total: number } | null;
   };
   map: {
