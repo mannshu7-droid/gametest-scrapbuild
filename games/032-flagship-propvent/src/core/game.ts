@@ -67,8 +67,6 @@ const CAVEIN_DMG_BASE = 12;
 const CAVEIN_DMG_PER_DIST = 0.3;
 /** 毒ガスを掘ると揺れが上がる（燃料版の燃料-15の翻案） */
 const GAS_TREMOR = 15;
-/** 梁で編んだ回廊（woven）は足場: 中で掘らずにいる間、揺れが毎tickこれだけ下がる（025の足場と同じ1.5） */
-const CORRIDOR_RELIEF = 1.5;
 /** 回廊の中で掘っている間・梁なしの塔のレーン（lane）の中では、揺れのたまる速さがこの倍率（燃料版の0.5/0.65と同じ） */
 const WOVEN_TREMOR_MULT = 0.5;
 const PATROL_TREMOR_MULT = 0.65;
@@ -266,6 +264,18 @@ export const TUNE = {
   restCommit: 1,
   /** 割れ目を掘ったら帰還の宣言（その遠征ではもう鉱石を掘れない）。0で030と同じ */
   riftCommit: 0,
+  /** 梁で編んだ回廊（woven）は足場: 中で休んでいる間、揺れが毎tickこれだけ下がる（025の足場と同じ1.5、v1までは定数）。2回目（v1中#6）で調整値に */
+  corridorRelief: 1.5,
+  /**
+   * 2回目（v1重大#1・中#9）: 支えの下（支柱の5列）では、割れ目が帰着線≥注意線−propRiftFloorから開く（開く確率は注意線から測る）。
+   * 0ならv1（どこでも注意線から）。浅く帰る型が自分で建てた区間にだけ割れ目の窓を下へ広げる
+   */
+  propRiftFloor: 8,
+  /**
+   * 2回目（v1重大#1）: 支柱の下で立ち止まる（wait、戦闘中でない）と1tickに最大HP×propHealだけ戻る（揺れは止まらずにたまる）。
+   * 踊り場（回廊・レーン）の休みと違って帰還の宣言にならない。0なら無効（v1）
+   */
+  propHeal: 0,
 };
 /** `--preset 026`（026-tremorspire v0.3.0と同じ規則）で上書きする値。対照群として同じコードに残す */
 export const PRESET_026: Partial<typeof TUNE> = {
@@ -1092,6 +1102,7 @@ export class Game {
     propSupportedTicks: 0,
     propWorkTicks: 0,
     restCommits: 0,
+    propHealed: 0,
     riftCommits: 0,
     digBlockedTicks: 0,
     rescueHomeDamage: 0,
@@ -1260,7 +1271,7 @@ export class Game {
     const coverage = this.patrolCoverage(x, y);
     // 032（restCommit）: 回廊・レーンで揺れが下がるのは休んでいる時だけ（歩いている間は下がらない）
     const relieves = !digging && (TUNE.restCommit <= 0 || resting);
-    if (coverage === 'woven' && relieves) return -CORRIDOR_RELIEF;
+    if (coverage === 'woven' && relieves) return -TUNE.corridorRelief;
     // v2（中#3）: 梁なしの塔のレーンも、掘らずにいる間は弱い踊り場（spireAllの見張り台に遠征の長所を足す）
     if (coverage === 'lane' && relieves && TUNE.laneRelief > 0) return -TUNE.laneRelief;
     let rate = tremorRateAt(this.nearestBaseDistance(x)) * this.tremorGearMult();
@@ -1370,14 +1381,18 @@ export class Game {
     if (this.inBaseRadius(this.player.x) || this.player.cargoUnits >= this.maxCapacity()) return false;
     if (this.returnOnly !== null) return false;
     const est = this.estTremorAtReturn();
-    if (est === null || est < TUNE.cautionAt) return false;
+    if (est === null || est < this.riftFloorHere()) return false;
     if (TUNE.riftCeil > 0 && est >= TUNE.riftCeil) return false;
     return TUNE.riftTower <= 0 || this.underWatch();
   }
   private riftChanceNow(): number {
     if (!this.riftOpenNow()) return 0;
     const est = this.estTremorAtReturn() ?? 0;
-    return TUNE.riftChanceBase + TUNE.riftChancePer * (est - TUNE.cautionAt);
+    return TUNE.riftChanceBase + TUNE.riftChancePer * Math.max(0, est - TUNE.cautionAt);
+  }
+  /** 2回目: 割れ目が開き始める帰着線（支えの下はpropRiftFloorだけ低い） */
+  private riftFloorHere(): number {
+    return TUNE.propRiftFloor > 0 && this.supportedAt(this.player.x) ? TUNE.cautionAt - TUNE.propRiftFloor : TUNE.cautionAt;
   }
   /** 深さ（バンド）だけで決まる割れ目の売値（揺れボーナスは乗らない。029-v2の「越えるほど高い」は迷いを先へ誘ったので使わない） */
   private riftValueAt(x: number): number {
@@ -1385,7 +1400,7 @@ export class Game {
   }
   private updateRifts(): void {
     if (this.riftOpenNow()) this.metrics.riftWindowTicks++;
-    else if (TUNE.rifts > 0 && TUNE.riftTower > 0 && this.phase === 'day' && (this.estTremorAtReturn() ?? 0) >= TUNE.cautionAt && !this.underWatch()) this.metrics.riftBlockedTicks++;
+    else if (TUNE.rifts > 0 && TUNE.riftTower > 0 && this.phase === 'day' && (this.estTremorAtReturn() ?? 0) >= this.riftFloorHere() && !this.underWatch()) this.metrics.riftBlockedTicks++;
     if (TUNE.riftCeil > 0 && this.rifts.length > 0 && (this.estTremorAtReturn() ?? 0) >= TUNE.riftCeil) {
       // 危険線の外では割れ目が崩れて閉じる
       for (const r of this.rifts) {
@@ -3352,6 +3367,12 @@ export class Game {
       } else {
         this.fieldRegenTimer = 0;
       }
+      // 2回目: 支柱の下で立ち止まるとHPが戻る（揺れは下がらない＝宣言にならない）
+      if (TUNE.propHeal > 0 && this.restedThisTick && !inCombat && this.supportedAt(this.player.x) && this.player.hp < this.maxHp()) {
+        const before = this.player.hp;
+        this.player.hp = Math.min(this.maxHp(), this.player.hp + this.maxHp() * TUNE.propHeal);
+        this.metrics.propHealed += this.player.hp - before;
+      }
     }
     if (inBase && !this.wasInBase) {
       this.lastTripOverLine = this.tripOverLine;
@@ -3568,6 +3589,7 @@ export class Game {
         returnOnlyBy: this.returnOnly,
         propCost: this.propCostNow(),
         supported: this.supportedAt(p.x),
+        restRelief: Math.max(0, -this.tremorRateHere(p.x, p.y, false, true, false)),
         propWork: this.propWork ? { ...this.propWork } : null,
       },
       map: {

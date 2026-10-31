@@ -374,6 +374,8 @@ export class Renderer {
       `積荷 ${p.cargoUnits}/${p.maxCapacity} ¥${p.cargoValue}${p.coverKeepNow > 0 ? ` 盾${Math.round(p.coverKeepNow * 100)}%` : ''}  被ダメ×${p.dmgMult.toFixed(1)}  ` +
         // 032: 帰還の宣言の後は「帰るだけ」を最優先で出す
         (p.returnOnly ? (p.returnOnlyBy === 'rest' ? '休んだ＝帰るだけ（もう掘れない）' : '割れ目で帰るだけ（もう掘れない）') : '') +
+        // 2回目: 踊り場の上では休んだ時の下がり方と代償（帰るだけ・帰り道の割れ目も無し）を先に見せる
+        (!p.returnOnly && p.restRelief > 0 && p.tremor > 0 ? `休めば−${p.restRelief.toFixed(1)}/t＝帰るだけ(割れ目も無し) ` : '') +
         (p.returnOnly ? '' : p.rescueDownTicks > 0 ? `手当て中${p.rescueDownTicks}` : p.stakeRescue ? '倒れたら積荷を失う' : rescueHint(p.rescueFee)),
       6,
       hudY + 60,

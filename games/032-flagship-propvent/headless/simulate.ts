@@ -62,6 +62,8 @@
  *   支柱を建てる型は、遠征中（帰還条件の前）に拠点からPROP_FROM列以上離れた支えのない列に来たら、その場に支柱を建てる。
  *   拠点の買い物では次の支柱PROP_RESERVE本分の所持金を残す。帰還の宣言の後（returnOnly）はまっすぐ帰る。
  *   要約表に支柱（建てた/折れた）・建築費・帰着線が注意線を下から越えた回数（1ラン・1往復あたり）・宣言の回数を足した
+ * - 032 2回目: 戦略名に`+R`で休む型（帰還条件で踊り場にいれば揺れ0まで休んでから帰る）。要約表に遠征を終えた理由（ret＝帰還線/HP/積荷/宣言）・
+ *   休んだ秒・支柱の下の手当て（`propHeal>0`の時だけ）を足した
  */
 import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type DeathPhase, type Dir, type Enemy, type GameState, type ShopItemId, type TileId, type Turret } from '../src/core/types';
@@ -69,17 +71,24 @@ import { TILE, type Action, type DeathPhase, type Dir, type Enemy, type GameStat
 /** 032: 支柱を建て始める拠点からの距離（列）と、拠点の買い物で残す支柱の本数 */
 const PROP_FROM = 20;
 const PROP_RESERVE = 0;
+/** 2回目: 支柱の下の手当てで戻すHP（最大HP比） */
+const HEAL_TO = 0.8;
 /** 032: `--props auto|none|all`（auto＝bare以外は建てる。規則に支柱が無ければ建てない） */
 let PROPS_DEFAULT: 'auto' | 'none' | 'all' = 'auto';
 /** 032: 戦略名（`weave+P`・`bare-P`）を、元の戦略と支柱を建てるかに分ける */
-function parseName(name: string): { base: Strategy; props: boolean } {
-  const m = name.match(/^(.*)([+-])P$/);
-  const base = (m ? m[1] : name) as Strategy;
-  if (m) return { base, props: m[2] === '+' };
-  if (PROPS_DEFAULT === 'none') return { base, props: false };
-  if (PROPS_DEFAULT === 'all') return { base, props: true };
-  return { base, props: TUNE.props > 0 && base !== 'bare' };
+function parseName(name: string): { base: Strategy; props: boolean; rest: boolean } {
+  // 2回目: `+R`（休む型）を足せる。`weave+R`・`p02-P+R`
+  const rest = /\+R$/.test(name);
+  const n = name.replace(/\+R$/, '');
+  const m = n.match(/^(.*)([+-])P$/);
+  const base = (m ? m[1] : n) as Strategy;
+  if (m) return { base, props: m[2] === '+', rest };
+  if (PROPS_DEFAULT === 'none') return { base, props: false, rest };
+  if (PROPS_DEFAULT === 'all') return { base, props: true, rest };
+  return { base, props: TUNE.props > 0 && base !== 'bare', rest };
 }
+/** 2回目: 遠征を終えた理由の数（帰還線・HP・積荷満杯・宣言・夜の予告）。runOneが読む */
+export type ReturnReason = 'line' | 'hp' | 'cargo' | 'commit' | 'night';
 
 const DELTA: Record<Dir, [number, number]> = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
 const DIRS: Dir[] = ['left', 'right', 'up', 'down'];
@@ -717,10 +726,20 @@ export class Bot {
   private strategy: Strategy;
   /** 032: 支柱を建てるか */
   private props: boolean;
+  /** 2回目（v1重大#2）: 休む型。帰還条件が成り立った時に回廊・塔のレーン（踊り場）にいれば、揺れが0になるまで休んでから帰る（＝帰還の宣言） */
+  private rest: boolean;
+  /** 2回目: 遠征を終えた理由（その遠征で最初に成り立ったもの） */
+  reasons: Record<ReturnReason, number> = { line: 0, hp: 0, cargo: 0, commit: 0, night: 0 };
+  private tripReason: ReturnReason | null = null;
+  rests = 0;
+  /** 2回目: 支柱の下で手当てしている（HPがHEAL_TOまで戻るか、帰着線が帰還線に届くまで） */
+  private healing = false;
+  heals = 0;
   constructor(name: string) {
-    const { base, props } = parseName(name);
+    const { base, props, rest } = parseName(name);
     this.strategy = base;
     this.props = props;
+    this.rest = rest;
   }
   /** v2: 帰還条件が連続で成り立っている判断回数（反応遅延用）。3回目: DELAY_FROMで数え方を選ぶ */
   private returnSeen = 0;
@@ -733,6 +752,8 @@ export class Bot {
     const nearest = nearestEnemy(s);
 
     if (inBaseRadius(s)) {
+      // 前線拠点を通って帰る途中（HPが戻っていない・積荷がある）は同じ遠征として数える
+      if (p.hp >= p.maxHp * HP_RETREAT_THRESHOLD[this.strategy] && p.cargoUnits === 0) this.tripReason = null;
       if (s.phase === 'night' && nearest) {
         // 夜間・拠点内: 侵入したレイダーがいれば、購入より迎撃を優先する（v2 FIX バグ#2）。
         // v1では拠点内でショップ購入が常に迎撃より優先され、隣接脅威があっても素通りしていた
@@ -870,6 +891,16 @@ export class Bot {
     else if (criticalFuelRaw || (DELAY_FROM === 'first' && this.returnSeen > 0)) this.returnSeen++;
     const criticalFuel = criticalFuelRaw && this.returnSeen > RETURN_DELAY;
     const criticalHp = !greedy && p.hp < p.maxHp * HP_RETREAT_THRESHOLD[this.strategy];
+    // 2回目: 支柱を建てる型は、HPで帰る時に支えの下（踊り場の外）なら立ち止まってHPを戻してから遠征を続ける
+    if (this.props && TUNE.propHeal > 0 && !criticalFuelRaw && p.cargoUnits < p.maxCapacity && !s.nightWarning && s.phase === 'day' && p.supported && p.restRelief === 0 && !p.returnOnly && !(nearest && nearest.dist <= 3)) {
+      if (criticalHp) this.healing = true;
+      if (this.healing && p.hp < p.maxHp * HEAL_TO) {
+        this.heals++;
+        return { type: 'wait' };
+      }
+    }
+    this.healing = false;
+
     const cargoFull = !greedy && p.cargoUnits >= p.maxCapacity;
     // 030: 割れ目を追う（HPが危険・積荷が満杯・夜の予告中は追わない）。帰還線＋RIFT_SLACKまでは帰還より優先する
     if (RIFT_CHASE && !criticalHp && !cargoFull && !s.nightWarning && s.map.rifts.length > 0) {
@@ -885,6 +916,15 @@ export class Bot {
     }
     // 032: 帰還の宣言の後（休んだ・割れ目）はもう掘れないので、まっすぐ帰る
     if (criticalFuel || criticalHp || cargoFull || p.returnOnly) {
+      if (this.tripReason === null && s.phase === 'day') {
+        this.tripReason = criticalHp ? 'hp' : cargoFull ? 'cargo' : criticalFuel ? 'line' : 'commit';
+        this.reasons[this.tripReason]++;
+      }
+      // 2回目: 休む型は踊り場で揺れが0になるまで休む（敵が近い・HP危険・夜の予告の間は休まない）
+      if (this.rest && p.restRelief > 0 && p.tremor > 0 && !criticalHp && !s.nightWarning && !(nearest && nearest.dist <= 2)) {
+        this.rests++;
+        return { type: 'wait' };
+      }
       if (nearest && nearest.dist <= 1 && !criticalHp) return { type: 'attack' };
       const dir = bfsToTargetX(s, 0);
       if (dir) {
@@ -1128,6 +1168,11 @@ interface RunResult {
   restCommits: number;
   riftCommits: number;
   cautionCross: number;
+  /** 2回目: 遠征を終えた理由・休む型が休んだtick */
+  reasons: Record<ReturnReason, number>;
+  restTicks: number;
+  healTicks: number;
+  propHealed: number;
   /** 030新規: 割れ目 */
   riftsOpened: number;
   riftsMined: number;
@@ -1338,6 +1383,10 @@ function runOne(seed: number, strategy: string, maxTicks: number): RunResult {
     restCommits: s.metrics.restCommits,
     riftCommits: s.metrics.riftCommits,
     cautionCross,
+    reasons: { ...bot.reasons },
+    restTicks: bot.rests,
+    healTicks: bot.heals,
+    propHealed: Math.round(s.metrics.propHealed),
     greedyStart,
     greedyTremor,
     greedyCargo,
@@ -1402,7 +1451,7 @@ const maxTicks = Number(argVal('maxTicks') ?? 20000);
 // ヘッドライン実行できる（デフォルトはこれまで通りcautious/pusherの2種のみ）
 const strategiesArg = argVal('strategies');
 const strategies: string[] = strategiesArg
-  ? strategiesArg.split(',').filter((s) => ALL_STRATEGIES.includes(s.replace(/[+-]P$/, '') as Strategy))
+  ? strategiesArg.split(',').filter((s) => ALL_STRATEGIES.includes(s.replace(/\+R$/, '').replace(/[+-]P$/, '') as Strategy))
   : ['wall', 'spire', 'weave'];
 
 // --quiet で個別ランのJSON行を省き、サマリ行だけを出す（024新規、40シード×多戦略の比較用）
@@ -1475,6 +1524,10 @@ function briefRow(strategy: string, rs: RunResult[]): Record<string, number | st
     cross: f((r) => r.cautionCross, 1),
     crossPerBank: +(rs.reduce((a, r) => a + r.cautionCross, 0) / Math.max(1, rs.reduce((a, r) => a + r.banks, 0))).toFixed(2),
     commits: `${f((r) => r.restCommits, 1)}/${f((r) => r.riftCommits, 1)}`,
+    // 2回目: 遠征を終えた理由（帰還線/HP/積荷/宣言、1ランあたり）と休む型の休んだ秒
+    ret: `${f((r) => r.reasons.line, 1)}/${f((r) => r.reasons.hp, 1)}/${f((r) => r.reasons.cargo, 1)}/${f((r) => r.reasons.commit, 1)}`,
+    restSec: f((r) => r.restTicks / 10, 1),
+    heal: `${f((r) => r.healTicks / 10, 0)}s/${f((r) => r.propHealed, 0)}hp`,
   };
 }
 function pairTable(names: string[], all: Record<string, RunResult[]>, n: number): void {

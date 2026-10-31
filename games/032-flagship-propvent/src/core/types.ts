@@ -356,6 +356,8 @@ export interface Metrics {
   propWorkTicks: number;
   /** 032新規: 休み＝帰還の宣言（回廊・レーンで休んで揺れを下げた遠征の数）／割れ目で宣言した遠征の数／宣言の後に掘ろうとして止められたtick */
   restCommits: number;
+  /** 2回目: 支柱の下で立ち止まって戻したHPの合計 */
+  propHealed: number;
   riftCommits: number;
   digBlockedTicks: number;
   score: number;
@@ -506,6 +508,8 @@ export interface GameState {
     /** 032新規: 次の支柱の費用・今いる列が支えられているか・建てている支柱の進捗 */
     propCost: number;
     supported: boolean;
+    /** 2回目: ここで休むと1tickに下がる揺れ（回廊・塔のレーンの踊り場。0なら休んでも下がらない） */
+    restRelief: number;
     propWork: { x: number; progress: number; total: number } | null;
   };
   map: {
