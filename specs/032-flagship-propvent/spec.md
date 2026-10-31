@@ -1,7 +1,7 @@
 # 仕様書: 032-flagship-propvent（帰り道を支える支柱と、休み＝帰還の宣言）
 
 - 作成日: 2026-10-31
-- ステータス: PLAYABLE（v0.3.0、サイクル38・3回目。[v1レビュー](../../reviews/032-flagship-propvent-v1.md)・[v2レビュー](../../reviews/032-flagship-propvent-v2.md)で判定FIX）
+- ステータス: FINAL（v0.3.0、サイクル38完了。[v1](../../reviews/032-flagship-propvent-v1.md)・[v2](../../reviews/032-flagship-propvent-v2.md)・[final](../../reviews/032-flagship-propvent-final.md)で判定FIX）
 - 元になったレビュー: [reviews/031-building-propway-final.md](../../reviews/031-building-propway-final.md)（提案(1)、採用すべき部分）、
   [reviews/030-flagship-ventward-final.md](../../reviews/030-flagship-ventward-final.md)（ベース。残課題「weaveの回廊で迷い直しの罰−9.9%」「p02が常に下位」）、
   routine-state.md「現在位置」（サイクル38の引き継ぎ事項）
