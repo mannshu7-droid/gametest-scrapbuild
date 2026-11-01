@@ -110,6 +110,22 @@ export const TUNE = {
    */
   graceShed: 0.5,
   graceShield: 0.5,
+  /**
+   * 033 v3: 癒しの迷い直し（v2中#1）への対応。この出撃で踏ん張りを使った後は、撃破の回復をHPでなく盾に足す（× mendShield）。
+   * HPが帰る線の上に戻らないので「帰る理由」が消えず、迷いが数え直されない。守りの量は変わらない。0で無効（v2と同じ）
+   */
+  mendShield: 1,
+  /**
+   * 033 v3: 持ち越しを「この出撃で育てた熱」に寄せる（v2中#3）。奉納時の熱のうち、出撃の始まりの熱（余熱）までの分は
+   * carryStartFrac、それより上（この出撃で上げた分）は carryFrac で持ち越す。carryStartFrac=carryFrac でv2と同じ。
+   * v3で試して不採用（0.8のまま）: 0.5/0.3/0 で p02 5655→5466/5423/5286 と下がるだけで、出撃の中央値は7.3→7.4〜7.6秒（帰るのはHPの線のため）
+   */
+  carryStartFrac: 0.8,
+  /**
+   * 033 v3（試験）: 被ダメージ倍率に数える余熱の割合。被ダメージは heat − carryLeft × (1 − carryDmgShare) で計算する。1でv2と同じ（1本のダイヤル）。
+   * v3で試して不採用（1のまま）: 0で p02 5655→9459・banker 5458→8642 と慎重な型だけが跳ね、p02の出撃の中央値は7.3→8.8秒しか伸びない
+   */
+  carryDmgShare: 1,
 };
 
 export type Tune = typeof TUNE;
@@ -223,7 +239,8 @@ export class Game {
 
   damageMult(): number {
     // 被ダメージは熱に対して凸（低い熱では緩く、高い熱で急に重くなる）→ 奉納する熱に内側の最適点を作る
-    return 1 + Math.pow(this.player.heat / this.tune.damageDiv, this.tune.damageExp);
+    const h = this.player.heat - this.player.carryLeft * (1 - this.tune.carryDmgShare);
+    return 1 + Math.pow(h / this.tune.damageDiv, this.tune.damageExp);
   }
 
   /** 033: 今奉納したら次の出撃が何の熱から始まるか（余熱） */
@@ -231,7 +248,8 @@ export class Game {
     const p = this.player;
     const t = this.tune;
     const share = Math.min(1, Math.max(0, (p.hp / p.maxHp - t.carryFloor) / (1 - t.carryFloor)));
-    return p.heat * t.carryFrac * share;
+    const old = Math.min(p.heat, p.sortieHeat);
+    return (old * t.carryStartFrac + (p.heat - old) * t.carryFrac) * share;
   }
 
   difficulty(): number {
@@ -365,7 +383,9 @@ export class Game {
       p.poolCarry += fromCarry;
       this.metrics.carryEarned += fromCarry;
       p.heat = Math.min(t.heatMax, p.heat + def.heat);
-      p.hp = Math.min(p.maxHp, p.hp + p.levels.mend * t.mendHeal);
+      const heal = p.levels.mend * t.mendHeal;
+      if (!p.graceReady && t.mendShield > 0) p.shield += heal * t.mendShield;
+      else p.hp = Math.min(p.maxHp, p.hp + heal);
       this.metrics.kills++;
       this.floats.push({ x: e.x, y: e.y, text: `+${gain.toFixed(0)}`, color: '#ffb347', ttl: 12 });
     }
@@ -435,7 +455,8 @@ export class Game {
       if (p.carryLeft > p.heat) p.carryLeft = p.heat;
       p.shield += shed * t.graceShield;
       this.metrics.shedHeat += shed;
-      this.floats.push({ x: p.x, y: p.y - 1.1, text: `熱−${shed.toFixed(0)}→盾${(shed * t.graceShield).toFixed(0)}`, color: '#9be7ff', ttl: 20 });
+      // v3: 「踏ん張り！戻れ」（頭の上）と重ならないよう、足元に出す
+      this.floats.push({ x: p.x, y: p.y + 0.9, text: `熱−${shed.toFixed(0)}→盾${(shed * t.graceShield).toFixed(0)}`, color: '#9be7ff', ttl: 20 });
     }
     for (const e of this.enemies) {
       const dx = e.x - p.x;
