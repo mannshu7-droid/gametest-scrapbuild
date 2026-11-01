@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spareglow (033)</title>
+    <style>
+      body {
+        margin: 0;
+        background: #0b0a0c;
+        color: #ccc;
+        font-family: monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+      }
+      canvas {
+        border: 1px solid #333;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div>
+      WASD/矢印: 移動 | Space: 斬る（周囲の敵全員） | Shift: ダッシュ（無敵） | B長押し: 篝火の中央で奉納 |
+      1〜4: 篝火の上で強化（刃・鎧・癒し・器） | R: もう一度（夜明け後）<br />
+      撃破で「熱」が上がる。熱が高いほど残り火（報酬）が増え、受けるダメージも増える。倒れると抱えた残り火と熱を失う（装備と奉納済みは無事）<br />
+      余熱: 奉納すると、HPの余裕に応じて熱の一部（最大8割）を次の出撃へ持ち越す。早めに引くほど次の出撃が高い倍率から始まる
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
