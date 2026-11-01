@@ -1,7 +1,7 @@
 # 仕様書: 033-combat-spareglow（スペアグロウ — 余熱を持ち帰る篝火の闘技場）
 
 - 作成日: 2026-11-01
-- ステータス: PLAYABLE（v0.3.0、サイクル39・3回目でFIX: 踏ん張りの後の癒しを盾へ）
+- ステータス: FINAL（v0.3.0、サイクル39完了。[v1](../../reviews/033-combat-spareglow-v1.md)・[v2](../../reviews/033-combat-spareglow-v2.md)・[final](../../reviews/033-combat-spareglow-final.md)で判定FIX）
 - 元になったレビュー: [reviews/032-flagship-propvent-final.md](../../reviews/032-flagship-propvent-final.md)（提案(1)「早めに引くが次の出撃を強くする」）
 - 土台: [027-combat-emberstake](../027-combat-emberstake/spec.md) v0.3.0（熱のダイヤル・奉納・救助・踏ん張り）をそのまま使い、**余熱**の規則を1つだけ足す
 - 要素: **戦闘（combat）単体**（採掘・建築は入れない）
