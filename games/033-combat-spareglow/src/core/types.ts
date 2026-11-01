@@ -58,6 +58,8 @@ export interface Player {
   carryLeft: number;
   /** 033: 抱えた残り火のうち、持ち越した熱による上乗せ分 */
   poolCarry: number;
+  /** 033 v2: 熱の盾の残り（踏ん張りの発動で熱を換えたもの。被ダメージを先に吸う） */
+  shield: number;
 }
 
 /** 倒れた（救助された）ときの熱の帯。021/022の deathPhase に相当する027の主指標 */
@@ -95,6 +97,9 @@ export interface Metrics {
   /** 033: 奉納で持ち越した熱の合計（平均は sumCarry / banks）と、奉納時のHP割合の合計 */
   sumCarry: number;
   sumBankHpFrac: number;
+  /** 033 v2: 踏ん張りで盾に換えた熱の合計と、盾が吸ったダメージの合計 */
+  shedHeat: number;
+  shieldAbsorbed: number;
 }
 
 export interface FloatText {

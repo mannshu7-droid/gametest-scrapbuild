@@ -9,7 +9,7 @@
  *   npm run simulate -- --bestPairs        前半シードで各ビルドの最良閾値を選び、後半シードで全組を対比較
  *   npm run simulate -- --delay 30         反応遅延: 奉納の条件が成り立ってから30回の判断は気付かずに戦い続ける
  *   npm run simulate -- --delay 30 --delayMode sum   sum=1出撃で迷うのは合計30回まで（条件が外れても数え直さない）、reset=条件が外れるたびに数え直す（既定）
- *   npm run simulate -- --grid             033の検証一式: 5条件（遅延0／3秒sum・reset／6秒sum・reset）×全戦略の要約・罰・総当たり・余熱なし対照
+ *   npm run simulate -- --grid             033の検証一式: 5条件（遅延0／1秒reset／3秒sum・reset／6秒reset）×全戦略の要約・罰・総当たり・余熱なし対照
  *   npm run simulate -- --brief            1行JSON（スクリプト集計用）
  *   npm run simulate -- --bankAt 50        全戦略の奉納の熱を固定値で上書き
  *   npm run simulate -- --tune damageDiv=30,armorMult=0.85   core TUNE の上書き
@@ -149,6 +149,9 @@ export interface RunResult {
   levels: Record<ShopItemId, number>;
   /** 033: 余熱 */
   carryBanked: number;
+  /** 033 v2: 熱の盾に換えた熱・盾が吸ったダメージ（1ランの合計） */
+  shedHeat: number;
+  shieldAbsorbed: number;
   avgCarry: number;
   avgBankHp: number;
   sorties: number;
@@ -188,6 +191,8 @@ export function runOne(
     graces: m.graces,
     levels: { ...g.player.levels },
     carryBanked: Math.round(m.carryBanked),
+    shedHeat: Math.round(m.shedHeat),
+    shieldAbsorbed: Math.round(m.shieldAbsorbed),
     avgCarry: m.banks ? m.sumCarry / m.banks : 0,
     avgBankHp: m.banks ? m.sumBankHpFrac / m.banks : 0,
     sorties: g.sortieLens.length,
@@ -232,6 +237,8 @@ function summarize(rs: RunResult[]) {
     graces: +mean(rs.map((r) => r.graces)).toFixed(2),
     levels: { blade: lv('blade'), armor: lv('armor'), mend: lv('mend'), vitality: lv('vitality') },
     carryBanked: +mean(rs.map((r) => r.carryBanked)).toFixed(1),
+    shedHeat: +mean(rs.map((r) => r.shedHeat)).toFixed(1),
+    shieldAbsorbed: +mean(rs.map((r) => r.shieldAbsorbed)).toFixed(1),
     avgCarry: +mean(rs.map((r) => r.avgCarry)).toFixed(1),
     avgBankHp: +mean(rs.map((r) => r.avgBankHp)).toFixed(2),
     sorties: +mean(rs.map((r) => r.sorties)).toFixed(1),
@@ -255,9 +262,10 @@ function roundRobin(all: Record<string, RunResult[]>, names: string[]) {
 
 const CONDS: { label: string; delay: number; mode: 'sum' | 'reset' }[] = [
   { label: 'd0', delay: 0, mode: 'reset' },
+  // v2: v1の#6（戦闘ではsumとresetがほぼ同じ）で 6s-sum を外し、遅延1秒を足した
+  { label: '1s-reset', delay: 10, mode: 'reset' },
   { label: '3s-sum', delay: 30, mode: 'sum' },
   { label: '3s-reset', delay: 30, mode: 'reset' },
-  { label: '6s-sum', delay: 60, mode: 'sum' },
   { label: '6s-reset', delay: 60, mode: 'reset' },
 ];
 
@@ -310,6 +318,7 @@ if (isMain) {
           carry: sm.avgCarry,
           bankHp: sm.avgBankHp,
           carryBanked: Math.round(sm.carryBanked),
+          shed: sm.shedHeat,
           sorties: sm.sorties,
           medSec: sm.medSortieSec,
           short: sm.shortShare,
@@ -348,13 +357,21 @@ if (isMain) {
   } else if (args.includes('--sweepHp')) {
     // 033: 帰るHPの線（bankHpFrac）の掃引。遅延0と3秒resetで、戦略ごとの平均scoreを1行JSONで出す（最良線の罰はスクリプトで集計）
     const Hs = (opt('--Hs') ?? '0.2,0.3,0.4,0.5,0.6,0.7').split(',').map(Number);
-    const conds = CONDS.filter((c) => (opt('--conds') ?? 'd0,3s-reset').split(',').includes(c.label));
+    const conds = CONDS.filter((c) => (opt('--conds') ?? 'd0,3s-reset,6s-reset').split(',').includes(c.label));
     const rows = [];
     for (const c of conds)
       for (const base of personas)
         for (const H of Hs) {
           const rs = seedList.map((sd) => runOne({ ...base, bankHpFrac: H }, sd, tune, c.delay, c.mode));
-          rows.push({ cond: c.label, name: base.name, H, score: Math.round(mean(rs.map((r) => r.score))), downs: +mean(rs.map((r) => r.downs)).toFixed(2) });
+          rows.push({
+            cond: c.label,
+            name: base.name,
+            H,
+            score: Math.round(mean(rs.map((r) => r.score))),
+            downs: +mean(rs.map((r) => r.downs)).toFixed(2),
+            // v2: 最良線どうしの総当たり用にシードごとのscoreも出す
+            scores: rs.map((r) => r.score),
+          });
         }
     console.log(JSON.stringify({ sweepHp: true, seeds, start, tune, rows }));
   } else if (args.includes('--bestPairs')) {

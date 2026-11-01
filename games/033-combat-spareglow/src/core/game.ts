@@ -75,7 +75,8 @@ export const TUNE = {
    * 奉納か救助で再び使えるようになる。v2の新規重大#1（迷いの罰が崖、遅延3秒で−79%）への対応。graceTicks=0で無効
    */
   graceFrac: 0.3,
-  graceTicks: 30,
+  /** 033 v2: 30→60（熱の盾と組で、迷いの6秒まで支える） */
+  graceTicks: 60,
   graceDmgMult: 0.5,
   graceKnockRadius: 2.5,
   graceKnockDist: 2.5,
@@ -101,6 +102,14 @@ export const TUNE = {
    */
   carryFrac: 0.8,
   carryFloor: 0.2,
+  /**
+   * 033 v2: 熱の盾（v1重大#1 迷いの崖への対応）。踏ん張りの発動の瞬間に熱の graceShed 割を捨て、
+   * 捨てた熱1につき graceShield のHPを吸う盾に換える（盾は奉納・救助まで残る）。
+   * 熱が下がるので被ダメージ倍率も下がる（凸なので熱70→35で 3.4倍→1.6倍）。代わりに帰り道の撃破の報酬と余熱は減る。
+   * 迷って帰り損ねた人の保険にするが、早めに帰る人（HP3割より上で帰る）は発動しないので遅延0の強さは変わりにくい。graceShed=0で無効
+   */
+  graceShed: 0.5,
+  graceShield: 0.5,
 };
 
 export type Tune = typeof TUNE;
@@ -152,6 +161,8 @@ function emptyMetrics(): Metrics {
     carryBanked: 0,
     sumCarry: 0,
     sumBankHpFrac: 0,
+    shedHeat: 0,
+    shieldAbsorbed: 0,
   };
 }
 
@@ -200,6 +211,7 @@ export class Game {
       sortieHeat: 0,
       carryLeft: 0,
       poolCarry: 0,
+      shield: 0,
     };
   }
 
@@ -400,6 +412,7 @@ export class Game {
     p.hp = p.maxHp;
     p.graceReady = true;
     p.grace = 0;
+    p.shield = 0;
     this.endSortie();
   }
 
@@ -415,6 +428,15 @@ export class Game {
     p.graceReady = false;
     p.grace = t.graceTicks;
     this.metrics.graces++;
+    // 033 v2: 熱の盾。熱を捨てて盾に換える（余熱の見込みも下がる）
+    if (t.graceShed > 0 && p.heat > 0) {
+      const shed = p.heat * t.graceShed;
+      p.heat -= shed;
+      if (p.carryLeft > p.heat) p.carryLeft = p.heat;
+      p.shield += shed * t.graceShield;
+      this.metrics.shedHeat += shed;
+      this.floats.push({ x: p.x, y: p.y - 1.1, text: `熱−${shed.toFixed(0)}→盾${(shed * t.graceShield).toFixed(0)}`, color: '#9be7ff', ttl: 20 });
+    }
     for (const e of this.enemies) {
       const dx = e.x - p.x;
       const dy = e.y - p.y;
@@ -455,6 +477,7 @@ export class Game {
     p.hp = p.maxHp;
     p.graceReady = true;
     p.grace = 0;
+    p.shield = 0;
     this.endSortie();
     p.x = 0;
     p.y = 0;
@@ -488,7 +511,13 @@ export class Game {
       if (d <= def.reach && e.cd === 0) {
         e.cd = def.cd;
         if (p.iframes === 0) {
-          const dmg = def.dmg * dmgScale * (p.grace > 0 ? t.graceDmgMult : 1);
+          let dmg = def.dmg * dmgScale * (p.grace > 0 ? t.graceDmgMult : 1);
+          if (p.shield > 0) {
+            const absorbed = Math.min(p.shield, dmg);
+            p.shield -= absorbed;
+            dmg -= absorbed;
+            this.metrics.shieldAbsorbed += absorbed;
+          }
           p.hp -= dmg;
           this.metrics.damageTaken += dmg;
           this.hitThisTick = true;
