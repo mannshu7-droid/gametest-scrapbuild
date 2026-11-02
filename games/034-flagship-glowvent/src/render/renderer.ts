@@ -375,7 +375,7 @@ export class Renderer {
         // 3回目: 無傷の帰還（HPが境目以上で積荷を入れるとscore+N。034では既定で無効、`?preset=032`で戻る）
         (p.cargoValue > 0 && p.soundHpAt > 0 ? (p.soundNow > 0 ? ` 今帰れば無傷+${p.soundNow}点` : ` (HP${p.soundHpAt}↑なら無傷)`) : '') +
         // 034: 余熱。拠点の外では「今帰れば次の遠征は揺れNから」、拠点の中では覚えている余熱。揺れの盾があれば量
-        (TUNE.carryFrac > 0 ? (p.estTremorAtReturn === null ? (p.glow >= 1 ? ` 余熱: 次は揺れ${Math.round(p.glow)}から` : '') : ` 今帰れば次は揺れ${p.glowPreview}から`) : '') +
+        (TUNE.carryFrac > 0 ? (p.estTremorAtReturn === null ? (p.glow >= 1 ? ` 余熱: 次は揺れ${Math.round(p.glow)}から` : '') : ` 今帰れば次は揺れ${p.glowPreview}から${p.glowSpare < 1 ? `（冷め${Math.round((1 - p.glowSpare) * 100)}%）` : ''}`) : '') +
         (p.shield > 0 ? ` 盾${Math.round(p.shield)}` : '') +
         `  被ダメ×${p.dmgMult.toFixed(1)}  ` +
         // 032: 帰還の宣言の後は「帰るだけ」を最優先で出す

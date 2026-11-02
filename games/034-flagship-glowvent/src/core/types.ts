@@ -532,6 +532,8 @@ export interface GameState {
     /** 034新規: 覚えている余熱（次の昼の遠征の揺れの初期値）・今帰れば覚える余熱・この遠征の始まりの揺れ・揺れの盾 */
     glow: number;
     glowPreview: number;
+    /** 034 3回目: 今帰った時の余熱の余力（0〜1。既定では遠征の長さで決まる＝15秒を過ぎると冷め始める） */
+    glowSpare: number;
     carryStart: number;
     shield: number;
     propWork: { x: number; progress: number; total: number } | null;
