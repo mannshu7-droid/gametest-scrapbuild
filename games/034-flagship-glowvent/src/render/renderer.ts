@@ -433,6 +433,17 @@ export class Renderer {
     ctx.fillStyle = '#777';
     this.fitText('1攻 2機 3耐 4ドリル 5支保 6速 7灯 8耐危 9積 0転送 Q防 Eスキャン Cチャージ V鑑定 F防具 P砲 B柵 O前哨 H積む G梁 K支柱 (止まる=休む)', 6, hudY + 144, W - 12, 10);
 
+    // 2回目（v1中#5）: 拠点の中では余熱を画面の上に大きく出す（次の遠征の始まりの揺れ）
+    if (!s.over && TUNE.carryFrac > 0 && p.estTremorAtReturn === null && p.glow >= 1) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(0, fieldTop + 4, W, 30);
+      ctx.fillStyle = '#ff9f40';
+      ctx.font = 'bold 20px monospace';
+      ctx.fillText(`余熱 ${Math.round(p.glow)}`, 10, fieldTop + 26);
+      ctx.fillStyle = '#ffd2a6';
+      this.fitText(`次の遠征は揺れ${Math.round(p.glow)}から（売値+${Math.round(p.glow)}%・割れ目にも）`, 120, fieldTop + 24, W - 130, 13);
+    }
+
     if (s.over) {
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(0, fieldTop, VIEW_W * TILE_PX, viewH);
