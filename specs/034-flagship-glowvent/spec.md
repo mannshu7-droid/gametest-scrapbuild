@@ -1,7 +1,7 @@
 # 仕様書: 034-flagship-glowvent（グロウベント — 余熱を持ち帰る揺れの遠征）
 
 - 作成日: 2026-11-02
-- ステータス: v0.3.0（サイクル40・3回目 FIX only。[v1レビュー](../../reviews/034-flagship-glowvent-v1.md)・[v2レビュー](../../reviews/034-flagship-glowvent-v2.md)）
+- ステータス: v0.3.0（サイクル40完了。[v1レビュー](../../reviews/034-flagship-glowvent-v1.md)・[v2レビュー](../../reviews/034-flagship-glowvent-v2.md)・[finalレビュー](../../reviews/034-flagship-glowvent-final.md)、判定FIX）
 - 元になったレビュー: [reviews/033-combat-spareglow-final.md](../../reviews/033-combat-spareglow-final.md)（提案(1)「032に余熱・熱の盾・癒しは盾へを入れる本命統合」）
 - 土台: [032-flagship-propvent](../032-flagship-propvent/spec.md) v0.3.0（揺れのダイヤル・救助・踏ん張り・塔と梁・割れ目・支柱・休み＝帰還の宣言）をそのままフォークし、
   **無傷の帰還（score+1.5）を外して**、033の3つの規則を揺れへ翻訳して足す
