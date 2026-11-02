@@ -322,6 +322,25 @@ export const TUNE = {
   glowBonusMult: 1,
   /** 034 2回目: >0なら余熱を揺れに依らず glowHp×余力 にする（HPを残して帰ったこと自体を持ち越す）。0ならv1（揺れ×carryFrac×余力） */
   glowHp: 0,
+  /**
+   * 034 3回目（v2重大#2）: 0なら塔の下の懸賞（killBonus）には持ち越した分（余熱で始めた揺れのうちまだ残っている分）の揺れボーナスを乗せない
+   * （懸賞の倍率は tremorBonusOf(揺れ)−tremorBonusOf(残っている余熱)）。1でv2（揺れ全体で倍率）
+   */
+  towerGlow: 1,
+  /**
+   * 034 3回目（v2重大#1）: >0なら余熱の余力をHPでなく遠征の短さで測る。余力＝clamp(1−この遠征で注意線の外で粘ったtick数/glowLinger, 0, 1)
+   * （帰着線が注意線に届く前に帰れば1）。0ならv2（HPの余力）
+   */
+  glowLinger: 0,
+  /**
+   * 034 3回目（v2重大#1、もう1つの測り方）: >0なら余力＝clamp(glowTripLen/この遠征の長さ（拠点を出てからのtick数）, 0, 1)。
+   * glowTripLenより短い遠征は余力1、長いほど小さい。glowLingerより優先。0ならv2（HPの余力）。
+   * 3回目の既定150（15秒）: 80シード×2組×遅延0/reset 3秒で、reset 3秒の平均の罰 −3.0｜−2.7｜−2.6｜−3.1% → −2.1｜−1.6｜+0.1｜−1.3%、
+   * pusherの罰が縮み、spireAllの遅延0の全勝が81〜160で崩れる（8｜6→5｜6）。p02は1勝のまま（救済にはならない）
+   */
+  glowTripLen: 150,
+  /** 034 3回目（v2中#3）: 1なら割れ目への余熱（riftGlow）は余熱で始めた遠征の最初の割れ目だけ。0でv2（残っている間ずっと） */
+  riftGlowFirst: 0,
   /** 3回目（v2中#5、spireAllの全勝の切り分け）: 1なら支えの下の割れ目の床は塔のパトロール圏の外だけ。0ならv2（どこでも） */
   propFloorOutside: 0,
 };
@@ -945,6 +964,8 @@ interface PlayerState {
   glowBonus: number;
   /** 2回目: この遠征を始めた時の余熱（鉱石なしの出入りで覚えたままにする分。carryStartはglowMode=1では0なので分けた） */
   glowKeep: number;
+  /** 3回目（riftGlowFirst）: この遠征で余熱を割れ目に乗せたか */
+  riftGlowUsed: boolean;
   shield: number;
   gritThisTrip: boolean;
 }
@@ -1254,6 +1275,7 @@ export class Game {
       carryLeft: 0,
       glowBonus: 0,
       glowKeep: 0,
+      riftGlowUsed: false,
       shield: 0,
       gritThisTrip: false,
     };
@@ -1567,7 +1589,8 @@ export class Game {
     const p = this.player;
     let value = r ? r.value : this.riftValueAt(x);
     // 2回目: 持ち越した分の揺れボーナスを割れ目にも
-    if ((TUNE.riftGlow > 0 && p.carryLeft > 0 && p.tremor > 0) || this.glowUp() > 0) {
+    if ((TUNE.riftGlow > 0 && p.carryLeft > 0 && p.tremor > 0 && !(TUNE.riftGlowFirst > 0 && p.riftGlowUsed)) || this.glowUp() > 0) {
+      p.riftGlowUsed = true;
       const up = TUNE.glowMode > 0 ? value * this.glowUp() : value * tremorBonusOf(Math.min(p.carryLeft, p.tremor)) * TUNE.riftGlow;
       if (p.cargoUnits < this.maxCapacity()) this.metrics.carryEarned += up;
       value = Math.round(value + up);
@@ -1654,6 +1677,16 @@ export class Game {
   }
   /** 今受ける被ダメージの倍率。拠点の中は揺れ0なので防具だけ */
   /** 034: 今拠点に入れば次の昼の遠征が何の揺れから始まるか（拠点の中なら覚えている余熱） */
+  /** 余熱の余力（0〜1）。v2はHPの余力、3回目のglowLinger>0では遠征の短さ（注意線の外で粘ったtick数） */
+  private glowSpare(): number {
+    if (TUNE.glowTripLen > 0) {
+      const len = this.tripStartTick >= 0 ? this.tick - this.tripStartTick : 0;
+      return len <= TUNE.glowTripLen ? 1 : TUNE.glowTripLen / len;
+    }
+    if (TUNE.glowLinger > 0) return Math.min(1, Math.max(0, 1 - this.tripOverLine / TUNE.glowLinger));
+    const p = this.player;
+    return Math.min(1, Math.max(0, (p.hp / this.maxHp() - TUNE.carryFloor) / (1 - TUNE.carryFloor)));
+  }
   private glowAmount(t: number, spare: number): number {
     if (TUNE.glowHp > 0) return TUNE.glowHp * spare;
     return (TUNE.glowCap > 0 ? Math.min(t, TUNE.glowCap) : t) * TUNE.carryFrac * spare;
@@ -1666,8 +1699,7 @@ export class Game {
     const p = this.player;
     if (TUNE.carryFrac <= 0) return 0;
     if (this.inBaseRadius(p.x)) return Math.round(p.glow);
-    const spare = Math.min(1, Math.max(0, (p.hp / this.maxHp() - TUNE.carryFloor) / (1 - TUNE.carryFloor)));
-    return Math.round(this.glowAmount(p.tremor, spare));
+    return Math.round(this.glowAmount(p.tremor, this.glowSpare()));
   }
   private dmgMult(): number {
     const p = this.player;
@@ -1797,6 +1829,7 @@ export class Game {
     p.glow = 0;
     p.carryStart = 0;
     p.carryLeft = 0;
+    p.riftGlowUsed = false;
     p.shield = 0;
     p.glowBonus = 0;
     p.glowKeep = 0;
@@ -2807,8 +2840,11 @@ export class Game {
     let reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
     // v2（重大#2）: 揺れが高い所で倒した敵は報酬が高い（鉱石の売値と同じボーナス）。拠点圏内は揺れ0なので乗らない
     if (this.resource === 'tremor' && TUNE.killBonus > 0 && this.player.tremor > 0 && (TUNE.killBonusTower <= 0 || this.underWatch())) {
-      const v = Math.round(reward * (1 + tremorBonusOf(this.player.tremor) + this.glowUp()));
-      this.metrics.carryEarned += reward * (TUNE.glowMode > 0 ? this.glowUp() : tremorBonusOf(Math.min(this.player.carryLeft, this.player.tremor)));
+      // 3回目（v2重大#2）: towerGlow=0なら持ち越した分の揺れボーナスを懸賞から外す
+      const carried = TUNE.glowMode > 0 ? this.glowUp() : tremorBonusOf(Math.min(this.player.carryLeft, this.player.tremor));
+      const off = TUNE.towerGlow > 0 ? 0 : carried;
+      const v = Math.round(reward * (1 + tremorBonusOf(this.player.tremor) + this.glowUp() - off));
+      this.metrics.carryEarned += reward * (carried - off);
       this.metrics.killBonusValue += v - reward;
       this.metrics.tremorBonusValue += v - reward;
       reward = v;
@@ -3488,7 +3524,7 @@ export class Game {
     // 034: 余熱。入った瞬間（回復の前）のHPの余力×直前の揺れを覚え、次の昼の遠征の揺れの初期値にする
     if (inBase && !this.wasInBase) {
       const p = this.player;
-      const spare = Math.min(1, Math.max(0, (p.hp / this.maxHp() - TUNE.carryFloor) / (1 - TUNE.carryFloor)));
+      const spare = this.glowSpare();
       // 鉱石を持ち帰った時だけ余熱が入れ替わる。鉱石なし（拠点の縁での戦い・懸賞だけ）の出入りでは、出る前の余熱を覚えたまま（大きい方）
       const fresh = TUNE.carryFrac > 0 ? this.glowAmount(this.lastFieldTremor, spare) : 0;
       const expedition = p.cargoUnits > 0;
@@ -3497,6 +3533,7 @@ export class Game {
       p.shield = 0;
       p.gritThisTrip = false;
       p.carryLeft = 0;
+      p.riftGlowUsed = false;
       p.glowBonus = 0;
       if (this.tripStartTick >= 0 && expedition) {
         const len = this.tick - this.tripStartTick;
@@ -3518,6 +3555,7 @@ export class Game {
         p.carryStart = TUNE.glowMode > 0 ? 0 : p.glow;
         p.glowKeep = p.glow;
         p.carryLeft = p.glow;
+        p.riftGlowUsed = false;
         this.metrics.carryStarts++;
         this.metrics.carryStartSum += p.glow;
         p.glow = 0;
@@ -3797,6 +3835,7 @@ export class Game {
         soundHpAt: TUNE.soundScore > 0 ? Math.ceil(this.maxHp() * TUNE.soundHp) : 0,
         glow: Math.round(p.glow * 10) / 10,
         glowPreview: this.glowPreview(),
+        glowSpare: Math.round(this.glowSpare() * 100) / 100,
         carryStart: Math.round(p.carryStart * 10) / 10,
         shield: Math.round(p.shield * 10) / 10,
         propWork: this.propWork ? { ...this.propWork } : null,
