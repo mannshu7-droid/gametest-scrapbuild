@@ -299,11 +299,29 @@ export const TUNE = {
   /**
    * 揺れの盾（033の熱の盾）: 踏ん張りの発動の瞬間に揺れのgritShed割を捨て、捨てた揺れ1につきgritShieldのHPを吸う盾に換える
    * （盾は拠点に入るか救助まで残る）。揺れが下がるので凸の被ダメージ・落盤も下がり、余熱と揺れボーナスは減る。0で無効（032の踏ん張りのまま）
+   * 2回目（v1重大#2）: 既定で外した（v1は0.5・0.5・mendShield 1）。慎重な型の吸収は1ランに0〜4で、HPの割合で作る盾（shieldHp 0.15）もp01・pusherだけが使い罰を縮めなかった
    */
-  gritShed: 0.5,
+  gritShed: 0,
   gritShield: 0.5,
   /** 癒しは盾へ（033 v3）: その遠征で踏ん張りを使った後は、拠点の外の自然回復をHPでなく盾に足す（×mendShield）。0で無効 */
-  mendShield: 1,
+  mendShield: 0,
+  /**
+   * 034 2回目（v1重大#1(a)）: 割れ目の売値にも、持ち越した分（余熱で始めた揺れのうちまだ残っている分）の揺れボーナスを×riftGlowで乗せる。
+   * 割れ目は稼ぎの3割で、v1の余熱は鉱石と塔の下の懸賞にしか乗らず上乗せが稼ぎの2%だった。既定1（v2）、0でv1
+   */
+  riftGlow: 1,
+  /** 034 2回目（v1重大#2）: 揺れの盾を最大HPの割合で作る（踏ん張りの発動で最大HP×shieldHpの盾）。0ならv1（捨てた揺れ×gritShield） */
+  shieldHp: 0,
+  /** 034 2回目（v1中#3）: 余熱に使う揺れの上限。迷って注意線を越えて帰った分は持ち越さない。0で上限なし（v1） */
+  glowCap: 0,
+  /**
+   * 034 2回目（v1重大#1、構造の案）: 1なら余熱は揺れを上げず、次の遠征の報酬（鉱石・懸賞・割れ目）すべてに
+   * tremorBonusOf(余熱)×glowBonusMult の上乗せとして掛かる（倍率だけを持ち越し、危険は持ち越さない＝033の熱に近い）。0ならv1（揺れの初期値）
+   */
+  glowMode: 0,
+  glowBonusMult: 1,
+  /** 034 2回目: >0なら余熱を揺れに依らず glowHp×余力 にする（HPを残して帰ったこと自体を持ち越す）。0ならv1（揺れ×carryFrac×余力） */
+  glowHp: 0,
   /** 3回目（v2中#5、spireAllの全勝の切り分け）: 1なら支えの下の割れ目の床は塔のパトロール圏の外だけ。0ならv2（どこでも） */
   propFloorOutside: 0,
 };
@@ -923,6 +941,10 @@ interface PlayerState {
   glow: number;
   carryStart: number;
   carryLeft: number;
+  /** 2回目（glowMode=1）: この遠征の報酬に上乗せする割合 */
+  glowBonus: number;
+  /** 2回目: この遠征を始めた時の余熱（鉱石なしの出入りで覚えたままにする分。carryStartはglowMode=1では0なので分けた） */
+  glowKeep: number;
   shield: number;
   gritThisTrip: boolean;
 }
@@ -1230,6 +1252,8 @@ export class Game {
       glow: 0,
       carryStart: 0,
       carryLeft: 0,
+      glowBonus: 0,
+      glowKeep: 0,
       shield: 0,
       gritThisTrip: false,
     };
@@ -1541,7 +1565,13 @@ export class Game {
     this.tiles[i] = TILE.FLOOR;
     this.rifts = this.rifts.filter((q) => q !== r);
     const p = this.player;
-    const value = r ? r.value : this.riftValueAt(x);
+    let value = r ? r.value : this.riftValueAt(x);
+    // 2回目: 持ち越した分の揺れボーナスを割れ目にも
+    if ((TUNE.riftGlow > 0 && p.carryLeft > 0 && p.tremor > 0) || this.glowUp() > 0) {
+      const up = TUNE.glowMode > 0 ? value * this.glowUp() : value * tremorBonusOf(Math.min(p.carryLeft, p.tremor)) * TUNE.riftGlow;
+      if (p.cargoUnits < this.maxCapacity()) this.metrics.carryEarned += up;
+      value = Math.round(value + up);
+    }
     if (p.cargoUnits < this.maxCapacity()) {
       p.cargoUnits++;
       p.cargoValue += value;
@@ -1624,12 +1654,20 @@ export class Game {
   }
   /** 今受ける被ダメージの倍率。拠点の中は揺れ0なので防具だけ */
   /** 034: 今拠点に入れば次の昼の遠征が何の揺れから始まるか（拠点の中なら覚えている余熱） */
+  private glowAmount(t: number, spare: number): number {
+    if (TUNE.glowHp > 0) return TUNE.glowHp * spare;
+    return (TUNE.glowCap > 0 ? Math.min(t, TUNE.glowCap) : t) * TUNE.carryFrac * spare;
+  }
+  /** 2回目（glowMode=1）: 今の報酬に上乗せする割合 */
+  private glowUp(): number {
+    return TUNE.glowMode > 0 ? this.player.glowBonus : 0;
+  }
   private glowPreview(): number {
     const p = this.player;
     if (TUNE.carryFrac <= 0) return 0;
     if (this.inBaseRadius(p.x)) return Math.round(p.glow);
     const spare = Math.min(1, Math.max(0, (p.hp / this.maxHp() - TUNE.carryFloor) / (1 - TUNE.carryFloor)));
-    return Math.round(p.tremor * TUNE.carryFrac * spare);
+    return Math.round(this.glowAmount(p.tremor, spare));
   }
   private dmgMult(): number {
     const p = this.player;
@@ -1678,9 +1716,10 @@ export class Game {
         const shed = p.tremor * TUNE.gritShed;
         p.tremor -= shed;
         if (p.carryLeft > p.tremor) p.carryLeft = p.tremor;
-        p.shield += shed * TUNE.gritShield;
+        const sh = TUNE.shieldHp > 0 ? this.maxHp() * TUNE.shieldHp : shed * TUNE.gritShield;
+        p.shield += sh;
         this.metrics.shedTremor += shed;
-        this.metrics.shieldGained += shed * TUNE.gritShield;
+        this.metrics.shieldGained += sh;
       }
       // 押し返し: 周りの敵を2マス下がらせ、攻撃を少し遅らせる
       for (const e of this.enemies) {
@@ -1759,6 +1798,8 @@ export class Game {
     p.carryStart = 0;
     p.carryLeft = 0;
     p.shield = 0;
+    p.glowBonus = 0;
+    p.glowKeep = 0;
     p.gritThisTrip = false;
     this.tripStartTick = -1;
     p.hp = this.maxHp();
@@ -2766,8 +2807,8 @@ export class Game {
     let reward = e.lured ? Math.round(ENEMY_DEFS[e.type].value * LURED_REWARD_MULT) : ENEMY_DEFS[e.type].value;
     // v2（重大#2）: 揺れが高い所で倒した敵は報酬が高い（鉱石の売値と同じボーナス）。拠点圏内は揺れ0なので乗らない
     if (this.resource === 'tremor' && TUNE.killBonus > 0 && this.player.tremor > 0 && (TUNE.killBonusTower <= 0 || this.underWatch())) {
-      const v = Math.round(reward * (1 + tremorBonusOf(this.player.tremor)));
-      this.metrics.carryEarned += reward * tremorBonusOf(Math.min(this.player.carryLeft, this.player.tremor));
+      const v = Math.round(reward * (1 + tremorBonusOf(this.player.tremor) + this.glowUp()));
+      this.metrics.carryEarned += reward * (TUNE.glowMode > 0 ? this.glowUp() : tremorBonusOf(Math.min(this.player.carryLeft, this.player.tremor)));
       this.metrics.killBonusValue += v - reward;
       this.metrics.tremorBonusValue += v - reward;
       reward = v;
@@ -3050,8 +3091,8 @@ export class Game {
         const base = oreValue(type, band);
         if (this.resource === 'tremor') {
           // 026新規: 掘った瞬間の揺れで売値が上がる（最大+60%）
-          const v = Math.round(base * (1 + tremorBonusOf(this.player.tremor)));
-          this.metrics.carryEarned += base * tremorBonusOf(Math.min(this.player.carryLeft, this.player.tremor));
+          const v = Math.round(base * (1 + tremorBonusOf(this.player.tremor) + this.glowUp()));
+          this.metrics.carryEarned += base * (TUNE.glowMode > 0 ? this.glowUp() : tremorBonusOf(Math.min(this.player.carryLeft, this.player.tremor)));
           this.metrics.tremorBonusValue += v - base;
           this.player.cargoValue += v;
         } else {
@@ -3449,13 +3490,14 @@ export class Game {
       const p = this.player;
       const spare = Math.min(1, Math.max(0, (p.hp / this.maxHp() - TUNE.carryFloor) / (1 - TUNE.carryFloor)));
       // 鉱石を持ち帰った時だけ余熱が入れ替わる。鉱石なし（拠点の縁での戦い・懸賞だけ）の出入りでは、出る前の余熱を覚えたまま（大きい方）
-      const fresh = TUNE.carryFrac > 0 ? this.lastFieldTremor * TUNE.carryFrac * spare : 0;
+      const fresh = TUNE.carryFrac > 0 ? this.glowAmount(this.lastFieldTremor, spare) : 0;
       const expedition = p.cargoUnits > 0;
-      p.glow = expedition ? fresh : Math.max(fresh, p.carryStart);
+      p.glow = expedition ? fresh : Math.max(fresh, p.glowKeep);
       if (expedition && p.glow > 0) this.metrics.glowSet++;
       p.shield = 0;
       p.gritThisTrip = false;
       p.carryLeft = 0;
+      p.glowBonus = 0;
       if (this.tripStartTick >= 0 && expedition) {
         const len = this.tick - this.tripStartTick;
         this.metrics.tripLenSum += len;
@@ -3463,14 +3505,18 @@ export class Game {
       }
       this.tripStartTick = -1;
       p.carryStart = 0;
+      p.glowKeep = 0;
     }
     if (!inBase && this.wasInBase) {
       const p = this.player;
       if (this.tripStartTick < 0) this.tripStartTick = this.tick;
       p.carryStart = 0;
       if (this.phase === 'day' && p.glow > 0) {
-        p.tremor = Math.max(p.tremor, p.glow);
-        p.carryStart = p.glow;
+        if (TUNE.glowMode > 0) p.glowBonus = tremorBonusOf(p.glow) * TUNE.glowBonusMult;
+        else p.tremor = Math.max(p.tremor, p.glow);
+        // glowMode=1では揺れは0から始まるので、始まりの揺れ（帰還線の基準・ゲージの細線）は0のまま
+        p.carryStart = TUNE.glowMode > 0 ? 0 : p.glow;
+        p.glowKeep = p.glow;
         p.carryLeft = p.glow;
         this.metrics.carryStarts++;
         this.metrics.carryStartSum += p.glow;
