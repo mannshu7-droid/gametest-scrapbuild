@@ -10,6 +10,11 @@
  * - P02は帰るHP（hpRet、最大HPの割合）でも帰る。--sweepHp a,b,c で P02 の帰るHPを、--sweepP02 a,b,c で P02 の帰還閾値を掃引する
  * - RunResult に固めの指標（作った・崩れた・その上のtick・抑えた揺れ）と遠征の平均tickを足した
  *
+ * 035 v0.2.0（v1レビュー重大#1・#2）:
+ * - 走る（固めた坑道の上はdash付きで1tickに2マス）と固めの上限（揺れpackCap未満の間だけ効く）。ボットは計画の次の2マスが同じ向きの固めた坑道なら走り、
+ *   地上へ上る巻き上げは走る。見積もりは固めた坑道の1歩を時間・揺れとも0.5、上限を越える所から先は固めなしの帰り道（capRet）
+ * - --preset t1: v0.1.0の固め（4回・×0.2・上限なし・走れない）。RunResult に glides（走った回数）
+ *
  * 029新規（riftseam）:
  * - 割れ目の鉱脈（揺れが注意線45を越えている間だけ開き、数秒で閉じる）を追う戦略と、対照群 line（割れ目を無視して
  *   自分の山で帰る）を並べる。割れ目を追う戦略は、割れ目に限って帰還閾値を riftSlack だけ越えて取りに行く
@@ -44,7 +49,7 @@
  * 地上ではなく足場へ戻って休み、揺れが下がったら掘りに戻る。--noScaffold で足場を買わない対照群になる
  * --seeds は 1,2,3 と 1..40 の両方の書き方を受け付ける
  */
-import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1, RULES_V2, RULES_029 } from '../src/core/game';
+import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1, RULES_V2, RULES_029, RULES_T1 } from '../src/core/game';
 import { TILE, type Action, type Dir, type GameState, type UpgradeId } from '../src/core/types';
 
 interface BotConfig {
@@ -202,9 +207,27 @@ export class Bot {
     const pk = p.packSteps;
     const pm = new Float64Array(n).fill(1);
     if (pk > 0) for (let i = WIDTH; i < n; i++) if (s.map.trod[i] >= pk) pm[i] = p.packRate;
-    const retFloor = this.returnField(s, pm, brace, winch);
+    // v0.2.0: 固めた一本道（滑れるマス）は時間も揺れも半分で見積もる
+    const gl = this.glideField(s);
+    const retFloor = this.returnField(s, pm, brace, winch, gl);
     const retAt = new Float64Array(n).fill(Infinity);
     retAt[start] = retFloor[start];
+    // v0.2.0: 固めが揺れpackCapまでしか効かないなら、固めなしの帰り道も並べて混ぜる
+    const cap = p.packCap;
+    const raw = cap > 0 && pk > 0 ? this.returnField(s, new Float64Array(n).fill(1), brace, winch, new Float64Array(n).fill(1)) : retFloor;
+    const rawAt = cap > 0 && pk > 0 ? new Float64Array(n).fill(Infinity) : retAt;
+    rawAt[start] = raw[start];
+    const capRet = (t0: number, i: number, cy: number): number => {
+      const rp = this.retOf(retAt[i], cy, brace, winch, s);
+      if (raw === retFloor) return rp;
+      const rr = this.retOf(rawAt[i], cy, brace, winch, s);
+      if (t0 >= cap) return rr;
+      if (t0 + rp <= cap || rp <= 0) return rp;
+      // 線まで固めの見積もりで歩き、残りの道のりを固めなしの揺れで見積もる
+      const f = (cap - t0) / rp;
+      return cap - t0 + rr * (1 - f);
+    };
+    const on = (i: number, t: number) => pm[i] < 1 && !(cap > 0 && t >= cap);
     const full = p.cargoUnits >= p.maxCapacity;
     let best = -1;
     let bestScore = 0;
@@ -220,7 +243,7 @@ export class Bot {
       const rift = t === TILE.RIFT && this.cfg.rifts ? riftAt.get(cur) : undefined;
       if (rift && cur !== start && !full && d + 1 < rift.closesAt - s.tick) {
         const projT = tr[cur];
-        let ret = this.retOf(retAt[cur], cy, brace, winch, s);
+        let ret = capRet(projT, cur, cy);
         if (p.hasCore) ret *= CORE_TREMOR_MULT;
         if (projT + ret < this.tRet + this.cfg.riftSlack + extra) {
           const score = rift.value / (d + 4);
@@ -234,7 +257,7 @@ export class Bot {
         // 着くまでにたまる揺れ（掘削中は1.5倍で近似）＋そこから帰る揺れが閾値内か
         const projT = tr[cur];
         // 帰り道は地上か、鉱石より浅い足場（そこで休めば揺れが下がる）の近い方
-        let ret = this.retOf(retAt[cur], cy, brace, winch, s);
+        let ret = capRet(projT, cur, cy);
         // v0.3.0: 核石を抱えた帰り道は揺れがCORE_TREMOR_MULT倍でたまる
         if (t === TILE.CORE) ret *= CORE_TREMOR_MULT;
         if (projT + ret < this.tRet + extra) {
@@ -256,13 +279,19 @@ export class Bot {
         if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= DEPTH) continue;
         const ni = ny * WIDTH + nx;
         const nt = s.map.tiles[ni];
-        const c = nt === TILE.FLOOR ? 1 : digTicks(nt, ny, p.drillPower);
+        const c = nt === TILE.FLOOR ? (on(ni, tr[cur]) ? gl[ni] : 1) : digTicks(nt, ny, p.drillPower);
         const nd = d + c;
         if (nd < dist[ni]) {
           dist[ni] = nd;
-          tr[ni] = isSc[ni] ? 0 : tr[cur] + tremorRate(ny, brace) * (nt === TILE.FLOOR ? pm[ni] : c * 1.5);
+          // v0.2.0: 固めた坑道から掘る間は×packDig、揺れがpackCap以上なら固めは効かない
+          tr[ni] = isSc[ni]
+            ? 0
+            : tr[cur] +
+              tremorRate(ny, brace) *
+                (nt === TILE.FLOOR ? (on(ni, tr[cur]) ? pm[ni] * gl[ni] : 1) : c * 1.5 * (on(cur, tr[cur]) ? p.packDig : 1));
           // 帰り道: 床なら床の場、掘って進んだマスは来た道（cur）へ1歩戻ってからcurの帰り道
           retAt[ni] = nt === TILE.FLOOR ? retFloor[ni] : retAt[cur] + tremorRate(cy, brace) * pm[cur];
+          if (rawAt !== retAt) rawAt[ni] = nt === TILE.FLOOR ? raw[ni] : rawAt[cur] + tremorRate(cy, brace);
           prev[ni] = cur;
           heap.push(ni, nd);
         }
@@ -277,7 +306,7 @@ export class Bot {
 
   /** 035: 床だけを通って地上（または足場）へ帰るときにたまる揺れを、全ての床マスについて求める（逆向きダイクストラ）。
    * 揺れはtickの終わりのマスで加算される。上への1歩は巻き上げで(1+Lv)マスまとめて上れる前提で1/(1+Lv)に割る */
-  private returnField(s: GameState, pm: Float64Array, brace: number, winch: number): Float64Array {
+  private returnField(s: GameState, pm: Float64Array, brace: number, winch: number, gl: Float64Array): Float64Array {
     const n = WIDTH * DEPTH;
     const d = new Float64Array(n).fill(Infinity);
     const heap = new MinHeap();
@@ -298,7 +327,7 @@ export class Bot {
       const ux = u % WIDTH;
       const uy = Math.floor(u / WIDTH);
       // u に着く1歩の揺れ（地上なら0）
-      const at = uy === 0 ? 0 : tremorRate(uy, brace) * pm[u];
+      const at = uy === 0 ? 0 : tremorRate(uy, brace) * pm[u] * gl[u];
       for (const [vx, vy] of [
         [ux, uy + 1],
         [ux - 1, uy],
@@ -316,6 +345,17 @@ export class Bot {
       }
     }
     return d;
+  }
+
+  /** 035 v0.2.0: マスごとの「踏み入る1歩の重さ」。走れるなら固めた坑道（足場以外）は0.5、他は1 */
+  private glideField(s: GameState): Float64Array {
+    const n = WIDTH * DEPTH;
+    const g = new Float64Array(n).fill(1);
+    const p = s.player;
+    if (!p.packGlide || p.packSteps <= 0) return g;
+    const sc = new Set(s.map.scaffolds.map((c) => c.y * WIDTH + c.x));
+    for (let i = WIDTH; i < n; i++) if (s.map.tiles[i] === TILE.FLOOR && s.map.trod[i] >= p.packSteps && !sc.has(i)) g[i] = 0.5;
+    return g;
   }
 
   /** 帰り道の揺れ（場が届かないマスはまっすぐな縦穴の近似） */
@@ -368,7 +408,8 @@ export class Bot {
   private returnAction(s: GameState): Action {
     this.plan = [];
     const step = s.player.y > 0 ? new GameView(s).firstStepTo((_x, y) => y === 0) : null;
-    if (step && step.y < s.player.y) return { type: 'hoist' };
+    // v0.2.0: 地上へ上る巻き上げは、固めた縦坑なら走る
+    if (step && step.y < s.player.y) return s.player.packGlide ? { type: 'hoist', dash: true } : { type: 'hoist' };
     if (step) return this.stepToward(s, step);
     return { type: 'move', dir: 'up' };
   }
@@ -384,9 +425,28 @@ export class Bot {
         n++;
         cy--;
       }
-      if (n >= 1 + winch) return { type: 'hoist' };
+      if (n >= 1 + winch) {
+        // v0.2.0: 計画の真上が固めた縦坑で2×(1+Lv)マス続くなら走って上る（走りきっても計画を通り過ぎない時だけ）
+        if (p.packGlide && n >= 2 * (1 + winch) && this.plan.slice(0, 2 * (1 + winch)).every((c) => this.packedFloor(s, c.x, c.y)))
+          return { type: 'hoist', dash: true };
+        return { type: 'hoist' };
+      }
     }
-    return this.stepToward(s, this.plan[0]);
+    const a = this.stepToward(s, this.plan[0]);
+    // v0.2.0: 計画の次の2マスが同じ向きの固めた坑道なら走る
+    if (p.packGlide && a.type === 'move' && this.plan.length >= 2) {
+      const [c0, c1] = this.plan;
+      if (c1.x - c0.x === c0.x - p.x && c1.y - c0.y === c0.y - p.y && this.packedFloor(s, c0.x, c0.y) && this.packedFloor(s, c1.x, c1.y))
+        return { ...a, dash: true };
+    }
+    return a;
+  }
+
+  /** 035 v0.2.0: 固めた坑道の床（足場以外）か */
+  private packedFloor(s: GameState, x: number, y: number): boolean {
+    const i = y * WIDTH + x;
+    const p = s.player;
+    return y > 0 && p.packSteps > 0 && s.map.tiles[i] === TILE.FLOOR && s.map.trod[i] >= p.packSteps && !s.map.scaffolds.some((c) => c.x === x && c.y === y);
   }
 
   private oreAtDepart = 0;
@@ -631,6 +691,7 @@ export interface RunResult {
   packedEnd: number;
   packedTicks: number;
   packSaved: number;
+  glides: number;
   tripTicksAtH: number;
   tripsAtH: number;
   rescuesAtH: number;
@@ -718,6 +779,7 @@ export function runOne(seed: number, cfg: BotConfig, maxTicks: number): RunResul
     packedEnd: s.player.packedCells,
     packedTicks: m.packedTicks,
     packSaved: Math.round(m.packSaved * 10) / 10,
+    glides: m.glides,
     tripsAtH: tripsH < 0 ? m.trips : tripsH,
     rescuesAtH: rescuesH < 0 ? m.rescues : rescuesH,
     tripTicksAtH: Math.round(mineTicksH / Math.max(1, tripsH < 0 ? m.trips : tripsH)),
@@ -746,7 +808,7 @@ export function summarize(label: string, results: RunResult[]): string {
     `avgRiftValue=${avg((r) => r.riftValueBanked)} avgOverLineSec=${avg((r) => r.overLineTicks / 10)} avgDelayed=${avg((r) => r.delayedTicks)} avgWedge=${avg((r) => r.wedgeLv)} ` +
     `avgTripsAtH=${avg((r) => r.tripsAtH)} avgTripTicksAtH=${avg((r) => r.tripTicksAtH)} avgRescuesAtH=${avg((r) => r.rescuesAtH)} ` +
     `avgPackedMade=${avg((r) => r.packedMade)} avgPackedLost=${avg((r) => r.packedLost)} avgPackedEnd=${avg((r) => r.packedEnd)} ` +
-    `avgPackedSec=${avg((r) => r.packedTicks / 10)} avgPackSaved=${avg((r) => r.packSaved)} avgScore=${avg((r) => r.score)}`
+    `avgPackedSec=${avg((r) => r.packedTicks / 10)} avgPackSaved=${avg((r) => r.packSaved)} avgGlides=${avg((r) => r.glides)} avgScore=${avg((r) => r.score)}`
   );
 }
 
@@ -795,6 +857,8 @@ if (isMain) {
   if (preset === 'v2') setRules(RULES_V2);
   // 035: --preset 029 は固めなし（029 v0.3.0の規則）
   if (preset === '029') setRules(RULES_029);
+  // 035 v0.2.0: --preset t1 は v0.1.0 の固め（掘りに効かない・揺れの上限なし）
+  if (preset === 't1') setRules(RULES_T1);
   // 掃引用: --rule key=value（riftLine=65, riftValue=flat|height, wedge=life|max|chance|steep, riftNeedSpace=true|false）
   for (let i = 0; i < args.length; i++) {
     if (args[i] !== '--rule' && args[i] !== '--tune') continue;

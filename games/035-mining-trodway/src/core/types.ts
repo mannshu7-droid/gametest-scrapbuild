@@ -21,7 +21,7 @@ export type Phase = 'shop' | 'mine' | 'cleared';
 export type UpgradeId = 'drill' | 'hp' | 'brace' | 'capacity' | 'winch' | 'basket' | 'scaffold' | 'wedge';
 
 export type Action =
-  | { type: 'move'; dir: Dir }
+  | { type: 'move'; dir: Dir; dash?: boolean }
   | { type: 'wait' }
   | { type: 'buy'; item: UpgradeId }
   /** 送り籠: 今の積荷を8割の値で地上へ送る（籠を下ろす振動で揺れ+10） */
@@ -29,7 +29,7 @@ export type Action =
   /** 足場を今いるマスに据える（地下のみ。買って持っている足場が要る） */
   | { type: 'place' }
   /** 巻き上げ: 真上へ続く掘った縦穴を1tickで(1+巻き上げ機Lv)マス上る */
-  | { type: 'hoist' };
+  | { type: 'hoist'; dash?: boolean };
 
 export interface ShopItemState {
   id: UpgradeId;
@@ -106,6 +106,8 @@ export interface Metrics {
   packedLost: number;
   packedTicks: number;
   packSaved: number;
+  /** 035 v0.2.0: 固めた坑道を走った（1tickで2マス進んだ）回数 */
+  glides: number;
   clearedTick: number | null;
   score: number;
 }
@@ -168,6 +170,11 @@ export interface GameState {
     /** 035: 固めた坑道になるまでに踏み入る回数（0なら固めなし）と、その上の揺れの倍率 */
     packSteps: number;
     packRate: number;
+    /** 035 v0.2.0: 固めた坑道の上で掘る間の揺れの倍率／固めが効く揺れの上限（0なら無し） */
+    packDig: number;
+    packCap: number;
+    /** 035 v0.2.0: 固めた坑道の上を走れる（dashで1tickに2マス）か */
+    packGlide: boolean;
     /** 035: 今ある固めた坑道のマス数 */
     packedCells: number;
   };
@@ -197,11 +204,12 @@ export interface ActionSpecEntry {
 export const ACTION_SPEC: ActionSpecEntry[] = [
   {
     type: 'move',
-    params: { dir: 'up|down|left|right' },
+    params: { dir: 'up|down|left|right', dash: 'true|false（省略可）' },
     description:
       '隣のマスへ移動する。掘った床なら1tickで1マス移動、土・岩・鉱石なら採掘を開始/継続する（深いほど硬く複数tick）。' +
       '地上（y=0）に着くと積荷が自動で換金され、揺れが0に戻り、HPが全快する。' +
-      '035: 掘った床に踏み入るたびに踏み固めが1たまり、packSteps回で固めた坑道になる（その上で掘らずにいる間は揺れ×packRate、落盤で近くが崩れる）',
+      '035: 掘った床に踏み入るたびに踏み固めが1たまり、packSteps回で固めた坑道になる（その上で掘らずにいる間は揺れ×packRate、落盤で近くが崩れる）。' +
+      '035 v0.2.0: dash=trueなら、固めた坑道から固めた坑道へ同じ向きにもう1マス走る（1tickで2マス、packGlide時のみ。足場では止まる）',
   },
   { type: 'wait', params: {}, description: '何もせず1ティック経過（地下では揺れがたまる）' },
   // 029: 割れ目は新しいアクションではなく、map.rifts に現れるタイル（RIFT=8）を move で掘る
@@ -225,6 +233,8 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
   {
     type: 'hoist',
     params: {},
-    description: '巻き上げ: 真上が掘った床なら1tickで最大(1+巻き上げ機Lv)マス上る。地上に着くか真上が床でなくなると止まる',
+    description:
+      '巻き上げ: 真上が掘った床なら1tickで最大(1+巻き上げ機Lv)マス上る。地上に着くか真上が床でなくなると止まる。' +
+      '035 v0.2.0: dash=trueなら、固めた縦坑では1段ごとにもう1マス上る（packGlide時のみ）',
   },
 ];

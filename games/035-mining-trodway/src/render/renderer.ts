@@ -68,8 +68,10 @@ export class Renderer {
             ctx.lineTo(x * TILE_PX + 16.5, row * TILE_PX + 16);
             ctx.stroke();
           } else if (k > 0) {
-            ctx.fillStyle = '#5a6a80';
-            for (let i = 0; i < k; i++) ctx.fillRect(x * TILE_PX + 4 + i * 6, row * TILE_PX + TILE_PX - 6, 3, 3);
+            // v0.2.0（v1軽微#6）: 3pxの点はタッチ版で読めないので、固めまでの進み具合を床の下からの石畳の高さで出す
+            const h = Math.round(((TILE_PX - 2) * k) / p.packSteps);
+            ctx.fillStyle = 'rgba(61,74,92,0.8)';
+            ctx.fillRect(x * TILE_PX + 1, row * TILE_PX + TILE_PX - 1 - h, TILE_PX - 2, h);
           }
         }
         if (t !== TILE.FLOOR && y > 0) {
@@ -277,6 +279,12 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
     };
+    // v0.2.0: 固めが効く上限（この線より上では固めた坑道も普通に揺れ、走れない）
+    if (p.packSteps > 0 && p.packCap > 0) {
+      const yc = toY(p.packCap);
+      dashLine(yc, '#9fc3e8', 4);
+      labels.push({ text: `固め${p.packCap}`, color: '#9fc3e8', font: '10px monospace', y: yc - 3 });
+    }
     if (p.estReturnTremor !== null) {
       const yy = toY(p.tremor + p.estReturnTremor);
       dashLine(yy, '#fff', 3);
@@ -311,9 +319,11 @@ export class Renderer {
     ctx.fillStyle = '#fff';
     ctx.fillText(`売値+${Math.round(p.tremorBonus * 100)}%`, gx, gy + gh + 14);
     if (p.onPacked && !p.digging) {
-      // 035: 固めた坑道の上では揺れのたまる速さ×packRate
-      ctx.fillStyle = '#9fc3e8';
-      ctx.fillText(`固めた坑道 揺れ×${p.packRate}`, gx, gy + gh + 26);
+      // 035: 固めた坑道の上では揺れのたまる速さ×packRate（v0.2.0: 揺れがpackCap以上なら効かず、走れない）
+      const off = p.packCap > 0 && p.tremor >= p.packCap;
+      ctx.fillStyle = off ? '#8a8a8a' : '#9fc3e8';
+      // ゲージ幅に収まるよう短く（v2のスクリーンショットで「Shiftで走る」が切れていた）
+      ctx.fillText(off ? `固め効かず(${p.packCap}↑)` : `固め 揺れ×${p.packRate}${p.packGlide ? ' 走れる' : ''}`, gx, gy + gh + 26);
     } else if (p.onScaffold && !p.digging) {
       ctx.fillStyle = '#d9a441';
       ctx.fillText(`足場で休憩 揺れ-${SCAFFOLD_RELIEF}/t`, gx, gy + gh + 26);

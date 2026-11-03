@@ -14,6 +14,7 @@ const BUY_KEYS: Record<string, UpgradeId> = {
 /**
  * キーボード入力を1ティック分のアクションに変換する。
  * 操作: WASD/矢印=移動・採掘、1〜8=ショップ購入（地上のみ）、Space/B=送り籠（地下のみ）、H=巻き上げ（地下のみ）、P=足場を据える（地下のみ）
+ * 035 v0.2.0: Shiftを押しながらの移動・巻き上げは「走る」（固めた坑道の上なら1tickで2マス）
  * タッチ移植時は src/render/ にタッチ用の同等クラスを足す（仕様書「タッチ操作の想定」参照）
  */
 export class Input {
@@ -38,14 +39,15 @@ export class Input {
     const single = this.queued.shift();
     if (single) {
       if (BUY_KEYS[single]) return { type: 'buy', item: BUY_KEYS[single] };
-      if (single === 'h') return { type: 'hoist' };
+      if (single === 'h') return { type: 'hoist', dash: this.pressed.has('shift') };
       if (single === 'p') return { type: 'place' };
       return { type: 'send' };
     }
-    if (this.pressed.has('w') || this.pressed.has('arrowup')) return { type: 'move', dir: 'up' };
-    if (this.pressed.has('s') || this.pressed.has('arrowdown')) return { type: 'move', dir: 'down' };
-    if (this.pressed.has('a') || this.pressed.has('arrowleft')) return { type: 'move', dir: 'left' };
-    if (this.pressed.has('d') || this.pressed.has('arrowright')) return { type: 'move', dir: 'right' };
+    const dash = this.pressed.has('shift');
+    if (this.pressed.has('w') || this.pressed.has('arrowup')) return { type: 'move', dir: 'up', dash };
+    if (this.pressed.has('s') || this.pressed.has('arrowdown')) return { type: 'move', dir: 'down', dash };
+    if (this.pressed.has('a') || this.pressed.has('arrowleft')) return { type: 'move', dir: 'left', dash };
+    if (this.pressed.has('d') || this.pressed.has('arrowright')) return { type: 'move', dir: 'right', dash };
     return { type: 'wait' };
   }
 }
