@@ -60,6 +60,8 @@ export interface CaveInEvent {
   spilledUnits: number;
   spilledValue: number;
   rescued: boolean;
+  /** 035 v0.3.0: この落盤で崩れた固めた坑道のマス数 */
+  packedLost: number;
 }
 
 export interface Metrics {

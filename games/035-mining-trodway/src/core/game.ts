@@ -25,6 +25,10 @@ import {
  * - 2回で固まり、その上は揺れ×0.1。**固めた坑道は走れる**（dash付きの移動・巻き上げで1tickに2マス＝往復の多い型の時間が浮く）
  * - **固めが効くのは揺れがpackCap=55未満の間だけ**（揺れ×0.1も走るのも）。線を越えて粘る型の帰り道は普通に揺れる＝帰着線が今の揺れに重ならない
  * - `setRules(RULES_T1)`（`--preset t1`）でv0.1.0の固め（4回・×0.2・上限なし・走れない）
+ * v0.3.0（035-v2レビュー重大#1・中#3・軽微#5・#7）:
+ * - **割れ目帯の下限**: 揺れがpackCap未満で開いた割れ目は、高さ倍率が最低RIFT_BAND_FLOOR=1.8（注意線45〜固め55の「道が守る割れ目帯」を深さで値付け）
+ * - 固めの上限は「注意線+10」（PACK_CAP_OVER）。落盤で崩れた固めた坑道の数を CaveInEvent.packedLost で出す
+ * - 掃引用に deepHard／deepFrom（深さ60以上の硬さの倍率、既定1）。`setRules(RULES_T2)`（`--preset t2`）でv0.2.0
  * 持ち越すのは数字（034の余熱）ではなく地形。短い遠征を重ねるほど同じ坑道を往復し、奥への道が先に固まる
  *
  * 以下は029の説明（土台）:
@@ -119,7 +123,11 @@ export const PACK_RATE = 0.1;
 export const PACK_COLLAPSE = 3;
 /** 035 v0.2.0: 固めた坑道から掘る揺れの倍率（掃引用、既定1＝掘りには効かない）・固めが効く揺れの上限（v1レビュー重大#1・#2） */
 export const PACK_DIG = 1;
-export const PACK_CAP = 55;
+/** v0.3.0: 固めの上限は「注意線（45）+10」（v2軽微#5: P02の帰還閾値に合わせた数字ではなく、注意線から決まる値） */
+export const PACK_CAP_OVER = 10;
+export const PACK_CAP = 45 + PACK_CAP_OVER;
+/** 035 v0.3.0: 固めの上限の下で開いた割れ目の高さ倍率の下限（v2重大#1・中#3: 注意線〜固め55の割れ目帯を深さで値付け） */
+export const RIFT_BAND_FLOOR = 1.8;
 
 /**
  * 規則の切り替え（対照用・掃引用）。
@@ -170,6 +178,11 @@ export const RULES: {
   packCap: number;
   /** 035 v0.2.0: 固めた坑道の上は走れる（dash付きの移動・巻き上げで1tickに2マス。足場では止まる） */
   packGlide: boolean;
+  /** 035 v0.3.0: 揺れがpackCap未満で開いた割れ目の高さ倍率の下限（0なら無し）。線の下の道が守る割れ目帯を深さで値付けする */
+  riftBandFloor: number;
+  /** 035 v0.3.0: 深さdeepFrom以上の岩・鉱石・核石の硬さの倍率（1なら無し）。道が速くなって短くなりすぎたセッションを戻す */
+  deepHard: number;
+  deepFrom: number;
 } = {
   rifts: true,
   riftLine: 45,
@@ -197,6 +210,9 @@ export const RULES: {
   packDig: PACK_DIG,
   packCap: PACK_CAP,
   packGlide: true,
+  riftBandFloor: RIFT_BAND_FLOOR,
+  deepHard: 1,
+  deepFrom: 60,
 };
 export function setRules(r: Partial<typeof RULES>): void {
   Object.assign(RULES, r);
@@ -221,7 +237,9 @@ export function riftBaseValue(y: number, baseMult = 1): number {
 /** 029 v0.3.0と同じ規則（固めなし、`--preset 029`） */
 export const RULES_029: typeof RULES = { ...RULES, packSteps: 0 };
 /** 035 v0.1.0の規則（`--preset t1`: 掘りに効かず、揺れの上限もない） */
-export const RULES_T1: typeof RULES = { ...RULES, packSteps: 4, packRate: 0.2, packDig: 1, packCap: 0, packGlide: false };
+/** 035 v0.2.0の規則（`--preset t2`: 割れ目帯の下限なし） */
+export const RULES_T2: typeof RULES = { ...RULES, riftBandFloor: 0 };
+export const RULES_T1: typeof RULES = { ...RULES, packSteps: 4, packRate: 0.2, packDig: 1, packCap: 0, packGlide: false, riftBandFloor: 0 };
 
 /** 揺れtの割れ目の「線からの高さ」倍率（flatなら1）。楔（steepLv）の伸びは揺れwedgeFromより上の分にだけ効く */
 export function riftHeightMult(t: number, ru: typeof RULES, steepLv = 0): number {
@@ -231,6 +249,8 @@ export function riftHeightMult(t: number, ru: typeof RULES, steepLv = 0): number
   const kw = Math.max(0, t - from) / ru.riftSpan;
   // 楔は上限も同じだけ持ち上げる（上限で頭打ちのまま伸びが消えないように）
   const w = ru.wedgeFrom > 0 ? 0.5 * steepLv : 0;
+  if (ru.riftBandFloor > 0 && ru.packSteps > 0 && ru.packCap > 0 && t < ru.packCap)
+    return Math.max(ru.riftBandFloor, Math.min(ru.riftHeightMax + w, ru.riftHeightMin + k + kw * 0.5 * steepLv));
   return Math.min(ru.riftHeightMax + w, ru.riftHeightMin + k + kw * 0.5 * steepLv);
 }
 
@@ -287,14 +307,14 @@ export function tremorBonus(t: number): number {
 }
 
 /** タイルの硬さ（深いほど硬い）。採掘tick = ceil(硬さ / ドリル威力) */
-export function hardness(t: number, y: number): number {
+export function hardness(t: number, y: number, ru: typeof RULES = RULES): number {
   if (t === TILE.RIFT) return 0; // 割れ目は1tickで崩れる
   if (t === TILE.DIRT) return 1 + y / 30;
-  return 2 + y / 14;
+  return (2 + y / 14) * (y >= ru.deepFrom ? ru.deepHard : 1);
 }
 
-export function digTicks(t: number, y: number, drillPower: number): number {
-  return Math.max(1, Math.ceil(hardness(t, y) / drillPower));
+export function digTicks(t: number, y: number, drillPower: number, ru: typeof RULES = RULES): number {
+  return Math.max(1, Math.ceil(hardness(t, y, ru) / drillPower));
 }
 
 interface UpgradeDef {
@@ -723,7 +743,7 @@ export class Game {
       return;
     }
     if (!this.digging || this.digging.x !== nx || this.digging.y !== ny) {
-      const total = digTicks(t, ny, this.drillPower);
+      const total = digTicks(t, ny, this.drillPower, this.rules);
       this.digging = { x: nx, y: ny, remaining: total, total };
     }
     this.digging.remaining--;
@@ -894,21 +914,23 @@ export class Game {
     this.metrics.spilledValue += spilledValue;
     // 035: 落盤で近くの踏み固めが0に戻る（粘って崩した道は作り直し）
     const R = this.rules.packCollapse;
+    let packedLost = 0;
     if (this.rules.packSteps > 0 && R >= 0) {
       for (let y = Math.max(1, this.y - R); y <= Math.min(DEPTH - 1, this.y + R); y++)
         for (let x = 0; x < WIDTH; x++) {
           if (Math.abs(x - this.x) + Math.abs(y - this.y) > R) continue;
           const i = y * WIDTH + x;
-          if (this.trod[i] >= this.rules.packSteps) this.metrics.packedLost++;
+          if (this.trod[i] >= this.rules.packSteps) packedLost++;
           this.trod[i] = 0;
         }
     }
+    this.metrics.packedLost += packedLost;
     let rescued = false;
     if (this.hp <= 0) {
       rescued = true;
       this.rescue();
     }
-    this.lastCaveIn = { tick: this.tick, damage, spilledUnits: spillUnits, spilledValue, rescued };
+    this.lastCaveIn = { tick: this.tick, damage, spilledUnits: spillUnits, spilledValue, rescued, packedLost };
   }
 
   /** HP0: 地上へ引き上げられる。積荷（核石含む）は全損、所持金の15%を救助費として失う */
