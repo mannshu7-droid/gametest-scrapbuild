@@ -1,7 +1,7 @@
 # 仕様書: 035-mining-trodway（トロッドウェイ／踏み固めた坑道）
 
 - 作成日: 2026-11-03
-- ステータス: PLAYABLE（v0.3.0、サイクル41・3回目。v0.2.0は2回目、v0.1.0は1回目）
+- ステータス: FINAL（v0.3.0、サイクル41完了。最終総括は [reviews/035-mining-trodway-final.md](../../reviews/035-mining-trodway-final.md)、判定FIX。v0.2.0は2回目、v0.1.0は1回目）
 - 元になったレビュー: [reviews/034-flagship-glowvent-final.md](../../reviews/034-flagship-glowvent-final.md)（提案(1)「掘った坑道が次の遠征を短くする」）、
   土台は [specs/029-mining-riftseam/spec.md](../029-mining-riftseam/spec.md)（揺れのダイヤル・落盤・帰着線・割れ目 v0.3.0）
 
