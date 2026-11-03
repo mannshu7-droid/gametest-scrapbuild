@@ -13,6 +13,7 @@
  * 035 v0.2.0（v1レビュー重大#1・#2）:
  * - 走る（固めた坑道の上はdash付きで1tickに2マス）と固めの上限（揺れpackCap未満の間だけ効く）。ボットは計画の次の2マスが同じ向きの固めた坑道なら走り、
  *   地上へ上る巻き上げは走る。見積もりは固めた坑道の1歩を時間・揺れとも0.5、上限を越える所から先は固めなしの帰り道（capRet）
+ * - --preset t2: v0.2.0の規則（割れ目帯の下限 riftBandFloor なし）。v0.3.0で `--tune deepHard=1.6`（深さ60以上の硬さ）・costMult の掃引も可
  * - --preset t1: v0.1.0の固め（4回・×0.2・上限なし・走れない）。RunResult に glides（走った回数）
  *
  * 029新規（riftseam）:
@@ -49,7 +50,7 @@
  * 地上ではなく足場へ戻って休み、揺れが下がったら掘りに戻る。--noScaffold で足場を買わない対照群になる
  * --seeds は 1,2,3 と 1..40 の両方の書き方を受け付ける
  */
-import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1, RULES_V2, RULES_029, RULES_T1 } from '../src/core/game';
+import { Game, WIDTH, DEPTH, CORE_TREMOR_MULT, digTicks, tremorRate, ORE_VALUE, isOre, caveInDamageAt, tremorBonus, UPGRADES, upgradeCost, setRules, RULES, RULES_V1, RULES_V2, RULES_029, RULES_T1, RULES_T2 } from '../src/core/game';
 import { TILE, type Action, type Dir, type GameState, type UpgradeId } from '../src/core/types';
 
 interface BotConfig {
@@ -859,6 +860,8 @@ if (isMain) {
   if (preset === '029') setRules(RULES_029);
   // 035 v0.2.0: --preset t1 は v0.1.0 の固め（掘りに効かない・揺れの上限なし）
   if (preset === 't1') setRules(RULES_T1);
+  // 035 v0.3.0: --preset t2 は v0.2.0（割れ目帯の下限なし）
+  if (preset === 't2') setRules(RULES_T2);
   // 掃引用: --rule key=value（riftLine=65, riftValue=flat|height, wedge=life|max|chance|steep, riftNeedSpace=true|false）
   for (let i = 0; i < args.length; i++) {
     if (args[i] !== '--rule' && args[i] !== '--tune') continue;

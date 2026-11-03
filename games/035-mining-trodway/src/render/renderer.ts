@@ -168,6 +168,8 @@ export class Renderer {
         ? '落盤！ 力尽きて引き上げられた（積荷全損・救助費）'
         : `落盤！ HP-${c.damage}${c.spilledUnits > 0 ? ` 積荷${c.spilledUnits}個(¥${c.spilledValue})落とした` : ''}`;
       ctx.fillText(msg, 6, VIEW_H * TILE_PX - 10);
+      // v0.3.0: 崩れた固めた坑道の数（v2軽微#7）
+      if (c.packedLost > 0) ctx.fillText(`固めた坑道が${c.packedLost}マス崩れた`, 6, VIEW_H * TILE_PX - 26);
     }
 
     this.drawGauge(s);
