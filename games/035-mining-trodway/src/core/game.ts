@@ -1,0 +1,1013 @@
+import { mulberry32, type Rng } from './rng';
+import {
+  TILE,
+  type Action,
+  type CargoItem,
+  type CaveInEvent,
+  type Digging,
+  type Dir,
+  type GameState,
+  type Metrics,
+  type Phase,
+  type ShopItemState,
+  type TileId,
+  type UpgradeId,
+} from './types';
+
+/**
+ * 035-mining-trodway のコアロジック（描画から完全分離・決定論）。029-mining-riftseam v0.3.0 をそのまま土台にし、
+ * **坑道の固め**を1つだけ足した（034-final提案(1)「掘った坑道が次の遠征を短くする」）:
+ * - 掘った床のマスは、踏み入るたびに「踏み固め」が1たまり、RULES.packSteps 回で**固めた坑道**になる（地上で消えない＝遠征をまたいで残る地形）
+ * - 固めた坑道の上で掘っていない間は、揺れのたまる速さが ×RULES.packRate（揺れずに歩ける）。帰り道の見積もり（帰着線）にもそのまま効く
+ * - 落盤が起きると、プレイヤーからマンハッタン距離 RULES.packCollapse 以内の踏み固めが0に戻る（粘って崩した道は作り直し）
+ * - `setRules({ packSteps: 0 })`（simulateの`--tune packSteps=0`）で029 v0.3.0と同じ規則（固めなしの対照）
+ * 持ち越すのは数字（034の余熱）ではなく地形。短い遠征を重ねるほど同じ坑道を往復し、奥への道が先に固まる
+ *
+ * 以下は029の説明（土台）:
+ *
+ * 029-mining-riftseam のコアロジック（描画から完全分離・決定論）。025-tremorveinの揺れのダイヤルをそのまま土台にし、
+ * 「注意線の向こうにだけある稼ぎ」を足した（028-final提案(1)）:
+ * - 揺れが注意線（RULES.riftLine=45）を越えている間だけ、近くの壁に**割れ目の鉱脈**（RIFT）が開く。数秒（RIFT_LIFE）で閉じて元の岩に戻る。
+ *   割れ目は1tickで掘れ、売値は深さで決まる（揺れボーナスは乗らない＝倍率の上乗せではなく「その時だけ掘れる物」）
+ * - 生存投資の代わりに**楔（wedge）**: 割れ目が開いている時間を延ばす（上限の向こうの稼ぎに効く投資）
+ * - `setRules({ rifts: false })`（simulateの`--preset 025`）で025の規則に戻る（同じコードで対照を取るため）
+ *
+ * v0.2.0（029-v1レビュー対応）:
+ * - 割れ目の売値を「開いた瞬間の揺れが注意線からどれだけ上か」で決める（×0.5＋(揺れ−45)/30、上限×3）。線のすぐ上は安く、
+ *   山を越えた先ほど高い（v1重大#1: 一様のボーナスで山が動かなかった）。注意線を55〜70へ上げる案は稼ぎが減るだけで山を動かさなかった
+ * - 楔は「高さの伸び+50%/Lv」（v1重大#2: 寿命は制約になっていなかった。寿命・同時数・確率・高さの伸びの4案を掃引して選んだ）
+ * - 積荷に空きがある間だけ開く（v1中#5: 満杯の帰り道に取れない割れ目が光る）
+ * - `--preset v1`（RULES_V1）で v0.1.0 の規則に戻る
+ *
+ * v0.3.0（029-v2レビュー対応）:
+ * - **割れ目を掘ると揺れが10抜ける**（割れ目は岩盤の圧の逃げ道）。v2では「線の向こうほど高い割れ目」が迷いを先へ誘い、
+ *   割れ目を追う型の3秒の遅延の罰が−10〜−26%だった（v2重大#1）。値の側（上限×2・掘った瞬間の値・籠5割・上の線で崩れる）を
+ *   掃引しても罰は−9〜−31%のまま動かず、獲物そのものを「取ると楽になる物」にした案だけが罰を−5〜−8%に縮めた
+ * - 割れ目の基本値×0.7・高さ倍率の上限×2.5（割れ目の取り分 約5割→4割強、v2重大#2）
+ * - 強化の価格×1.3（v2中#4: P01のクリア 1636→約1890tick）
+ * - 掃引用の規則（`--rule`）: riftPriceAt / riftBasketRate / riftCeil / wedgeFrom / wedge=relief ほか。`--preset v2` で v0.2.0 の規則に戻る
+ *
+ * 以下は025の説明（土台）:
+ *
+ * 主題は「リスクとリターンの連続的なカーブ」。017-forkshaftの燃料（帰れるか帰れないかが確定的に決まる）を捨て、
+ * 1本のダイヤル「揺れ（tremor）」に長所と短所を両方結びつけた:
+ * - 揺れは地下にいる間たまり続け、深いほど速くたまる（地上で0に戻る）
+ * - 揺れが高いほど、その瞬間に掘った鉱石の売値が上がる（最大+60%）
+ * - 揺れが高いほど、毎tick落盤しやすくなる。落盤は「HPダメージ＋積荷の1/3を落とす＋揺れが少し収まる」で、
+ *   即死ではない。HPが0になると地上へ引き上げられ、積荷全損＋所持金の15%を救助費として失う（ゲームは続く）
+ * - 送り籠（basket）で積荷を8割の値で途中換金でき、粘る前に一部を確定させられる（部分的な回収点）。
+ *   v0.2.0: 籠を下ろす振動で揺れ+10（v1で籠が代償なしに強すぎた）
+ * - v0.2.0: 足場（scaffold）を買って地下に据えると、その上で掘らずにいる間は揺れが毎tick下がる
+ *   （途中の回収点。休むほど安全になるが、売値ボーナスも下がり、時間も使う）。強化を買い切った後のお金の行き先
+ * - v0.3.0: 核石を抱えている間は揺れのたまる速さが3倍（核石が岩盤を鳴らす）。最終目標の帰り道を揺れのダイヤルの
+ *   山場にし、核石に届く閾値で潜る攻める遊び方にも「深い足場で一度下ろす」意味を作る（v2重大#1・#2）
+ */
+
+export const WIDTH = 9;
+export const DEPTH = 121; // y=0が地上、y=120が最深部
+export const START_X = 4;
+export const CORE_X = 4;
+export const CORE_Y = DEPTH - 1;
+
+export const TREMOR_CAP = 150;
+export const TREMOR_BONUS_MAX = 0.6;
+export const TREMOR_BONUS_FULL_AT = 100;
+export const CAVEIN_THRESHOLD = 20;
+export const CAVEIN_COEF = 0.00035;
+export const CAVEIN_RELIEF = 20;
+export const DIG_TREMOR_MULT = 1.5;
+export const BRACE_REDUCTION = 0.12;
+export const BASKET_RATE = 0.8;
+/** 送り籠を下ろす振動で上がる揺れ */
+export const BASKET_TREMOR = 10;
+/** 足場の上で掘らずにいる間、1tickに下がる揺れ */
+export const SCAFFOLD_RELIEF = 1.5;
+/** 足場を据えられる最も浅い深さ */
+export const SCAFFOLD_MIN_Y = 10;
+/** 核石を抱えている間の揺れのたまる速さの倍率 */
+export const CORE_TREMOR_MULT = 3;
+export const RESCUE_FEE_RATE = 0.15;
+export const BASE_HP = 60;
+export const HP_PER_LEVEL = 20;
+export const BASE_CAPACITY = 6;
+
+/** 029: 割れ目が開く注意線（今の揺れ）。v0.2.0の既定はRULES.riftLine（v0.1.0は45） */
+export const RIFT_LINE_V1 = 45;
+/** 注意線の上で1tickに割れ目が開く確率＝BASE＋PER×（揺れ−注意線） */
+export const RIFT_CHANCE_BASE = 0.04;
+export const RIFT_CHANCE_PER = 0.002;
+/** 同時に開いていられる割れ目の数 */
+export const RIFT_MAX = 2;
+/** 割れ目が開いている時間（tick）と、楔1Lvごとの延長（v0.1.0の楔） */
+export const RIFT_LIFE = 40;
+export const WEDGE_LIFE = 20;
+/** 割れ目が開く範囲（プレイヤーからのマンハッタン距離） */
+export const RIFT_RANGE = 4;
+/** v0.2.0: 割れ目の売値の「線からの高さ」倍率＝MIN＋（揺れ−注意線）/SPAN（上限MAX）。線のすぐ上は安く、山を越えた先ほど高い */
+export const RIFT_HEIGHT_MIN = 0.5;
+export const RIFT_HEIGHT_SPAN = 30;
+export const RIFT_HEIGHT_MAX = 3;
+/** v0.3.0: 割れ目を掘ると抜ける揺れ（割れ目は岩盤の圧の逃げ道） */
+export const RIFT_RELIEF = 10;
+/** 035: 固めた坑道になるまでに踏み入る回数・その上の揺れの倍率・落盤で崩れる範囲 */
+export const PACK_STEPS = 4;
+export const PACK_RATE = 0.2;
+export const PACK_COLLAPSE = 3;
+
+/**
+ * 規則の切り替え（対照用・掃引用）。
+ * - rifts=false で025と同じ規則になる（`--preset 025`）
+ * - riftLine: 割れ目が開く注意線（今の揺れ）
+ * - riftValue: 'flat'=深さだけ（v0.1.0）／'height'=深さ×線からの高さ倍率（v0.2.0）
+ * - wedge: 楔の効き方。'life'=寿命+2秒/Lv（v0.1.0）／'max'=同時に開く数+1/Lv／'chance'=開く確率×(1+0.5Lv)／'steep'=高さ倍率の伸び+50%/Lv
+ * - riftSpan: 高さ倍率が+1になる揺れの幅（小さいほど急）
+ * - riftNeedSpace: 積荷に空きがある間だけ割れ目が開く（v0.2.0、帰り道のノイズを減らす）
+ */
+export const RULES: {
+  rifts: boolean;
+  riftLine: number;
+  riftValue: 'flat' | 'height';
+  wedge: 'life' | 'max' | 'chance' | 'steep' | 'relief';
+  riftNeedSpace: boolean;
+  riftSpan: number;
+  /** v0.3.0: 高さ倍率の下限（線のすぐ上）と上限 */
+  riftHeightMin: number;
+  riftHeightMax: number;
+  /** v0.3.0: 売値を決める揺れ。'open'=開いた瞬間（v0.2.0）／'dig'=掘った瞬間 */
+  riftPriceAt: 'open' | 'dig';
+  /** v0.3.0: 送り籠で送った割れ目の換金率（鉱石は0.8のまま） */
+  riftBasketRate: number;
+  /** v0.3.0: 割れ目の基本売値の倍率 */
+  riftBaseMult: number;
+  /** v0.3.0: 楔（steep）の伸びが効き始める揺れ（0なら注意線から） */
+  wedgeFrom: number;
+  /** v0.3.0: 強化の価格の倍率 */
+  costMult: number;
+  /** v0.3.0: 割れ目を掘ると抜ける揺れ（割れ目は岩盤の圧の逃げ道） */
+  riftRelief: number;
+  /** v0.3.0: 楔（relief）1Lvごとに、割れ目を掘ると抜ける揺れに足す量 */
+  wedgeRelief: number;
+  /** v0.3.0: 揺れがこれを越えると割れ目は開かず、開いている割れ目も崩れて閉じる（0なら無し） */
+  riftCeil: number;
+  /** 035: 何回踏み入ると固めた坑道になるか（0なら固めなし＝029と同じ） */
+  packSteps: number;
+  /** 035: 固めた坑道の上で掘っていない間の揺れのたまる速さの倍率 */
+  packRate: number;
+  /** 035: 落盤で踏み固めが0に戻る範囲（プレイヤーからのマンハッタン距離） */
+  packCollapse: number;
+  /** 035掃引用: 揺れがこれ以上の間に踏み入っても踏み固めがたまらない（0なら無し） */
+  packCalm: number;
+} = {
+  rifts: true,
+  riftLine: 45,
+  riftValue: 'height',
+  wedge: 'steep',
+  riftNeedSpace: true,
+  riftSpan: RIFT_HEIGHT_SPAN,
+  riftHeightMin: RIFT_HEIGHT_MIN,
+  // v0.3.0（029-v2レビュー対応）: 上限×3→×2.5、基本値×0.7（割れ目の取り分を約半分→4割前後へ）
+  riftHeightMax: 2.5,
+  riftPriceAt: 'open',
+  riftBasketRate: BASKET_RATE,
+  riftBaseMult: 0.7,
+  wedgeFrom: 0,
+  // v0.3.0: 強化の価格×1.3（割れ目の稼ぎで強化が早く揃いセッションが短すぎた）
+  costMult: 1.3,
+  // v0.3.0: 割れ目を掘ると揺れが10抜ける（迷いの罰が割れ目を追う型に乗った v2重大#1 への対策）
+  riftRelief: RIFT_RELIEF,
+  wedgeRelief: 5,
+  riftCeil: 0,
+  packSteps: PACK_STEPS,
+  packRate: PACK_RATE,
+  packCollapse: PACK_COLLAPSE,
+  packCalm: 0,
+};
+export function setRules(r: Partial<typeof RULES>): void {
+  Object.assign(RULES, r);
+}
+/** v0.2.0の規則（`--preset v2`） */
+export const RULES_V2: typeof RULES = {
+  ...RULES,
+  riftHeightMax: RIFT_HEIGHT_MAX,
+  riftBaseMult: 1,
+  costMult: 1,
+  riftRelief: 0,
+  packSteps: 0,
+};
+/** v0.1.0の規則（`--preset v1`） */
+export const RULES_V1 = { ...RULES_V2, riftValue: 'flat' as const, wedge: 'life' as const, riftNeedSpace: false };
+
+/** 深さyの割れ目の基本売値（揺れボーナスは乗らない） */
+export function riftBaseValue(y: number, baseMult = 1): number {
+  return (12 + y * 0.5) * baseMult;
+}
+
+/** 029 v0.3.0と同じ規則（固めなし、`--preset 029`） */
+export const RULES_029: typeof RULES = { ...RULES, packSteps: 0 };
+
+/** 揺れtの割れ目の「線からの高さ」倍率（flatなら1）。楔（steepLv）の伸びは揺れwedgeFromより上の分にだけ効く */
+export function riftHeightMult(t: number, ru: typeof RULES, steepLv = 0): number {
+  if (ru.riftValue === 'flat') return 1;
+  const k = Math.max(0, t - ru.riftLine) / ru.riftSpan;
+  const from = Math.max(ru.riftLine, ru.wedgeFrom);
+  const kw = Math.max(0, t - from) / ru.riftSpan;
+  // 楔は上限も同じだけ持ち上げる（上限で頭打ちのまま伸びが消えないように）
+  const w = ru.wedgeFrom > 0 ? 0.5 * steepLv : 0;
+  return Math.min(ru.riftHeightMax + w, ru.riftHeightMin + k + kw * 0.5 * steepLv);
+}
+
+/** 深さy・揺れtの割れ目の売値 */
+export function riftValue(y: number, t: number, ru: typeof RULES, steepLv = 0): number {
+  return Math.round(riftBaseValue(y, ru.riftBaseMult) * riftHeightMult(t, ru, steepLv));
+}
+
+export function riftChance(t: number, line: number, chanceMult = 1): number {
+  if (t < line) return 0;
+  return (RIFT_CHANCE_BASE + RIFT_CHANCE_PER * (t - line)) * chanceMult;
+}
+export const CAPACITY_PER_LEVEL = 3;
+
+export const ORE_VALUE: Record<number, number> = {
+  [TILE.ORE_COPPER]: 4,
+  [TILE.ORE_IRON]: 10,
+  [TILE.ORE_GOLD]: 24,
+  [TILE.ORE_CRYSTAL]: 55,
+  [TILE.CORE]: 400,
+};
+
+export function isOre(t: number): boolean {
+  return t === TILE.ORE_COPPER || t === TILE.ORE_IRON || t === TILE.ORE_GOLD || t === TILE.ORE_CRYSTAL || t === TILE.CORE;
+}
+
+/** 深さyで1tickあたりにたまる揺れ（支保Lv0） */
+export function baseTremorRate(y: number): number {
+  if (y <= 0) return 0;
+  return 0.04 + 0.3 * (y / 40) * (y / 40);
+}
+
+export function tremorRate(y: number, braceLv: number): number {
+  return baseTremorRate(y) * (1 - BRACE_REDUCTION * braceLv);
+}
+
+/** 揺れTのときの1tickあたりの落盤確率 */
+export function caveInProb(t: number): number {
+  if (t < CAVEIN_THRESHOLD) return 0;
+  const k = (t - CAVEIN_THRESHOLD) / 10;
+  return CAVEIN_COEF * k * k;
+}
+
+export function caveInChanceOver(t: number, ticks: number): number {
+  return 1 - Math.pow(1 - caveInProb(t), ticks);
+}
+
+export function caveInDamageAt(y: number): number {
+  return Math.round(12 + y * 0.3);
+}
+
+export function tremorBonus(t: number): number {
+  return (Math.min(t, TREMOR_BONUS_FULL_AT) / TREMOR_BONUS_FULL_AT) * TREMOR_BONUS_MAX;
+}
+
+/** タイルの硬さ（深いほど硬い）。採掘tick = ceil(硬さ / ドリル威力) */
+export function hardness(t: number, y: number): number {
+  if (t === TILE.RIFT) return 0; // 割れ目は1tickで崩れる
+  if (t === TILE.DIRT) return 1 + y / 30;
+  return 2 + y / 14;
+}
+
+export function digTicks(t: number, y: number, drillPower: number): number {
+  return Math.max(1, Math.ceil(hardness(t, y) / drillPower));
+}
+
+interface UpgradeDef {
+  id: UpgradeId;
+  name: string;
+  desc: string;
+  maxLevel: number;
+  baseCost: number;
+  growth: number;
+}
+
+export const UPGRADES: UpgradeDef[] = [
+  { id: 'drill', name: 'ドリル', desc: '威力+1（深い岩を速く掘れる＝揺れの中にいる時間が減る）', maxLevel: 7, baseCost: 15, growth: 1.6 },
+  { id: 'hp', name: '防護服', desc: '最大HP+20（落盤に何回耐えられるか）', maxLevel: 6, baseCost: 12, growth: 1.55 },
+  { id: 'brace', name: '支保', desc: '揺れのたまる速さ-12%（同じ揺れでより深く・長く）', maxLevel: 5, baseCost: 20, growth: 1.7 },
+  { id: 'capacity', name: '背負子', desc: '積荷+3', maxLevel: 6, baseCost: 10, growth: 1.5 },
+  { id: 'winch', name: '巻き上げ機', desc: '巻き上げ（H）で掘った縦穴を1tickに+1マス多く上れる（帰り道の揺れが減る）', maxLevel: 3, baseCost: 30, growth: 1.8 },
+  { id: 'basket', name: '送り籠', desc: '潜行ごとの籠+1（8割で途中換金、揺れ+10）', maxLevel: 3, baseCost: 25, growth: 1.8 },
+  { id: 'scaffold', name: '足場', desc: '地下に据える（P）。上で休むと揺れが下がる', maxLevel: 3, baseCost: 260, growth: 1.85 },
+  { id: 'wedge', name: '楔', desc: `割れ目が開いている時間+${WEDGE_LIFE / 10}秒（注意線の向こうの稼ぎを拾いやすく）`, maxLevel: 3, baseCost: 40, growth: 1.9 },
+];
+
+/** 楔の説明（RULES.wedgeの効き方に合わせる） */
+export function wedgeDesc(mode: (typeof RULES)['wedge']): string {
+  if (mode === 'life') return `割れ目が開いている時間+${WEDGE_LIFE / 10}秒`;
+  if (mode === 'max') return '同時に開いていられる割れ目+1（線の上に長く居るほど多く拾える）';
+  if (mode === 'chance') return '割れ目が開く確率+50%';
+  if (mode === 'relief') return `割れ目を掘ると抜ける揺れ+${RULES.wedgeRelief}`;
+  return '割れ目の売値の「線からの高さ」の伸び+50%（高く粘るほど得）';
+}
+
+export function upgradeCost(def: UpgradeDef, level: number, costMult = 1): number | null {
+  if (level >= def.maxLevel) return null;
+  return Math.round(def.baseCost * costMult * Math.pow(def.growth, level));
+}
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function generateMap(rng: Rng): number[] {
+  const tiles: number[] = new Array(WIDTH * DEPTH).fill(TILE.FLOOR);
+  for (let y = 1; y < DEPTH; y++) {
+    for (let x = 0; x < WIDTH; x++) {
+      const r = rng();
+      const oreProb = 0.12 + y * 0.0012;
+      let t: number;
+      if (r < oreProb) {
+        // 深さに応じて連続的に鉱石の質が上がる（バンドの段差を作らない）
+        const w = [
+          Math.max(0.15, 1 - y / 80),
+          clamp01((y - 8) / 25),
+          clamp01((y - 30) / 35) * 0.8,
+          clamp01((y - 60) / 40) * 0.6,
+        ];
+        const sum = w[0] + w[1] + w[2] + w[3];
+        let pick = rng() * sum;
+        const ores = [TILE.ORE_COPPER, TILE.ORE_IRON, TILE.ORE_GOLD, TILE.ORE_CRYSTAL];
+        t = ores[3];
+        for (let i = 0; i < 4; i++) {
+          if (pick < w[i]) {
+            t = ores[i];
+            break;
+          }
+          pick -= w[i];
+        }
+      } else {
+        const rockProb = 0.2 + y * 0.005;
+        t = rng() < rockProb ? TILE.ROCK : TILE.DIRT;
+      }
+      tiles[y * WIDTH + x] = t;
+    }
+  }
+  tiles[CORE_Y * WIDTH + CORE_X] = TILE.CORE;
+  return tiles;
+}
+
+function emptyMetrics(): Metrics {
+  return {
+    oreMined: 0,
+    moneyEarned: 0,
+    tremorBonusEarned: 0,
+    maxDepth: 0,
+    upgradesBought: 0,
+    trips: 0,
+    caveIns: 0,
+    caveInDamage: 0,
+    spilledValue: 0,
+    rescues: 0,
+    rescueFeesPaid: 0,
+    rescueLostValue: 0,
+    basketsSent: 0,
+    basketValue: 0,
+    basketTremor: 0,
+    scaffoldsPlaced: 0,
+    restTicks: 0,
+    restRelief: 0,
+    peakTremorBanked: 0,
+    coreCarryTicks: 0,
+    coreCaveIns: 0,
+    coreLost: 0,
+    riftsOpened: 0,
+    riftsMined: 0,
+    riftValueBanked: 0,
+    riftsClosed: 0,
+    riftRelief: 0,
+    overLineTicks: 0,
+    packedMade: 0,
+    packedLost: 0,
+    packedTicks: 0,
+    packSaved: 0,
+    clearedTick: null,
+    score: 0,
+  };
+}
+
+interface CargoEntry extends CargoItem {
+  /** 揺れボーナスで上乗せされた分 */
+  bonus: number;
+  /** 割れ目の鉱脈か */
+  rift?: boolean;
+}
+
+interface Rift {
+  x: number;
+  y: number;
+  closesAt: number;
+  value: number;
+  /** 閉じたら戻るタイル */
+  prev: number;
+}
+
+/**
+ * 帰り道の経路を、巻き上げ（真上へ続く縦穴は1tickで(1+Lv)マス）を使う前提でtickに区切り、
+ * 各tickの終わりにいるマスの列を返す（揺れはtickの終わりのマスで加算されるため。035: 固めた坑道かどうかもそのマスで決まる）
+ */
+export function returnTicksAlong(
+  sx: number,
+  sy: number,
+  path: { x: number; y: number }[],
+  winchLv: number,
+  /** 巻き上げが止まるマス（足場） */
+  stopAt: (x: number, y: number) => boolean = () => false,
+): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  let px = sx;
+  let py = sy;
+  let i = 0;
+  while (i < path.length) {
+    let n = 1;
+    if (path[i].y === py - 1 && path[i].x === px) {
+      while (
+        n < 1 + winchLv &&
+        i + n < path.length &&
+        path[i + n].x === px &&
+        path[i + n].y === path[i + n - 1].y - 1 &&
+        path[i + n - 1].y > 0 &&
+        !stopAt(path[i + n - 1].x, path[i + n - 1].y)
+      )
+        n++;
+    }
+    const last = path[i + n - 1];
+    px = last.x;
+    py = last.y;
+    i += n;
+    out.push({ x: px, y: py });
+  }
+  return out;
+}
+
+export class Game {
+  readonly seed: number;
+  private rng: Rng;
+  /** 割れ目専用の乱数（落盤の乱数列を乱さない＝割れ目の有無で落盤の引きが変わらない） */
+  private riftRng: Rng;
+  private rifts: Rift[] = [];
+  /** 生成時の規則（途中でsetRulesしても同じゲームの中では変わらない） */
+  readonly rules: typeof RULES;
+  tick = 0;
+  over = false;
+  private tiles: number[];
+  private x = START_X;
+  private y = 0;
+  private hp = BASE_HP;
+  private money = 0;
+  private cargo: CargoEntry[] = [];
+  private hasCore = false;
+  private digging: Digging | null = null;
+  private tremor = 0;
+  private basketsLeft = 0;
+  private levels: Record<UpgradeId, number> = { drill: 0, hp: 0, brace: 0, capacity: 0, winch: 0, basket: 0, scaffold: 0, wedge: 0 };
+  private scaffoldsHeld = 0;
+  private scaffolds: { x: number; y: number }[] = [];
+  private lastCaveIn: CaveInEvent | null = null;
+  private metrics: Metrics = emptyMetrics();
+  /** 035: マスごとの踏み固め（踏み入った回数、上限255） */
+  private trod = new Uint8Array(WIDTH * DEPTH);
+
+  constructor(seed: number) {
+    this.seed = seed;
+    this.rng = mulberry32(seed);
+    this.tiles = generateMap(this.rng);
+    this.riftRng = mulberry32((seed ^ 0x9e3779b9) >>> 0);
+    this.rules = { ...RULES };
+  }
+
+  get phase(): Phase {
+    if (this.over) return 'cleared';
+    return this.y === 0 ? 'shop' : 'mine';
+  }
+
+  private get maxHp(): number {
+    return BASE_HP + HP_PER_LEVEL * this.levels.hp;
+  }
+  private get drillPower(): number {
+    return 1 + this.levels.drill;
+  }
+  private get maxCapacity(): number {
+    return BASE_CAPACITY + CAPACITY_PER_LEVEL * this.levels.capacity;
+  }
+  /** 深さyで今1tickにたまる揺れ（支保Lv・核石の倍率込み、掘削の倍率は含まない） */
+  private rateAt(y: number): number {
+    return tremorRate(y, this.levels.brace) * (this.hasCore ? CORE_TREMOR_MULT : 1);
+  }
+  private get cargoValue(): number {
+    return this.cargo.reduce((a, c) => a + c.value, 0);
+  }
+  /** 029: 楔の効き方（RULES.wedge）ごとの割れ目の寿命・同時数・開く確率の倍率 */
+  private get riftLife(): number {
+    return RIFT_LIFE + (this.rules.wedge === 'life' ? WEDGE_LIFE * this.levels.wedge : 0);
+  }
+  private get riftMax(): number {
+    return RIFT_MAX + (this.rules.wedge === 'max' ? this.levels.wedge : 0);
+  }
+  private get riftChanceMult(): number {
+    return this.rules.wedge === 'chance' ? 1 + 0.5 * this.levels.wedge : 1;
+  }
+  /** v0.3.0: 割れ目を掘ると抜ける揺れ（楔=reliefならLvごとに足す） */
+  private get riftRelief(): number {
+    return this.rules.riftRelief + (this.rules.wedge === 'relief' ? this.rules.wedgeRelief * this.levels.wedge : 0);
+  }
+  /** 035: マス(x,y)が固めた坑道か */
+  isPacked(x: number, y: number): boolean {
+    const k = this.rules.packSteps;
+    return k > 0 && y > 0 && this.trod[y * WIDTH + x] >= k;
+  }
+  /** 035: マス(x,y)に居て掘っていないときの揺れの倍率 */
+  private packMult(x: number, y: number): number {
+    return this.isPacked(x, y) ? this.rules.packRate : 1;
+  }
+  private get packedCount(): number {
+    const k = this.rules.packSteps;
+    if (k <= 0) return 0;
+    let n = 0;
+    for (let i = WIDTH; i < this.trod.length; i++) if (this.trod[i] >= k) n++;
+    return n;
+  }
+  /** 今の揺れのまま深さyに割れ目が開いたときの売値 */
+  private riftValueHere(y: number): number {
+    const ru = this.rules;
+    return riftValue(y, this.tremor, ru, ru.wedge === 'steep' ? this.levels.wedge : 0);
+  }
+
+  tileAt(x: number, y: number): number {
+    if (x < 0 || x >= WIDTH || y < 0 || y >= DEPTH) return -1;
+    return this.tiles[y * WIDTH + x];
+  }
+
+  step(action: Action): void {
+    if (this.over) return;
+    this.tick++;
+
+    switch (action.type) {
+      case 'move':
+        this.handleMove(action.dir);
+        break;
+      case 'buy':
+        this.handleBuy(action.item);
+        break;
+      case 'send':
+        this.handleSend();
+        break;
+      case 'hoist':
+        this.handleHoist();
+        break;
+      case 'place':
+        this.handlePlace();
+        break;
+      case 'wait':
+        this.digging = null;
+        break;
+    }
+    if (this.over) return;
+
+    if (this.y > 0) {
+      if (this.onScaffold() && !this.digging) {
+        // 足場の上で掘らずにいる間は、揺れがたまらず下がっていく（途中の回収点）
+        const before = this.tremor;
+        this.tremor = Math.max(0, this.tremor - SCAFFOLD_RELIEF);
+        if (before > this.tremor) {
+          this.metrics.restTicks++;
+          this.metrics.restRelief += before - this.tremor;
+        }
+      } else {
+        const raw = this.rateAt(this.y) * (this.digging ? DIG_TREMOR_MULT : 1);
+        // 035: 固めた坑道の上で掘っていない間は揺れずに歩ける
+        const packed = !this.digging && this.isPacked(this.x, this.y);
+        const rate = packed ? raw * this.rules.packRate : raw;
+        if (packed) {
+          this.metrics.packedTicks++;
+          this.metrics.packSaved += raw - rate;
+        }
+        this.tremor = Math.min(TREMOR_CAP, this.tremor + rate);
+      }
+      if (this.hasCore) this.metrics.coreCarryTicks++;
+      if (this.tremor >= this.rules.riftLine) this.metrics.overLineTicks++;
+      this.updateRifts();
+      // 乱数は地下にいる毎tick必ず1回引く（揺れに関わらず消費量を一定にして決定論の見通しを良くする）
+      const roll = this.rng();
+      if (roll < caveInProb(this.tremor)) this.caveIn();
+    }
+    this.closeRifts();
+    this.updateScore();
+  }
+
+  /** 029: 注意線の上にいる間、近くの露出した壁に割れ目が開く */
+  private updateRifts(): void {
+    const ru = this.rules;
+    if (!ru.rifts) return;
+    if (ru.riftCeil > 0 && this.tremor > ru.riftCeil) {
+      // v0.3.0: 揺れが上の線を越えると割れ目は崩れて閉じる
+      for (const r of this.rifts) if (this.tiles[r.y * WIDTH + r.x] === TILE.RIFT) {
+        this.tiles[r.y * WIDTH + r.x] = r.prev;
+        this.metrics.riftsClosed++;
+      }
+      this.rifts = [];
+      return;
+    }
+    // v0.2.0: 積荷に空きがある間だけ開く（満杯の帰り道に取れない割れ目が光らない）
+    if (ru.riftNeedSpace && (this.cargo.length >= this.maxCapacity || this.hasCore)) return;
+    const chance = riftChance(this.tremor, ru.riftLine, this.riftChanceMult);
+    if (chance <= 0 || this.rifts.length >= this.riftMax) return;
+    if (this.riftRng() >= chance) return;
+    const cands: number[] = [];
+    for (let y = Math.max(1, this.y - RIFT_RANGE); y <= Math.min(DEPTH - 1, this.y + RIFT_RANGE); y++) {
+      for (let x = 0; x < WIDTH; x++) {
+        if (Math.abs(x - this.x) + Math.abs(y - this.y) > RIFT_RANGE) continue;
+        const t = this.tiles[y * WIDTH + x];
+        if (t === TILE.FLOOR || t === TILE.CORE || t === TILE.RIFT) continue;
+        if (this.digging && this.digging.x === x && this.digging.y === y) continue;
+        // 掘った床に面した壁だけ（すぐ手が届く所に開く）
+        const exposed = [[x, y - 1], [x, y + 1], [x - 1, y], [x + 1, y]].some(([ax, ay]) => this.tileAt(ax, ay) === TILE.FLOOR);
+        if (exposed) cands.push(y * WIDTH + x);
+      }
+    }
+    if (cands.length === 0) return;
+    const i = cands[Math.floor(this.riftRng() * cands.length)];
+    const x = i % WIDTH;
+    const y = Math.floor(i / WIDTH);
+    this.rifts.push({ x, y, closesAt: this.tick + this.riftLife, value: this.riftValueHere(y), prev: this.tiles[i] });
+    this.tiles[i] = TILE.RIFT;
+    this.metrics.riftsOpened++;
+  }
+
+  /** 時間切れの割れ目を閉じる（地上にいても時間は進む） */
+  private closeRifts(): void {
+    if (this.rifts.length === 0) return;
+    this.rifts = this.rifts.filter((r) => {
+      if (this.tick < r.closesAt) return true;
+      if (this.tiles[r.y * WIDTH + r.x] === TILE.RIFT) {
+        this.tiles[r.y * WIDTH + r.x] = r.prev;
+        this.metrics.riftsClosed++;
+      }
+      return false;
+    });
+  }
+
+  private handleMove(dir: Dir): void {
+    const [dx, dy] = dir === 'up' ? [0, -1] : dir === 'down' ? [0, 1] : dir === 'left' ? [-1, 0] : [1, 0];
+    const nx = this.x + dx;
+    const ny = this.y + dy;
+    const t = this.tileAt(nx, ny);
+    if (t < 0) {
+      this.digging = null;
+      return;
+    }
+    if (t === TILE.FLOOR) {
+      this.digging = null;
+      this.moveTo(nx, ny);
+      return;
+    }
+    if (!this.digging || this.digging.x !== nx || this.digging.y !== ny) {
+      const total = digTicks(t, ny, this.drillPower);
+      this.digging = { x: nx, y: ny, remaining: total, total };
+    }
+    this.digging.remaining--;
+    if (this.digging.remaining <= 0) {
+      this.digging = null;
+      this.finishDig(nx, ny, t);
+      this.moveTo(nx, ny);
+    }
+  }
+
+  /**
+   * 巻き上げ機: 真上が掘った床なら、1tickで最大(1+Lv)マス上る（地上に着くか、真上が床でなくなったら止まる）。
+   * v1初版は「縦の移動が自動で複数マス進む」方式だったが、縦穴の途中で横の鉱石へ曲がれず通り過ぎる
+   * （人の操作でもボットでも同じ）問題があったため、明示的なアクションに分けた
+   */
+  private handleHoist(): void {
+    this.digging = null;
+    const steps = 1 + this.levels.winch;
+    for (let i = 0; i < steps && this.y > 0; i++) {
+      if (this.tileAt(this.x, this.y - 1) !== TILE.FLOOR) break;
+      this.moveTo(this.x, this.y - 1);
+      if (this.onScaffold()) break; // 足場は踊り場: 巻き上げはそこで止まる
+    }
+  }
+
+  isScaffold(x: number, y: number): boolean {
+    return this.scaffolds.some((sc) => sc.x === x && sc.y === y);
+  }
+
+  private onScaffold(): boolean {
+    return this.y > 0 && this.isScaffold(this.x, this.y);
+  }
+
+  private handlePlace(): void {
+    this.digging = null;
+    if (this.y < SCAFFOLD_MIN_Y || this.scaffoldsHeld <= 0 || this.onScaffold()) return;
+    this.scaffolds.push({ x: this.x, y: this.y });
+    this.scaffoldsHeld--;
+    this.metrics.scaffoldsPlaced++;
+  }
+
+  private finishDig(x: number, y: number, t: number): void {
+    this.tiles[y * WIDTH + x] = TILE.FLOOR;
+    if (t === TILE.RIFT) {
+      const r = this.rifts.find((rf) => rf.x === x && rf.y === y)!;
+      this.rifts = this.rifts.filter((rf) => rf !== r);
+      if (this.cargo.length >= this.maxCapacity) return;
+      // v0.3.0: 'dig'なら掘った瞬間の揺れで値が決まる（取りに行く間に落盤して揺れが下がれば安くなる）
+      const value = this.rules.riftPriceAt === 'dig' ? this.riftValueHere(y) : r.value;
+      this.cargo.push({ tile: TILE.RIFT, value, bonus: 0, rift: true });
+      const relief = this.riftRelief;
+      if (relief > 0) {
+        const before = this.tremor;
+        this.tremor = Math.max(0, this.tremor - relief);
+        this.metrics.riftRelief += before - this.tremor;
+      }
+      this.metrics.riftsMined++;
+      this.metrics.oreMined++;
+      return;
+    }
+    if (!isOre(t)) return;
+    if (t === TILE.CORE) {
+      this.hasCore = true;
+      this.metrics.oreMined++;
+      return;
+    }
+    if (this.cargo.length >= this.maxCapacity) return; // 背負えない鉱石は砕けて失われる
+    const base = ORE_VALUE[t];
+    const bonus = Math.round(base * tremorBonus(this.tremor));
+    this.cargo.push({ tile: t as TileId, value: base + bonus, bonus });
+    this.metrics.oreMined++;
+  }
+
+  private moveTo(x: number, y: number): void {
+    const wasUnder = this.y > 0;
+    this.x = x;
+    this.y = y;
+    if (y > 0) {
+      // 035: 踏み入るたびに踏み固めがたまる
+      const i = y * WIDTH + x;
+      if (this.trod[i] < 255 && !(this.rules.packCalm > 0 && this.tremor >= this.rules.packCalm)) this.trod[i]++;
+      if (this.rules.packSteps > 0 && this.trod[i] === this.rules.packSteps) this.metrics.packedMade++;
+    }
+    if (y > this.metrics.maxDepth) this.metrics.maxDepth = y;
+    if (wasUnder && y === 0) this.arriveHome();
+    if (!wasUnder && y > 0) this.basketsLeft = this.levels.basket;
+  }
+
+  private bank(entries: CargoEntry[], rate: number, riftRate = rate): number {
+    let total = 0;
+    let bonus = 0;
+    for (const c of entries) {
+      const r = c.rift ? riftRate : rate;
+      total += Math.floor(c.value * r);
+      bonus += Math.floor(c.bonus * r);
+      if (c.rift) this.metrics.riftValueBanked += Math.floor(c.value * r);
+    }
+    this.money += total;
+    this.metrics.moneyEarned += total;
+    this.metrics.tremorBonusEarned += bonus;
+    return total;
+  }
+
+  private arriveHome(): void {
+    this.metrics.trips++;
+    if (this.cargo.length > 0) {
+      this.bank(this.cargo, 1);
+      this.metrics.peakTremorBanked = Math.max(this.metrics.peakTremorBanked, Math.round(this.tremor));
+    }
+    this.cargo = [];
+    this.tremor = 0;
+    this.hp = this.maxHp;
+    if (this.hasCore) {
+      this.hasCore = false;
+      this.money += ORE_VALUE[TILE.CORE];
+      this.metrics.moneyEarned += ORE_VALUE[TILE.CORE];
+      this.metrics.clearedTick = this.tick;
+      this.over = true;
+    }
+  }
+
+  private handleBuy(item: UpgradeId): void {
+    this.digging = null;
+    if (this.y !== 0) return;
+    const def = UPGRADES.find((u) => u.id === item);
+    if (!def) return;
+    const cost = upgradeCost(def, this.levels[item], this.rules.costMult);
+    if (cost === null || this.money < cost) return;
+    this.money -= cost;
+    this.levels[item]++;
+    this.metrics.upgradesBought++;
+    if (item === 'scaffold') this.scaffoldsHeld++;
+    if (item === 'hp') this.hp = this.maxHp;
+  }
+
+  private handleSend(): void {
+    this.digging = null;
+    if (this.y === 0 || this.basketsLeft <= 0 || this.cargo.length === 0) return;
+    const got = this.bank(this.cargo, BASKET_RATE, this.rules.riftBasketRate);
+    this.metrics.basketsSent++;
+    this.metrics.basketValue += got;
+    this.metrics.peakTremorBanked = Math.max(this.metrics.peakTremorBanked, Math.round(this.tremor));
+    this.cargo = [];
+    this.basketsLeft--;
+    // 籠を下ろす振動（v1で籠が代償なしに強すぎたため、揺れのダイヤルに代償を結びつけた）
+    const before = this.tremor;
+    this.tremor = Math.min(TREMOR_CAP, this.tremor + BASKET_TREMOR);
+    this.metrics.basketTremor += this.tremor - before;
+  }
+
+  private caveIn(): void {
+    const damage = caveInDamageAt(this.y);
+    const spillUnits = Math.floor(this.cargo.length / 3);
+    const spilled = spillUnits > 0 ? this.cargo.splice(this.cargo.length - spillUnits, spillUnits) : [];
+    const spilledValue = spilled.reduce((a, c) => a + c.value, 0);
+    this.hp -= damage;
+    this.tremor = Math.max(0, this.tremor - CAVEIN_RELIEF);
+    this.digging = null;
+    this.metrics.caveIns++;
+    if (this.hasCore) this.metrics.coreCaveIns++;
+    this.metrics.caveInDamage += damage;
+    this.metrics.spilledValue += spilledValue;
+    // 035: 落盤で近くの踏み固めが0に戻る（粘って崩した道は作り直し）
+    const R = this.rules.packCollapse;
+    if (this.rules.packSteps > 0 && R >= 0) {
+      for (let y = Math.max(1, this.y - R); y <= Math.min(DEPTH - 1, this.y + R); y++)
+        for (let x = 0; x < WIDTH; x++) {
+          if (Math.abs(x - this.x) + Math.abs(y - this.y) > R) continue;
+          const i = y * WIDTH + x;
+          if (this.trod[i] >= this.rules.packSteps) this.metrics.packedLost++;
+          this.trod[i] = 0;
+        }
+    }
+    let rescued = false;
+    if (this.hp <= 0) {
+      rescued = true;
+      this.rescue();
+    }
+    this.lastCaveIn = { tick: this.tick, damage, spilledUnits: spillUnits, spilledValue, rescued };
+  }
+
+  /** HP0: 地上へ引き上げられる。積荷（核石含む）は全損、所持金の15%を救助費として失う */
+  private rescue(): void {
+    this.metrics.rescues++;
+    this.metrics.rescueLostValue += this.cargoValue;
+    const fee = Math.floor(this.money * RESCUE_FEE_RATE);
+    this.money -= fee;
+    this.metrics.rescueFeesPaid += fee;
+    this.cargo = [];
+    if (this.hasCore) {
+      this.metrics.coreLost++;
+      this.hasCore = false;
+      this.tiles[CORE_Y * WIDTH + CORE_X] = TILE.CORE; // 核石は元の場所へ落ちていく
+    }
+    this.x = START_X;
+    this.y = 0;
+    this.tremor = 0;
+    this.hp = this.maxHp;
+    this.metrics.trips++;
+  }
+
+  /** 掘った床だけを通って地上へ戻る最短経路（BFS） */
+  returnPath(): { x: number; y: number }[] | null {
+    if (this.y === 0) return [];
+    return this.floorPath((_x, y) => y === 0);
+  }
+
+  /** 掘った床だけを通って一番近い足場へ行く最短経路（足場の上なら空配列、足場が無い・届かないならnull） */
+  scaffoldPath(): { x: number; y: number }[] | null {
+    if (this.scaffolds.length === 0) return null;
+    if (this.onScaffold()) return [];
+    return this.floorPath((x, y) => y > 0 && this.isScaffold(x, y));
+  }
+
+  private floorPath(isGoal: (x: number, y: number) => boolean): { x: number; y: number }[] | null {
+    const start = this.y * WIDTH + this.x;
+    const prev = new Int32Array(WIDTH * DEPTH).fill(-2);
+    prev[start] = -1;
+    const queue = [start];
+    let head = 0;
+    let goal = -1;
+    while (head < queue.length) {
+      const cur = queue[head++];
+      const cx = cur % WIDTH;
+      const cy = Math.floor(cur / WIDTH);
+      if (cur !== start && isGoal(cx, cy)) {
+        goal = cur;
+        break;
+      }
+      const ns = [
+        [cx, cy - 1],
+        [cx - 1, cy],
+        [cx + 1, cy],
+        [cx, cy + 1],
+      ];
+      for (const [nx, ny] of ns) {
+        if (nx < 0 || nx >= WIDTH || ny < 0 || ny >= DEPTH) continue;
+        const ni = ny * WIDTH + nx;
+        if (prev[ni] !== -2 || this.tiles[ni] !== TILE.FLOOR) continue;
+        prev[ni] = cur;
+        queue.push(ni);
+      }
+    }
+    if (goal < 0) return null;
+    const path: { x: number; y: number }[] = [];
+    for (let c = goal; c !== start; c = prev[c]) path.push({ x: c % WIDTH, y: Math.floor(c / WIDTH) });
+    return path.reverse();
+  }
+
+  private updateScore(): void {
+    const m = this.metrics;
+    m.score = m.moneyEarned + (m.clearedTick !== null ? 2000 : 0);
+  }
+
+  getState(): GameState {
+    const path = this.returnPath();
+    const stop = (x: number, y: number) => this.isScaffold(x, y);
+    let estReturnTremor: number | null = null;
+    let estReturnTicks: number | null = null;
+    if (this.y > 0 && path) {
+      // 1歩ごとに「今いるマスの深さ」の速さで揺れがたまる
+      const ticks = returnTicksAlong(this.x, this.y, path, this.levels.winch, stop);
+      let sum = 0;
+      for (const c of ticks) sum += this.rateAt(c.y) * this.packMult(c.x, c.y);
+      estReturnTremor = Math.round(sum * 10) / 10;
+      estReturnTicks = ticks.length;
+    }
+    let estScaffoldTremor: number | null = null;
+    let nearestScaffoldY: number | null = null;
+    const spath = this.y > 0 ? this.scaffoldPath() : null;
+    if (spath) {
+      const ticks = returnTicksAlong(this.x, this.y, spath, this.levels.winch, stop);
+      let sum = 0;
+      for (const c of ticks) sum += this.rateAt(c.y) * this.packMult(c.x, c.y);
+      estScaffoldTremor = Math.round(sum * 10) / 10;
+      nearestScaffoldY = spath.length > 0 ? spath[spath.length - 1].y : this.y;
+    }
+    const shop: ShopItemState[] = UPGRADES.map((def) => ({
+      id: def.id,
+      name: def.name,
+      desc: def.id === 'wedge' ? wedgeDesc(this.rules.wedge) : def.desc,
+      level: this.levels[def.id],
+      maxLevel: def.maxLevel,
+      nextCost: upgradeCost(def, this.levels[def.id], this.rules.costMult),
+    }));
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    return {
+      tick: this.tick,
+      phase: this.phase,
+      over: this.over,
+      player: {
+        x: this.x,
+        y: this.y,
+        hp: this.hp,
+        maxHp: this.maxHp,
+        money: this.money,
+        drillPower: this.drillPower,
+        cargo: this.cargo.map((c) => ({ tile: c.tile, value: c.value })),
+        cargoUnits: this.cargo.length,
+        maxCapacity: this.maxCapacity,
+        cargoValue: this.cargoValue,
+        hasCore: this.hasCore,
+        digging: this.digging ? { ...this.digging } : null,
+        tremor: r2(this.tremor),
+        tremorRate: r2(this.rateAt(this.y) * (this.digging ? DIG_TREMOR_MULT : this.packMult(this.x, this.y))),
+        onPacked: this.isPacked(this.x, this.y),
+        packSteps: this.rules.packSteps,
+        packRate: this.rules.packRate,
+        packedCells: this.packedCount,
+        tremorBonus: r2(tremorBonus(this.tremor)),
+        caveInChance100: r2(caveInChanceOver(this.tremor, 100)),
+        caveInDamage: this.y > 0 ? caveInDamageAt(this.y) : 0,
+        estReturnTremor,
+        estReturnTicks,
+        basketsLeft: this.y > 0 ? this.basketsLeft : this.levels.basket,
+        basketsMax: this.levels.basket,
+        scaffoldsHeld: this.scaffoldsHeld,
+        onScaffold: this.onScaffold(),
+        estScaffoldTremor,
+        nearestScaffoldY,
+        overLine: this.y > 0 && this.tremor >= this.rules.riftLine,
+        riftLine: this.rules.riftLine,
+        riftChance: this.rules.rifts && this.y > 0 && !(this.rules.riftNeedSpace && (this.cargo.length >= this.maxCapacity || this.hasCore)) ? Math.round(riftChance(this.tremor, this.rules.riftLine, this.riftChanceMult) * 1000) / 1000 : 0,
+        riftMax: this.rules.rifts ? this.riftMax : 0,
+        riftRelief: this.rules.rifts ? this.riftRelief : 0,
+        riftValueHere: this.rules.rifts && this.y > 0 && this.tremor >= this.rules.riftLine ? this.riftValueHere(this.y) : null,
+      },
+      map: {
+        width: WIDTH,
+        depth: DEPTH,
+        tiles: this.tiles.slice(),
+        trod: Array.from(this.trod),
+        scaffolds: this.scaffolds.map((sc) => ({ ...sc })),
+        rifts: this.rifts.map((r) => ({ x: r.x, y: r.y, closesAt: r.closesAt, value: this.rules.riftPriceAt === 'dig' ? this.riftValueHere(r.y) : r.value })),
+      },
+      lastCaveIn: this.lastCaveIn ? { ...this.lastCaveIn } : null,
+      shop,
+      metrics: { ...this.metrics },
+    };
+  }
+}
