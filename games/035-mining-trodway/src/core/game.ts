@@ -21,6 +21,10 @@ import {
  * - 固めた坑道の上で掘っていない間は、揺れのたまる速さが ×RULES.packRate（揺れずに歩ける）。帰り道の見積もり（帰着線）にもそのまま効く
  * - 落盤が起きると、プレイヤーからマンハッタン距離 RULES.packCollapse 以内の踏み固めが0に戻る（粘って崩した道は作り直し）
  * - `setRules({ packSteps: 0 })`（simulateの`--tune packSteps=0`）で029 v0.3.0と同じ規則（固めなしの対照）
+ * v0.2.0（035-v1レビュー重大#1・#2）:
+ * - 2回で固まり、その上は揺れ×0.1。**固めた坑道は走れる**（dash付きの移動・巻き上げで1tickに2マス＝往復の多い型の時間が浮く）
+ * - **固めが効くのは揺れがpackCap=55未満の間だけ**（揺れ×0.1も走るのも）。線を越えて粘る型の帰り道は普通に揺れる＝帰着線が今の揺れに重ならない
+ * - `setRules(RULES_T1)`（`--preset t1`）でv0.1.0の固め（4回・×0.2・上限なし・走れない）
  * 持ち越すのは数字（034の余熱）ではなく地形。短い遠征を重ねるほど同じ坑道を往復し、奥への道が先に固まる
  *
  * 以下は029の説明（土台）:
@@ -109,10 +113,13 @@ export const RIFT_HEIGHT_SPAN = 30;
 export const RIFT_HEIGHT_MAX = 3;
 /** v0.3.0: 割れ目を掘ると抜ける揺れ（割れ目は岩盤の圧の逃げ道） */
 export const RIFT_RELIEF = 10;
-/** 035: 固めた坑道になるまでに踏み入る回数・その上の揺れの倍率・落盤で崩れる範囲 */
-export const PACK_STEPS = 4;
-export const PACK_RATE = 0.2;
+/** 035: 固めた坑道になるまでに踏み入る回数・その上の揺れの倍率・落盤で崩れる範囲（v0.2.0: 4→2回、×0.2→×0.1） */
+export const PACK_STEPS = 2;
+export const PACK_RATE = 0.1;
 export const PACK_COLLAPSE = 3;
+/** 035 v0.2.0: 固めた坑道から掘る揺れの倍率（掃引用、既定1＝掘りには効かない）・固めが効く揺れの上限（v1レビュー重大#1・#2） */
+export const PACK_DIG = 1;
+export const PACK_CAP = 55;
 
 /**
  * 規則の切り替え（対照用・掃引用）。
@@ -157,6 +164,12 @@ export const RULES: {
   packCollapse: number;
   /** 035掃引用: 揺れがこれ以上の間に踏み入っても踏み固めがたまらない（0なら無し） */
   packCalm: number;
+  /** 035 v0.2.0: 固めた坑道の上に立って面した壁を掘る間の揺れの倍率（1なら掘りには効かない＝v0.1.0） */
+  packDig: number;
+  /** 035 v0.2.0: 揺れがこれ未満の間だけ固めが効く（0なら上限なし＝v0.1.0）。線の外では固めた坑道も普通に揺れる */
+  packCap: number;
+  /** 035 v0.2.0: 固めた坑道の上は走れる（dash付きの移動・巻き上げで1tickに2マス。足場では止まる） */
+  packGlide: boolean;
 } = {
   rifts: true,
   riftLine: 45,
@@ -181,6 +194,9 @@ export const RULES: {
   packRate: PACK_RATE,
   packCollapse: PACK_COLLAPSE,
   packCalm: 0,
+  packDig: PACK_DIG,
+  packCap: PACK_CAP,
+  packGlide: true,
 };
 export function setRules(r: Partial<typeof RULES>): void {
   Object.assign(RULES, r);
@@ -204,6 +220,8 @@ export function riftBaseValue(y: number, baseMult = 1): number {
 
 /** 029 v0.3.0と同じ規則（固めなし、`--preset 029`） */
 export const RULES_029: typeof RULES = { ...RULES, packSteps: 0 };
+/** 035 v0.1.0の規則（`--preset t1`: 掘りに効かず、揺れの上限もない） */
+export const RULES_T1: typeof RULES = { ...RULES, packSteps: 4, packRate: 0.2, packDig: 1, packCap: 0, packGlide: false };
 
 /** 揺れtの割れ目の「線からの高さ」倍率（flatなら1）。楔（steepLv）の伸びは揺れwedgeFromより上の分にだけ効く */
 export function riftHeightMult(t: number, ru: typeof RULES, steepLv = 0): number {
@@ -388,6 +406,7 @@ function emptyMetrics(): Metrics {
     packedLost: 0,
     packedTicks: 0,
     packSaved: 0,
+    glides: 0,
     clearedTick: null,
     score: 0,
   };
@@ -420,28 +439,35 @@ export function returnTicksAlong(
   winchLv: number,
   /** 巻き上げが止まるマス（足場） */
   stopAt: (x: number, y: number) => boolean = () => false,
+  /** 035 v0.2.0: (x,y)に(dx,dy)向きで踏み入った直後にもう1マス走れるか（帰り道は走る前提で見積もる） */
+  glide: (x: number, y: number, dx: number, dy: number) => boolean = () => false,
 ): { x: number; y: number }[] {
   const out: { x: number; y: number }[] = [];
   let px = sx;
   let py = sy;
   let i = 0;
-  while (i < path.length) {
-    let n = 1;
-    if (path[i].y === py - 1 && path[i].x === px) {
-      while (
-        n < 1 + winchLv &&
-        i + n < path.length &&
-        path[i + n].x === px &&
-        path[i + n].y === path[i + n - 1].y - 1 &&
-        path[i + n - 1].y > 0 &&
-        !stopAt(path[i + n - 1].x, path[i + n - 1].y)
-      )
-        n++;
+  const next = (dx: number, dy: number) => i < path.length && path[i].x === px + dx && path[i].y === py + dy;
+  // 1マス進み、走れるならもう1マス
+  const stepOnce = (dx: number, dy: number) => {
+    px = path[i].x;
+    py = path[i].y;
+    i++;
+    if (py > 0 && glide(px, py, dx, dy) && next(dx, dy)) {
+      px = path[i].x;
+      py = path[i].y;
+      i++;
     }
-    const last = path[i + n - 1];
-    px = last.x;
-    py = last.y;
-    i += n;
+  };
+  while (i < path.length) {
+    const dx = path[i].x - px;
+    const dy = path[i].y - py;
+    if (dx === 0 && dy === -1) {
+      // 巻き上げ: 最大(1+Lv)段（足場・地上で止まる）
+      for (let k = 0; k < 1 + winchLv && next(0, -1); k++) {
+        stepOnce(0, -1);
+        if (py === 0 || stopAt(px, py)) break;
+      }
+    } else stepOnce(dx, dy);
     out.push({ x: px, y: py });
   }
   return out;
@@ -523,9 +549,31 @@ export class Game {
     const k = this.rules.packSteps;
     return k > 0 && y > 0 && this.trod[y * WIDTH + x] >= k;
   }
-  /** 035: マス(x,y)に居て掘っていないときの揺れの倍率 */
-  private packMult(x: number, y: number): number {
-    return this.isPacked(x, y) ? this.rules.packRate : 1;
+  /** 035: 揺れtのときマス(x,y)に居て掘っていない（dig=falseの）／掘っている（dig=true）ときの固めの倍率。
+   * v0.2.0: 揺れがpackCap以上なら効かない */
+  private packMult(x: number, y: number, t = this.tremor, dig = false): number {
+    if (!this.isPacked(x, y)) return 1;
+    const cap = this.rules.packCap;
+    if (cap > 0 && t >= cap) return 1;
+    return dig ? this.rules.packDig : this.rules.packRate;
+  }
+  /**
+   * 035 v0.2.0: (x,y)に(dx,dy)向きで踏み入った直後に、同じ向きへもう1マス走れるか。
+   * (x,y)と次のマスがどちらも固めた坑道の床で、(x,y)が足場でなく、揺れがpackCap未満であること
+   */
+  dashOk(x: number, y: number, dx: number, dy: number): boolean {
+    if (!this.rules.packGlide || !this.isPacked(x, y) || this.isScaffold(x, y)) return false;
+    // 揺れがpackCap以上の坑道は走れない（固めの効きは線の下の間だけ）
+    if (this.rules.packCap > 0 && this.tremor >= this.rules.packCap) return false;
+    const nx = x + dx;
+    const ny = y + dy;
+    return ny > 0 && this.tileAt(nx, ny) === TILE.FLOOR && this.isPacked(nx, ny);
+  }
+  /** 035 v0.2.0: 揺れtから経路ticksを歩いたときにたまる揺れ（固めはpackCapまで） */
+  private walkTremor(ticks: { x: number; y: number }[]): number {
+    let t = this.tremor;
+    for (const c of ticks) t += this.rateAt(c.y) * this.packMult(c.x, c.y, t);
+    return t - this.tremor;
   }
   private get packedCount(): number {
     const k = this.rules.packSteps;
@@ -551,7 +599,7 @@ export class Game {
 
     switch (action.type) {
       case 'move':
-        this.handleMove(action.dir);
+        this.handleMove(action.dir, !!action.dash);
         break;
       case 'buy':
         this.handleBuy(action.item);
@@ -560,7 +608,7 @@ export class Game {
         this.handleSend();
         break;
       case 'hoist':
-        this.handleHoist();
+        this.handleHoist(!!action.dash);
         break;
       case 'place':
         this.handlePlace();
@@ -582,9 +630,10 @@ export class Game {
         }
       } else {
         const raw = this.rateAt(this.y) * (this.digging ? DIG_TREMOR_MULT : 1);
-        // 035: 固めた坑道の上で掘っていない間は揺れずに歩ける
-        const packed = !this.digging && this.isPacked(this.x, this.y);
-        const rate = packed ? raw * this.rules.packRate : raw;
+        // 035: 固めた坑道の上で掘っていない間は揺れずに歩ける（v0.2.0: 掘る間は×packDig、揺れがpackCap以上なら効かない）
+        const mult = this.packMult(this.x, this.y, this.tremor, !!this.digging);
+        const packed = mult < 1;
+        const rate = raw * mult;
         if (packed) {
           this.metrics.packedTicks++;
           this.metrics.packSaved += raw - rate;
@@ -654,7 +703,7 @@ export class Game {
     });
   }
 
-  private handleMove(dir: Dir): void {
+  private handleMove(dir: Dir, dash = false): void {
     const [dx, dy] = dir === 'up' ? [0, -1] : dir === 'down' ? [0, 1] : dir === 'left' ? [-1, 0] : [1, 0];
     const nx = this.x + dx;
     const ny = this.y + dy;
@@ -666,6 +715,11 @@ export class Game {
     if (t === TILE.FLOOR) {
       this.digging = null;
       this.moveTo(nx, ny);
+      // 035 v0.2.0: 固めた坑道の上は走れる（1tickで2マス）
+      if (dash && this.dashOk(nx, ny, dx, dy)) {
+        this.metrics.glides++;
+        this.moveTo(nx + dx, ny + dy);
+      }
       return;
     }
     if (!this.digging || this.digging.x !== nx || this.digging.y !== ny) {
@@ -685,13 +739,19 @@ export class Game {
    * v1初版は「縦の移動が自動で複数マス進む」方式だったが、縦穴の途中で横の鉱石へ曲がれず通り過ぎる
    * （人の操作でもボットでも同じ）問題があったため、明示的なアクションに分けた
    */
-  private handleHoist(): void {
+  private handleHoist(dash = false): void {
     this.digging = null;
     const steps = 1 + this.levels.winch;
     for (let i = 0; i < steps && this.y > 0; i++) {
       if (this.tileAt(this.x, this.y - 1) !== TILE.FLOOR) break;
       this.moveTo(this.x, this.y - 1);
       if (this.onScaffold()) break; // 足場は踊り場: 巻き上げはそこで止まる
+      // 035 v0.2.0: 固めた縦坑を走るなら1段ごとにもう1マス
+      if (dash && this.y > 0 && this.dashOk(this.x, this.y, 0, -1)) {
+        this.metrics.glides++;
+        this.moveTo(this.x, this.y - 1);
+        if (this.onScaffold()) break;
+      }
     }
   }
 
@@ -927,24 +987,21 @@ export class Game {
   getState(): GameState {
     const path = this.returnPath();
     const stop = (x: number, y: number) => this.isScaffold(x, y);
+    const glide = (x: number, y: number, dx: number, dy: number) => this.dashOk(x, y, dx, dy);
     let estReturnTremor: number | null = null;
     let estReturnTicks: number | null = null;
     if (this.y > 0 && path) {
       // 1歩ごとに「今いるマスの深さ」の速さで揺れがたまる
-      const ticks = returnTicksAlong(this.x, this.y, path, this.levels.winch, stop);
-      let sum = 0;
-      for (const c of ticks) sum += this.rateAt(c.y) * this.packMult(c.x, c.y);
-      estReturnTremor = Math.round(sum * 10) / 10;
+      const ticks = returnTicksAlong(this.x, this.y, path, this.levels.winch, stop, glide);
+      estReturnTremor = Math.round(this.walkTremor(ticks) * 10) / 10;
       estReturnTicks = ticks.length;
     }
     let estScaffoldTremor: number | null = null;
     let nearestScaffoldY: number | null = null;
     const spath = this.y > 0 ? this.scaffoldPath() : null;
     if (spath) {
-      const ticks = returnTicksAlong(this.x, this.y, spath, this.levels.winch, stop);
-      let sum = 0;
-      for (const c of ticks) sum += this.rateAt(c.y) * this.packMult(c.x, c.y);
-      estScaffoldTremor = Math.round(sum * 10) / 10;
+      const ticks = returnTicksAlong(this.x, this.y, spath, this.levels.winch, stop, glide);
+      estScaffoldTremor = Math.round(this.walkTremor(ticks) * 10) / 10;
       nearestScaffoldY = spath.length > 0 ? spath[spath.length - 1].y : this.y;
     }
     const shop: ShopItemState[] = UPGRADES.map((def) => ({
@@ -974,10 +1031,13 @@ export class Game {
         hasCore: this.hasCore,
         digging: this.digging ? { ...this.digging } : null,
         tremor: r2(this.tremor),
-        tremorRate: r2(this.rateAt(this.y) * (this.digging ? DIG_TREMOR_MULT : this.packMult(this.x, this.y))),
+        tremorRate: r2(this.rateAt(this.y) * (this.digging ? DIG_TREMOR_MULT : 1) * this.packMult(this.x, this.y, this.tremor, !!this.digging)),
         onPacked: this.isPacked(this.x, this.y),
         packSteps: this.rules.packSteps,
         packRate: this.rules.packRate,
+        packDig: this.rules.packDig,
+        packCap: this.rules.packCap,
+        packGlide: this.rules.packGlide,
         packedCells: this.packedCount,
         tremorBonus: r2(tremorBonus(this.tremor)),
         caveInChance100: r2(caveInChanceOver(this.tremor, 100)),
