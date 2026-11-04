@@ -69,7 +69,7 @@
  *   `--preset 032`で032 v0.3.0と同じ規則。ボットの帰還線は「この遠征で上げた分」（帰着線−始まりの揺れ×LINE_REL）で測る（033と同じ）。
  *   `--lineRel 0`で絶対値の帰着線。`--hp p02=0.6`で戦略ごとの帰るHPを上書き。`--grid`で5条件×戦略の一括実行（JSON行）
  */
-import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
+import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, PRESET_V1, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type DeathPhase, type Dir, type Enemy, type GameState, type ShopItemId, type TileId, type Turret } from '../src/core/types';
 
 /** 032: 支柱を建て始める拠点からの距離（列）と、拠点の買い物で残す支柱の本数 */
@@ -1282,6 +1282,7 @@ interface RunResult {
   packedLost: number;
   packedTicks: number;
   packCapTicks: number;
+  packCaveSaved: number;
   runs: number;
   /** 030新規: 割れ目 */
   riftsOpened: number;
@@ -1510,6 +1511,7 @@ function runOne(seed: number, strategy: string, maxTicks: number): RunResult {
     packedLost: s.metrics.packedLost,
     packedTicks: s.metrics.packedTicks,
     packCapTicks: s.metrics.packCapTicks,
+    packCaveSaved: s.metrics.packCaveSaved,
     runs: s.metrics.runs,
     greedyStart,
     greedyTremor,
@@ -1546,6 +1548,8 @@ else if (PRESET === '030') Object.assign(TUNE, PRESET_030);
 else if (PRESET === '032') Object.assign(TUNE, PRESET_032);
 // 036新規: --preset 034 で034 v0.3.0と同じ規則（固め・走るなし）。ボットの帰還線は034のまま
 else if (PRESET === '034') Object.assign(TUNE, PRESET_034);
+// 036 2回目: --preset v1 で036 v0.1.0の固め（揺れ×0.1・上限40の崖）
+else if (PRESET === 'v1') Object.assign(TUNE, PRESET_V1);
 else if (PRESET !== null) throw new Error(`unknown preset: ${PRESET}`);
 // 030新規: --ignoreRifts でボットが割れ目を見ない（割れ目は開くが取らない）、--riftSlack N で割れ目を追う余裕
 RIFT_CHASE = !args.includes('--ignoreRifts');
@@ -1553,7 +1557,7 @@ RIFT_SLACK = Number(argVal('riftSlack') ?? 10);
 BOT_RUN = !args.includes('--noRun');
 BOT_FIX = !args.includes('--bot034');
 // `--preset 026/028`では帰還線をその版のまま（028と全フィールド一致させる）
-if ((PRESET !== null && PRESET !== '030' && PRESET !== '032' && PRESET !== '034') || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
+if ((PRESET !== null && PRESET !== '030' && PRESET !== '032' && PRESET !== '034' && PRESET !== 'v1') || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
 const propsArg = argVal('props');
 if (propsArg === 'none' || propsArg === 'all' || propsArg === 'auto') PROPS_DEFAULT = propsArg;
 else if (propsArg !== undefined) throw new Error(`unknown --props: ${propsArg}`);
@@ -1652,6 +1656,7 @@ function briefRow(strategy: string, rs: RunResult[]): Record<string, number | st
     pack: `${f((r) => r.packedMade)}/${f((r) => r.packedLost)}`,
     packSec: f((r) => r.packedTicks / 10),
     capSec: f((r) => r.packCapTicks / 10),
+    caveSaved: f((r) => r.packCaveSaved, 2),
     runs: f((r) => r.runs),
     riftShare: +(rs.reduce((a, r) => a + r.riftValueBanked, 0) / Math.max(1, rs.reduce((a, r) => a + r.moneyEarned, 0))).toFixed(3),
     fieldDmg: f((r) => r.fieldDamageTaken),

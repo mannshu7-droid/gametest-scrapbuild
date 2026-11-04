@@ -364,6 +364,24 @@ export const TUNE = {
    * 本命では揺れが報酬の倍率でもあるので、往きの揺れを割り引くと売値も割り引かれる。それを切り分ける
    */
   packHome: 0,
+  /**
+   * 036 2回目（v1致命#1）: 固めが何を割り引くか。0＝v1（固めた坑道の上で掘らずにいる間の揺れのたまる速さ×packRate＝売値の倍率・余熱の元・帰着線もまとめて下がる）、
+   * 1＝落盤だけ（揺れも帰着線も普通にたまり、固めた坑道の上で掘らずにいる間の落盤の確率だけ×packCave＝「揺れずに歩ける」を「崩れずに歩ける」に読み替える）
+   */
+  packMode: 1,
+  /** packMode=1 の落盤の確率の倍率（固めた坑道の上で掘らずにいる間） */
+  packCave: 0.1,
+  /**
+   * 036 2回目（v1重大#2、上限の崖）: >0なら上限（packCap）から上限+packSlope までで割引を×packRate（packCave）→×1へ線形に戻す（坂）。
+   * 走るは上限まで（坂の上では走れない）。0なら崖（v1）
+   */
+  packSlope: 0,
+};
+/** 036 2回目: `--preset v1`（036 v0.1.0と同じ規則）。固めは揺れのたまる速さ×0.1、上限40の崖 */
+export const PRESET_V1: Partial<typeof TUNE> = {
+  packMode: 0,
+  packCapOver: 10,
+  packSlope: 0,
 };
 /** 036新規: `--preset 034`（034-glowvent v0.3.0と同じ規則）。固めと走るを外す */
 export const PRESET_034: Partial<typeof TUNE> = {
@@ -371,6 +389,8 @@ export const PRESET_034: Partial<typeof TUNE> = {
   packRun: 0,
   riftRawEst: 0,
   packHome: 0,
+  packMode: 0,
+  packSlope: 0,
 };
 /** `--preset 026`（026-tremorspire v0.3.0と同じ規則）で上書きする値。対照群として同じコードに残す */
 export const PRESET_026: Partial<typeof TUNE> = {
@@ -1252,6 +1272,7 @@ export class Game {
     packedLost: 0,
     packedTicks: 0,
     packCapTicks: 0,
+    packCaveSaved: 0,
     runs: 0,
     riftCommits: 0,
     digBlockedTicks: 0,
@@ -1427,9 +1448,13 @@ export class Game {
     return this.trod[x * LANE_COUNT + y] >= TUNE.packSteps;
   }
   /** 揺れtのとき、(x,y)で掘らずにいる間の固めの倍率（上限以上・固めでなければ1） */
-  private packMultAt(x: number, y: number, t: number): number {
-    if (!this.isPacked(x, y) || t >= this.packCap()) return 1;
-    return TUNE.packRate;
+  private packMultAt(x: number, y: number, t: number, rate = TUNE.packRate): number {
+    if (!this.isPacked(x, y)) return 1;
+    const cap = this.packCap();
+    if (t < cap) return rate;
+    // 2回目: 坂（上限から上限+packSlopeまでで×rate→×1）
+    if (TUNE.packSlope > 0 && t < cap + TUNE.packSlope) return rate + (1 - rate) * ((t - cap) / TUNE.packSlope);
+    return 1;
   }
   /** 掘った床に踏み入る（踏み固めが1たまる。拠点の圏内は数えない） */
   private tread(x: number, y: number): void {
@@ -1489,7 +1514,7 @@ export class Game {
     rate *= cover;
     if (this.isDusk()) rate *= TUNE.duskMult;
     // 036: 固めた坑道の上で掘らずにいる間は揺れ×packRate（揺れが上限以上なら効かない）
-    if (!digging && !raw && (TUNE.packHome <= 0 || homeward)) rate *= this.packMultAt(x, y, t);
+    if (TUNE.packMode === 0 && !digging && !raw && (TUNE.packHome <= 0 || homeward)) rate *= this.packMultAt(x, y, t);
     return rate;
   }
   /**
@@ -1566,6 +1591,12 @@ export class Game {
     }
     if (p.tremor > this.metrics.maxTremor) this.metrics.maxTremor = Math.round(p.tremor);
     let prob = caveInProb(p.tremor);
+    // 036 2回目（packMode=1）: 固めた坑道の上で掘らずにいる間は落盤の確率×packCave（上限・坂はpackMultAtと同じ）
+    if (TUNE.packMode === 1 && !this.dugThisTick && (TUNE.packHome <= 0 || this.movedHomeward)) {
+      const m = this.packMultAt(p.x, p.y, p.tremor, TUNE.packCave);
+      if (m < 1) this.metrics.packCaveSaved += prob * (1 - m);
+      prob *= m;
+    }
     if (TUNE.propCaveBare !== 1 && !this.supportedAt(p.x) && coverage === 'none') prob *= TUNE.propCaveBare;
     if (prob <= 0 || this.quakeRng() >= prob) return;
     // 032: 支えの下の落盤は一番近い支柱を折ることがある
@@ -3860,7 +3891,7 @@ export class Game {
         tremor: p.tremor,
         tremorCap: TREMOR_CAP,
         tremorBonus: tremorBonusOf(p.tremor),
-        caveInChance100: 1 - Math.pow(1 - caveInProb(p.tremor), 100),
+        caveInChance100: 1 - Math.pow(1 - caveInProb(p.tremor) * (TUNE.packMode === 1 ? this.packMultAt(p.x, p.y, p.tremor, TUNE.packCave) : 1), 100),
         tremorRate: this.resource === 'tremor' ? this.tremorRateHere(p.x, p.y, false) : 0,
         estTremorAtReturn: this.estTremorAtReturn(),
         corridor: this.patrolCoverage(p.x, p.y),
@@ -3944,9 +3975,10 @@ export class Game {
         carryStart: Math.round(p.carryStart * 10) / 10,
         shield: Math.round(p.shield * 10) / 10,
         onPacked: this.isPacked(p.x, p.y),
-        packActive: this.isPacked(p.x, p.y) && p.tremor < this.packCap(),
+        packActive: this.isPacked(p.x, p.y) && p.tremor < this.packCap() + TUNE.packSlope,
         packCap: this.packCap() === Infinity ? 999 : this.packCap(),
-        packRate: TUNE.packRate,
+        packRate: TUNE.packMode === 1 ? TUNE.packCave : TUNE.packRate,
+        packMode: TUNE.packMode,
         packSteps: TUNE.packSteps,
         packRun: TUNE.packRun > 0 && TUNE.packSteps > 0,
         packLost: this.lastPackLost ? { ...this.lastPackLost } : null,
