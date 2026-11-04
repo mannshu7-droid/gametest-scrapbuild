@@ -1,4 +1,4 @@
-import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, type Resource } from './core/game';
+import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, PRESET_V1, type Resource } from './core/game';
 import { Renderer } from './render/renderer';
 import { Input } from './render/input';
 import { createAIP } from './aip';
@@ -23,6 +23,7 @@ else if (params.get('preset') === '030') Object.assign(TUNE, PRESET_030);
 else if (params.get('preset') === '032') Object.assign(TUNE, PRESET_032);
 // 036新規: ?preset=034 で034-glowvent v0.3.0と同じ規則（固め・走るなし）
 else if (params.get('preset') === '034') Object.assign(TUNE, PRESET_034);
+else if (params.get('preset') === 'v1') Object.assign(TUNE, PRESET_V1);
 let game = new Game(Number(params.get('seed') ?? 1), resource);
 let aiControlled = false;
 

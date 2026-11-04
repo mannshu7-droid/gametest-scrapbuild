@@ -380,6 +380,8 @@ export interface Metrics {
   packedLost: number;
   packedTicks: number;
   packCapTicks: number;
+  /** 036 2回目: packMode=1で固めが防いだ落盤の期待回数（確率の差の合計） */
+  packCaveSaved: number;
   runs: number;
   riftCommits: number;
   digBlockedTicks: number;
@@ -548,6 +550,8 @@ export interface GameState {
     packActive: boolean;
     packCap: number;
     packRate: number;
+    /** 036 2回目: 0＝揺れ×packRate（v1）、1＝落盤×packRate */
+    packMode: number;
     packSteps: number;
     packRun: boolean;
     /** 036新規: 直近の落盤で崩れた固めた坑道（tickと数。無ければnull） */

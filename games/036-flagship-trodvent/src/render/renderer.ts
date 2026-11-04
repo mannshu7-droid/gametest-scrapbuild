@@ -616,7 +616,7 @@ export class Renderer {
       this.fitText(`固めた坑道が${lost.n}マス崩れた`, x + w - 186, y + 10, 186);
     } else if (p.onPacked) {
       ctx.fillStyle = p.packActive ? '#7fd3ff' : '#888';
-      this.fitText(p.packActive ? `固め 揺れ×${p.packRate}${p.packRun ? ' 走れる(Shift)' : ''}` : `固め効かず(${p.packCap}↑)`, x + w - 186, y + 10, 186);
+      this.fitText(p.packActive ? `固め ${p.packMode === 1 ? '落盤' : '揺れ'}×${p.packRate}${p.packRun && p.tremor < p.packCap ? ' 走れる(Shift)' : ''}` : `固め効かず(${p.packCap}↑)`, x + w - 186, y + 10, 186);
     }
   }
 }
