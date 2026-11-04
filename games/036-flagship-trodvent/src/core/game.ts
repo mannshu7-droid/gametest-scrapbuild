@@ -376,6 +376,23 @@ export const TUNE = {
    * 走るは上限まで（坂の上では走れない）。0なら崖（v1）
    */
   packSlope: 0,
+  /**
+   * 036 3回目（v2重大#3 案(a)）: >0なら固めた坑道の上を拠点の方へ歩いている間（掘らずに）、揺れが packReliefBelow 未満なら毎tick −packRelief（弱い踊り場の帰り道）。
+   * 帰着線の見積もりにも入る（帰り道で下がるのは本当なので）。0なら v2
+   */
+  packRelief: 0,
+  /** 案(a)の効く上限（この揺れ未満で下がる）。0なら固めの上限（packCap＝注意線+packCapOver）と同じ */
+  packReliefBelow: 0,
+  /**
+   * 036 3回目（v2重大#3 案(b)）: 1なら帰着線の見積もりに走りを入れる。固めた坑道が2マス続き、揺れが上限未満の所は1tickに2マス進む＝揺れのたまり半分。
+   * v2までの見積もりは歩き前提で、走って帰れる慎重な型ほど早く帰りすぎていた。0なら v2
+   */
+  packRunEst: 0,
+  /**
+   * 036 3回目（v2重大#3 案(d)）: >0なら固めた坑道の上では割れ目の窓（帰着線≥注意線）が 注意線−packRiftFloor から開く。
+   * 慎重な型はHPで早く帰り帰着線が注意線に届かない（窓の時間 p02 705tick、他の慎重な型 980〜1190）ので、育てた道の上で窓を下げる。0なら v2
+   */
+  packRiftFloor: 0,
 };
 /** 036 2回目: `--preset v1`（036 v0.1.0と同じ規則）。固めは揺れのたまる速さ×0.1、上限40の崖 */
 export const PRESET_V1: Partial<typeof TUNE> = {
@@ -1273,6 +1290,7 @@ export class Game {
     packedTicks: 0,
     packCapTicks: 0,
     packCaveSaved: 0,
+    packReliefTicks: 0,
     runs: 0,
     riftCommits: 0,
     digBlockedTicks: 0,
@@ -1515,6 +1533,9 @@ export class Game {
     if (this.isDusk()) rate *= TUNE.duskMult;
     // 036: 固めた坑道の上で掘らずにいる間は揺れ×packRate（揺れが上限以上なら効かない）
     if (TUNE.packMode === 0 && !digging && !raw && (TUNE.packHome <= 0 || homeward)) rate *= this.packMultAt(x, y, t);
+    // 036 3回目 案(a): 固めた坑道の帰り道は揺れが下がる（上限未満だけ。粘った揺れは下がらない）
+    if (TUNE.packRelief > 0 && homeward && !digging && !raw && this.isPacked(x, y) && t < (TUNE.packReliefBelow > 0 ? TUNE.packReliefBelow : this.packCap()))
+      return -TUNE.packRelief;
     return rate;
   }
   /**
@@ -1531,7 +1552,10 @@ export class Game {
     let peak = t;
     for (let x = p.x - 1; x >= 0; x--) {
       if (this.inBaseRadius(x)) break;
-      t = Math.max(0, Math.min(TREMOR_CAP, t + this.tremorRateHere(x, p.y, false, false, true, t, raw)));
+      let r = this.tremorRateHere(x, p.y, false, false, true, t, raw);
+      // 3回目 案(b): 走れる所（固めた坑道が2マス続き、揺れが上限未満）は1tickに2マス＝たまりは半分
+      if (TUNE.packRunEst > 0 && !raw && r > 0 && TUNE.packRun > 0 && t < this.packCap() && this.isPacked(x, p.y) && this.isPacked(x + 1, p.y)) r *= 0.5;
+      t = Math.max(0, Math.min(TREMOR_CAP, t + r));
       if (t > peak) peak = t;
     }
     return Math.round(peak);
@@ -1552,7 +1576,11 @@ export class Game {
     }
     const coverage = this.patrolCoverage(p.x, p.y);
     const rate = this.tremorRateHere(p.x, p.y, this.dugThisTick, this.restedThisTick, this.movedHomeward);
-    if (rate < 0) {
+    // 3回目 案(a): 固めた坑道の帰り道で下がった分は踊り場ではない（休みの宣言にしない）
+    const relievesHere = !this.dugThisTick && (TUNE.restCommit <= 0 || this.restedThisTick);
+    const packRelieved = rate < 0 && TUNE.packRelief > 0 && !(coverage === 'woven' && relievesHere) && !(coverage === 'lane' && relievesHere && TUNE.laneRelief > 0);
+    if (packRelieved) this.metrics.packReliefTicks++;
+    if (rate < 0 && !packRelieved) {
       if (coverage === 'woven') this.metrics.corridorReliefTicks++;
       else this.metrics.laneReliefTicks++;
       // 032: 休んで揺れが下がったら帰還の宣言（その遠征ではもう掘れない）
@@ -1636,6 +1664,11 @@ export class Game {
   }
   /** 2回目: 割れ目が開き始める帰着線（支えの下はpropRiftFloorだけ低い） */
   private riftFloorHere(): number {
+    // 036 3回目（v2重大#3 案(d)）: 固めた坑道の上では割れ目の窓が注意線−packRiftFloorから開く（早く帰る型が育てた道で割れ目に出会える）
+    if (TUNE.packRiftFloor > 0 && this.isPacked(this.player.x, this.player.y)) return Math.min(this.riftFloorBase(), TUNE.cautionAt - TUNE.packRiftFloor);
+    return this.riftFloorBase();
+  }
+  private riftFloorBase(): number {
     if (TUNE.propRiftFloor <= 0 || !this.supportedAt(this.player.x)) return TUNE.cautionAt;
     // 3回目（v2中#5）: propFloorOutside=1なら、塔のパトロール圏（レーン・回廊）の中の支柱には床を付けない
     if (TUNE.propFloorOutside > 0 && this.patrolCoverage(this.player.x, this.player.y) !== 'none') return TUNE.cautionAt;

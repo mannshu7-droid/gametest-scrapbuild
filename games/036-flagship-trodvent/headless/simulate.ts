@@ -1283,6 +1283,7 @@ interface RunResult {
   packedTicks: number;
   packCapTicks: number;
   packCaveSaved: number;
+  packReliefTicks: number;
   runs: number;
   /** 030新規: 割れ目 */
   riftsOpened: number;
@@ -1512,6 +1513,7 @@ function runOne(seed: number, strategy: string, maxTicks: number): RunResult {
     packedTicks: s.metrics.packedTicks,
     packCapTicks: s.metrics.packCapTicks,
     packCaveSaved: s.metrics.packCaveSaved,
+    packReliefTicks: s.metrics.packReliefTicks,
     runs: s.metrics.runs,
     greedyStart,
     greedyTremor,
