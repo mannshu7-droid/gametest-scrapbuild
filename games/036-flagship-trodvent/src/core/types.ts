@@ -382,6 +382,8 @@ export interface Metrics {
   packCapTicks: number;
   /** 036 2回目: packMode=1で固めが防いだ落盤の期待回数（確率の差の合計） */
   packCaveSaved: number;
+  /** 036 3回目（案(a)）: 固めた坑道の帰り道で揺れが下がったtick数 */
+  packReliefTicks: number;
   runs: number;
   riftCommits: number;
   digBlockedTicks: number;
