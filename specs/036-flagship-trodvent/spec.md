@@ -1,7 +1,7 @@
 # 仕様書: 036-flagship-trodvent（トロッドベント — 踏み固めた坑道を走る揺れの遠征）
 
 - 作成日: 2026-11-04
-- ステータス: v0.3.0（サイクル42・3回目 FIX only。既定の規則は v0.2.0 と同じ。[v1レビュー](../../reviews/036-flagship-trodvent-v1.md)・[v2レビュー](../../reviews/036-flagship-trodvent-v2.md)）
+- ステータス: v0.3.0（サイクル42・4回目 FINAL REVIEW で総括、判定FIX: [finalレビュー](../../reviews/036-flagship-trodvent-final.md)。3回目 FIX only。既定の規則は v0.2.0 と同じ。[v1レビュー](../../reviews/036-flagship-trodvent-v1.md)・[v2レビュー](../../reviews/036-flagship-trodvent-v2.md)）
 - 元になったレビュー: [reviews/035-mining-trodway-final.md](../../reviews/035-mining-trodway-final.md)（提案(1)「034-glowventに035の坑道の固め・走る・固めの上限を入れる本命統合」）
 - 土台: [034-flagship-glowvent](../034-flagship-glowvent/spec.md) v0.3.0（揺れのダイヤル・救助・踏ん張り・塔と梁・割れ目・支柱・休み＝帰還の宣言・余熱）をそのままフォークし、
   **035の4つ（固め・走る・固めの上限・HUD）だけ**を横長の坑道へ翻訳して足す
