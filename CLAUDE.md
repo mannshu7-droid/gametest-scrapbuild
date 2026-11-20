@@ -13,7 +13,9 @@ specs/NNN-*/     ゲームごとの仕様書（連番）
 games/NNN-*/     ゲーム実装（specs と同じ連番・名前）。索引は games/README.md
 reviews/         AIプレイのレビュー結果（NNN-name-vX.md）
 routine-state.md 自動ルーチンの現在位置と実行履歴
-tools/           共通スクリプト（single-html.mjs: 無人実行でブラウザAIPプレイ用の単一HTMLを作る）
+tools/           共通スクリプト（single-html.mjs: 無人実行でブラウザAIPプレイ用の単一HTMLを作る、
+                 mobile-html.mjs: 4回目にスマホ確認用のページを作る＝Artifactで公開）
+mobile/          スマホ確認用のページ（mobile/NNN-*.html、ボット観戦＋タッチ操作。games/NNN-*/mobile.json で設定）
 ```
 
 ## 自動ルーチン（重要）

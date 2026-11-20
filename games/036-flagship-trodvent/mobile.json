@@ -1,0 +1,29 @@
+{
+  "strategies": ["p01", "p02", "weave", "spireAll", "pusher", "bare"],
+  "maxTicks": 20000,
+  "actions": [
+    { "label": "攻撃", "key": " " },
+    { "label": "走る", "key": "Shift", "toggle": true },
+    { "label": "ダッシュ", "key": "r" },
+    { "label": "支柱(長押し)", "key": "k", "hold": true },
+    { "label": "積む(長押し)", "key": "h", "hold": true },
+    { "label": "梁(長押し)", "key": "g", "hold": true }
+  ],
+  "shop": [
+    { "label": "1 攻撃力", "key": "1" },
+    { "label": "2 機動", "key": "2" },
+    { "label": "3 耐久", "key": "3" },
+    { "label": "4 ドリル", "key": "4" },
+    { "label": "5 支保", "key": "5" },
+    { "label": "6 速掘り", "key": "6" },
+    { "label": "7 灯り", "key": "7" },
+    { "label": "8 耐危険", "key": "8" },
+    { "label": "9 積載", "key": "9" },
+    { "label": "F 防具", "key": "f" },
+    { "label": "Q 拠点防衛", "key": "q" },
+    { "label": "P 砲台", "key": "p" },
+    { "label": "B 柵", "key": "b" },
+    { "label": "O 前哨", "key": "o" }
+  ],
+  "help": "十字で移動（未採掘のマスへ進むと掘る）。「走る」を入れて移動すると、固めた坑道から固めた坑道へ1tickに2マス（揺れ40未満の間）。何も押さないと休む。拠点の中でショップのボタンを押すと購入。HPが尽きると救助され、抱えた積荷を失う。"
+}

@@ -7,6 +7,7 @@
   [v2](036-flagship-trodvent-v2.md)（判定FIX。**固めは落盤だけ×0.1**、上限の崖が消えた。p02は8位のまま）、
   3回目（FIX only、レビューなし）: p02の8位へ4案を `--tune` の切り替え（既定0）で試し、どれも5位に届かず既定は据え置き
 - 評価ペルソナ: [P01 野望型](../personas/p01-yabou.md)・[P02 あき型](../personas/p02-aki.md)
+- **スマホで動作確認**: [Artifact（ボット観戦・タッチ操作）](https://claude.ai/artifact/RxN1226Lq8EyFixnX1LWc4)（`node tools/mobile-html.mjs games/036-flagship-trodvent` で作る `mobile/036-flagship-trodvent.html`。2026-11-20に追加）
 
 ## サイクル42の総括（4回を通じて何を検証したか）
 
