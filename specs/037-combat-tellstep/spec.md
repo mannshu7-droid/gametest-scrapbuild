@@ -1,7 +1,7 @@
 # 仕様書: 037-combat-tellstep（テルステップ — 大振りを読んで一歩引く篝火の闘技場）
 
 - 作成日: 2026-11-23
-- ステータス: v1（v0.1.0、サイクル43・1回目）
+- ステータス: v1（v0.1.0、サイクル43・1回目。[v1レビュー](../../reviews/037-combat-tellstep-v1.md)で判定FIX）
 - 元になったレビュー: [reviews/036-flagship-trodvent-final.md](../../reviews/036-flagship-trodvent-final.md)（提案(1)「被ダメを読んで減らす戦い方が稼ぎになる（HPで早く帰る型の時計を延ばす戦闘）」）
 - 土台: [033-combat-spareglow](../033-combat-spareglow/spec.md) v0.3.0（熱のダイヤル・奉納・救助・踏ん張り・余熱・熱の盾・癒しは盾へ）をそのまま使い、**大振りの予兆**の規則を1つだけ足す
 - 要素: **戦闘（combat）単体**（採掘・建築は入れない）
