@@ -136,10 +136,19 @@ export const TUNE = {
   /** 種類ごとの予兆の長さ（tick）。0なら033と同じく手が届いた瞬間に当たる */
   windupGrunt: 0,
   windupRunner: 0,
-  windupBrute: 8,
-  strikeSlack: 0.5,
+  /** v2: 8→16（v1重大#2 反応0.6秒で読みの得が0になる崖への対応。熱で縮むので熱0で1.6秒・熱100で0.5秒） */
+  windupBrute: 16,
+  /** v2: 0.5→0.3（予兆を長くした分、判定を狭く） */
+  strikeSlack: 0.3,
   whiffStun: 6,
-  punishHeat: 3,
+  /** v2: 3→0（v1中#4 外しても−0.9%で効かないため、規則を1つに保つ。--tune punishHeat=3 で再現） */
+  punishHeat: 0,
+  /**
+   * 037 v2: 熱は振りを速める（v1重大#1 読みが全員に同じだけ効く への対応）。予兆の長さ × (1 − heatHaste × 熱/熱の上限)。
+   * 熱100では予兆が (1 − heatHaste) 倍に縮み、読みにくくなる。読みの得は「熱を上げすぎずに帰る」慎重な型ほど大きい。
+   * 1本のダイヤル（熱は報酬・被ダメージ・振りの速さを同時に上げる）。点は足さない。0でv1と同じ
+   */
+  heatHaste: 0.7,
 };
 
 export type Tune = typeof TUNE;
@@ -267,6 +276,13 @@ export class Game {
     const share = Math.min(1, Math.max(0, (p.hp / p.maxHp - t.carryFloor) / (1 - t.carryFloor)));
     const old = Math.min(p.heat, p.sortieHeat);
     return (old * t.carryStartFrac + (p.heat - old) * t.carryFrac) * share;
+  }
+
+  /** 037 v2: 今の熱での予兆の長さ（tick）。熱が高いほど振りが速い（heatHaste）。最短1tick、0なら予兆なし */
+  windupFor(kind: EnemyKind): number {
+    const t = this.tune;
+    const base = (kind === 'brute' ? t.windupBrute : kind === 'runner' ? t.windupRunner : t.windupGrunt) * t.windupScale;
+    return base > 0 ? Math.max(1, Math.round(base * (1 - (t.heatHaste * this.player.heat) / t.heatMax))) : 0;
   }
 
   difficulty(): number {
@@ -578,7 +594,7 @@ export class Game {
       }
       if (d <= def.reach && e.cd === 0) {
         e.cd = def.cd;
-        const w = Math.round((e.kind === 'brute' ? t.windupBrute : e.kind === 'runner' ? t.windupRunner : t.windupGrunt) * t.windupScale);
+        const w = this.windupFor(e.kind);
         if (w > 0) {
           e.windup = w;
           e.windupMax = w;
@@ -692,6 +708,7 @@ export class Game {
       heatMax: this.tune.heatMax,
       typePenalty: this.tune.typePenalty,
       strikeSlack: this.tune.strikeSlack,
+      bruteWindup: this.windupFor('brute'),
       metrics: { ...this.metrics, downsByPhase: { ...this.metrics.downsByPhase } },
     };
   }

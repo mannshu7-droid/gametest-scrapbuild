@@ -4,6 +4,8 @@
  *   npm run simulate -- --noRead           全戦略が予兆を読まない（避けない）。規則はそのまま
  *   npm run simulate -- --readLag 5        予兆が見えてから動けるまでのtick（既定3＝0.3秒）
  *   npm run simulate -- --tune windupScale=0   予兆なし（033と同じ規則。対照）
+ *   npm run simulate -- --tune heatHaste=0,windupBrute=8,strikeSlack=0.5,punishHeat=3   v1（v0.1.0）の規則を再現
+ *   npm run simulate -- --tune heatHaste=0     熱で振りを速めない（v2の対照。予兆は16tickのまま）
  *   npm run simulate                       全戦略×40シードの要約表＋JSON
  *   npm run simulate -- --seeds 80         シード数
  *   npm run simulate -- --pairs            全戦略の対比較（行が列に勝った数/同点）
