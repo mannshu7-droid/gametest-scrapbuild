@@ -93,16 +93,24 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(X(e.x), Y(e.y), r * scale, 0, Math.PI * 2);
       ctx.fill();
-      // 037: 大振りの予兆。当たる範囲（手の長さ＋余裕）を赤く塗り、輪が閉じたら打つ
+      // 037: 大振りの予兆。当たる範囲（手の長さ＋余裕）を輪郭で示し、輪が閉じたら打つ。
+      // v2（v1中#7 群れの中で重なる）: 塗りは打つ直前（残り4tick以下）だけ、輪郭は残りが短いほど濃く太く
       if (e.windup > 0) {
         const reach = (e.kind === 'brute' ? 1.1 : e.kind === 'runner' ? 0.8 : 0.9) + s.strikeSlack;
         const prog = 1 - e.windup / Math.max(1, e.windupMax);
-        ctx.fillStyle = `rgba(255,60,40,${0.08 + 0.17 * prog})`;
+        if (e.windup <= 4) {
+          ctx.fillStyle = 'rgba(255,60,40,0.22)';
+          ctx.beginPath();
+          ctx.arc(X(e.x), Y(e.y), reach * scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.strokeStyle = `rgba(255,74,58,${0.25 + 0.3 * prog})`;
+        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(X(e.x), Y(e.y), reach * scale, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.stroke();
         ctx.strokeStyle = '#ff4a3a';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 2 + 2 * prog;
         ctx.beginPath();
         ctx.arc(X(e.x), Y(e.y), reach * scale, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
         ctx.stroke();
@@ -111,18 +119,13 @@ export class Renderer {
         ctx.font = 'bold 14px monospace';
         ctx.fillText('!', X(e.x) - 3, Y(e.y) - r * scale - 8);
       }
-      // 037: 空振りの隙（最初の一撃で熱+N）
+      // 037: 空振りの隙（動かず打たない）。v2: 文字は出さず黄色い輪だけ（浮き文字「空振り」と重ならないように）
       if (e.stun > 0) {
-        ctx.strokeStyle = e.open ? '#ffe066' : '#887';
+        ctx.strokeStyle = '#ffe066';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(X(e.x), Y(e.y), (r + 0.15) * scale, 0, Math.PI * 2);
         ctx.stroke();
-        if (e.open) {
-          ctx.fillStyle = '#ffe066';
-          ctx.font = 'bold 11px monospace';
-          ctx.fillText('隙', X(e.x) - 6, Y(e.y) - r * scale - 8);
-        }
       }
       if (e.hp < e.maxHp) {
         ctx.fillStyle = '#400';
@@ -186,9 +189,16 @@ export class Renderer {
     }
 
     ctx.font = 'bold 13px monospace';
+    // v2（v1中#7）: 浮き文字が重なるときは上へずらす
+    const placed: { x: number; y: number; w: number }[] = [];
     for (const f of s.floats) {
+      const w = ctx.measureText(f.text).width;
+      const fx = X(f.x) - 12;
+      let fy = Y(f.y) - 10;
+      for (let k = 0; k < 6 && placed.some((q) => Math.abs(q.y - fy) < 14 && fx < q.x + q.w && q.x < fx + w); k++) fy -= 14;
+      placed.push({ x: fx, y: fy, w });
       ctx.fillStyle = f.color;
-      ctx.fillText(f.text, X(f.x) - 12, Y(f.y) - 10);
+      ctx.fillText(f.text, fx, fy);
     }
 
     if (s.over) {
@@ -225,7 +235,8 @@ export class Renderer {
     ctx.fillRect(x0, y - 10, HUD_W - 10, 12);
     ctx.fillStyle = p.hp < p.maxHp * 0.3 ? '#e74c3c' : '#58c46b';
     ctx.fillRect(x0, y - 10, ((HUD_W - 10) * Math.max(0, p.hp)) / p.maxHp, 12);
-    y += 8;
+    // v2（v1中#7）: HPの数字がバーに重ならないよう、バーの下へ
+    y += 16;
     line(`HP ${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}${p.shield > 0 ? `  盾 ${Math.ceil(p.shield)}` : ''}`);
     if (p.grace > 0) line(`踏ん張り中 ${(p.grace / 10).toFixed(1)}秒 — 被ダメ半分。今のうちに戻れ`, '#9be7ff', 'bold 12px monospace');
     else line(p.graceReady ? '踏ん張り: 1回（HP3割で熱の半分を盾に）' : '踏ん張り: 使用済み（奉納で戻る）', p.graceReady ? '#7ab' : '#755', '11px monospace');
@@ -290,7 +301,9 @@ export class Renderer {
     y = PAD + ARENA_PX - 78;
     // 037: 予兆の読み
     line('重兵の大振り: 赤い輪が閉じる前に赤い円の外へ一歩引く', '#ff8a7a', '11px monospace');
-    line(`空振り ${s.metrics.whiffs}回｜被弾 ${s.metrics.hitsTaken}回｜隙への一撃 ${s.metrics.punishes}回（熱+3）`, '#ffe066', '11px monospace');
+    line(`空振り ${s.metrics.whiffs}回｜被弾 ${s.metrics.hitsTaken}回`, '#ffe066', '11px monospace');
+    // v2: 熱は振りを速める（今の熱での重兵の予兆の長さ）
+    line(`重兵の予兆 ${(s.bruteWindup / 10).toFixed(1)}秒（熱が高いほど短い）`, s.bruteWindup <= 8 ? '#ff8a7a' : '#ffb0a0', '11px monospace');
     y += 2;
     line(`撃破 ${s.metrics.kills}  奉納 ${s.metrics.banks}回  救助 ${s.metrics.downs}回`, '#999', '12px monospace');
     line(`敵の強さ ×${s.difficulty.toFixed(2)}  失った残り火 ${s.metrics.lostEmbers}`, '#999', '12px monospace');

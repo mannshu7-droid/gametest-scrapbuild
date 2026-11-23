@@ -154,6 +154,8 @@ export interface GameState {
   typePenalty: number;
   /** 037: 予兆が当たるかの判定の余裕（敵の手の長さ＋これ）。表示・ボット用 */
   strikeSlack: number;
+  /** 037 v2: 今の熱で重兵が振りかぶる長さ（tick）。熱が高いほど短い（heatHaste）。表示用 */
+  bruteWindup: number;
   metrics: Metrics;
 }
 
@@ -168,12 +170,12 @@ export const ACTION_SPEC: ActionSpecEntry[] = [
   {
     type: 'move',
     params: { dir: 'up|down|left|right' },
-    description: '移動（0.25タイル/tick）。敵は手が届くと足を止めて大振りの予兆（windup）に入る。予兆が終わる時に手の長さ+0.5より外にいれば空振り',
+    description: '移動（0.25タイル/tick）。重兵は手が届くと足を止めて大振りの予兆（windup、熱0で16tick・熱が高いほど短く熱100で5tick）に入る。予兆が終わる時に手の長さ+0.3より外にいれば空振り',
   },
   {
     type: 'attack',
     description:
-      '周囲（半径1.5）の敵全員を斬る。クールダウン6tick。篝火の上では斬れない。空振りした直後の敵（open）への最初の一撃は熱+3',
+      '周囲（半径1.5）の敵全員を斬る。クールダウン6tick。篝火の上では斬れない。v2: 隙への一撃の熱は既定0（punishHeat）',
   },
   { type: 'dash', params: { dir: 'up|down|left|right' }, description: '3タイル跳ぶ。4tick無敵、クールダウン30tick' },
   {
