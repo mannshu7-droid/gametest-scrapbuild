@@ -695,21 +695,33 @@ let BOT_FIX = true;
  */
 let BOT_READ = true;
 let READ_LAG = 3;
-const READ_AT = 2;
+/** 打つまで残り何tickで出始めるか。手の外が strikeSlack マス広いと、出るのにその分の歩数が要る（2回目: 2＋strikeSlack） */
+const readAt = () => 2 + Math.max(0, TUNE.strikeSlack);
 function readDodge(s: GameState): Action | null {
   const p = s.player;
   const slack = TUNE.strikeSlack;
+  const READ_AT = readAt();
   const threats = s.enemies.filter(
     (e) => (e.windup ?? 0) > 0 && (e.windupMax ?? 0) - (e.windup ?? 0) >= READ_LAG && (e.windup ?? 0) <= READ_AT && chebyshev(e.x, e.y, p.x, p.y) <= e.range + slack,
   );
   if (threats.length === 0) return null;
+  const free = (nx: number, ny: number) => tileAt(s, nx, ny) === TILE.FLOOR && !occupied(s, nx, ny) && !s.enemies.some((e) => e.x === nx && e.y === ny);
   for (const dir of ['left', 'up', 'down', 'right'] as Dir[]) {
     const [dx, dy] = DELTA[dir];
     const nx = p.x + dx;
     const ny = p.y + dy;
-    if (tileAt(s, nx, ny) !== TILE.FLOOR || occupied(s, nx, ny)) continue;
-    if (s.enemies.some((e) => e.x === nx && e.y === ny)) continue;
+    if (!free(nx, ny)) continue;
     if (threats.every((e) => chebyshev(e.x, e.y, nx, ny) > e.range + slack)) return { type: 'move', dir };
+  }
+  // 2回目: 手の外が2マス以上なら、1歩で出られなくても全ての重兵から遠ざかる1歩を踏む（次のtickにもう1歩）
+  if (slack > 0) {
+    for (const dir of ['left', 'up', 'down', 'right'] as Dir[]) {
+      const [dx, dy] = DELTA[dir];
+      const nx = p.x + dx;
+      const ny = p.y + dy;
+      if (!free(nx, ny)) continue;
+      if (threats.every((e) => chebyshev(e.x, e.y, nx, ny) > chebyshev(e.x, e.y, p.x, p.y))) return { type: 'move', dir };
+    }
   }
   if (p.dashCd === 0) return { type: 'dash', dir: 'left' };
   return null;
@@ -723,6 +735,7 @@ function readHold(s: GameState, a: Action): Action {
   const nx = p.x + dx * steps;
   const ny = p.y + dy * steps;
   const slack = TUNE.strikeSlack;
+  const READ_AT = readAt();
   const danger = s.enemies.some(
     (e) => (e.windup ?? 0) > 0 && (e.windupMax ?? 0) - (e.windup ?? 0) >= READ_LAG && (e.windup ?? 0) <= READ_AT &&
       chebyshev(e.x, e.y, p.x, p.y) > e.range + slack && (chebyshev(e.x, e.y, nx, ny) <= e.range + slack || chebyshev(e.x, e.y, p.x + dx, p.y + dy) <= e.range + slack),
