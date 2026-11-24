@@ -109,7 +109,8 @@ export class Renderer {
         ctx.beginPath();
         ctx.arc(X(e.x), Y(e.y), reach * scale, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = '#ff4a3a';
+        // v3（v2軽微#6）: 予兆が短い（熱が高い）ほど輪の色を赤→赤紫へ。速い振りが色で分かる
+        ctx.strokeStyle = e.windupMax <= 8 ? '#ff3aa0' : e.windupMax <= 12 ? '#ff4a5a' : '#ff4a3a';
         ctx.lineWidth = 2 + 2 * prog;
         ctx.beginPath();
         ctx.arc(X(e.x), Y(e.y), reach * scale, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
@@ -258,6 +259,26 @@ export class Renderer {
       ctx.fillStyle = '#555';
       ctx.fillRect(x0 + (gw * m) / s.heatMax, y - 12, 1, 14);
     }
+    // v3（v2軽微#6 予兆が速くなったことが分かりにくい）: ゲージの下に、熱0/50/100での重兵の予兆の秒数を目盛りで出す。
+    // 今の熱の位置に▲を置き、そこでの秒数を太字で（熱が上がると振りが速いことをゲージの上で読める）
+    ctx.font = '10px monospace';
+    for (const mk of s.bruteWindupMarks) {
+      const mx = x0 + (gw * mk.heat) / s.heatMax;
+      ctx.fillStyle = '#c99';
+      const txt = `${(mk.ticks / 10).toFixed(1)}s`;
+      const tw = ctx.measureText(txt).width;
+      ctx.fillText(txt, Math.min(x0 + gw - tw, Math.max(x0, mx - tw / 2)), y + 12);
+    }
+    {
+      const px = x0 + (gw * Math.min(p.heat, s.heatMax)) / s.heatMax;
+      ctx.fillStyle = s.bruteWindup <= 8 ? '#ff5a4a' : '#ffb0a0';
+      ctx.beginPath();
+      ctx.moveTo(px, y + 2);
+      ctx.lineTo(px - 4, y + 8);
+      ctx.lineTo(px + 4, y + 8);
+      ctx.fill();
+    }
+    y += 14;
     y += 18;
     line(`報酬 ×${s.rewardMult.toFixed(2)}   被ダメ ×${s.damageMult.toFixed(2)}`, '#ffcf8a');
     if (p.sinceKill > 40 && p.heat > 0) line('撃破が途切れて熱が冷めている', '#88a');

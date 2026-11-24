@@ -156,6 +156,8 @@ export interface GameState {
   strikeSlack: number;
   /** 037 v2: 今の熱で重兵が振りかぶる長さ（tick）。熱が高いほど短い（heatHaste）。表示用 */
   bruteWindup: number;
+  /** 037 v3: 熱ゲージの目盛り用。熱0/50/100での重兵の予兆の長さ（tick） */
+  bruteWindupMarks: { heat: number; ticks: number }[];
   metrics: Metrics;
 }
 

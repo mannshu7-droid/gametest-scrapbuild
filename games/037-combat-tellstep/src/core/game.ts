@@ -149,6 +149,14 @@ export const TUNE = {
    * 1本のダイヤル（熱は報酬・被ダメージ・振りの速さを同時に上げる）。点は足さない。0でv1と同じ
    */
   heatHaste: 0.7,
+  /**
+   * 037 v3: 予兆の最短（tick）。熱で縮んでもこれより短くならない（v2 中#5 熱100の上限が低い への試し）。0で無効（v2と同じ）
+   */
+  windupMin: 0,
+  /**
+   * 037 v3: 予兆の間に重兵が寄る速さ（通常の速さに対する割合）。予兆だけで手数が減る得（noread）を減らす試し。0で足を止める（v2と同じ）
+   */
+  windupCreep: 0,
 };
 
 export type Tune = typeof TUNE;
@@ -279,10 +287,12 @@ export class Game {
   }
 
   /** 037 v2: 今の熱での予兆の長さ（tick）。熱が高いほど振りが速い（heatHaste）。最短1tick、0なら予兆なし */
-  windupFor(kind: EnemyKind): number {
+  windupFor(kind: EnemyKind, heat = this.player.heat): number {
     const t = this.tune;
     const base = (kind === 'brute' ? t.windupBrute : kind === 'runner' ? t.windupRunner : t.windupGrunt) * t.windupScale;
-    return base > 0 ? Math.max(1, Math.round(base * (1 - (t.heatHaste * this.player.heat) / t.heatMax))) : 0;
+    if (base <= 0) return 0;
+    const w = Math.max(1, Math.round(base * (1 - (t.heatHaste * heat) / t.heatMax)));
+    return Math.max(w, Math.min(Math.round(base), t.windupMin));
   }
 
   difficulty(): number {
@@ -577,6 +587,11 @@ export class Game {
       // 037: 振りかぶっている間は足を止める。終わった瞬間に当たるか空振るかが決まる
       if (e.windup > 0) {
         e.windup--;
+        // v3: 予兆の間に少し寄る（windupCreep、既定0＝足を止める）
+        if (t.windupCreep > 0 && d > def.reach * 0.85) {
+          e.x += (dx / d) * def.speed * t.windupCreep;
+          e.y += (dy / d) * def.speed * t.windupCreep;
+        }
         if (e.windup === 0) {
           if (d <= def.reach + t.strikeSlack && p.iframes === 0) this.hitPlayer(def.dmg * dmgScale);
           else {
@@ -709,6 +724,7 @@ export class Game {
       typePenalty: this.tune.typePenalty,
       strikeSlack: this.tune.strikeSlack,
       bruteWindup: this.windupFor('brute'),
+      bruteWindupMarks: [0, 50, 100].filter((h) => h <= this.tune.heatMax).map((h) => ({ heat: h, ticks: this.windupFor('brute', h) })),
       metrics: { ...this.metrics, downsByPhase: { ...this.metrics.downsByPhase } },
     };
   }
