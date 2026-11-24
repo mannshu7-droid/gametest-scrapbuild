@@ -1,4 +1,5 @@
 import type { GameState, ShopItemId } from '../core/types';
+import * as SP from './sprites';
 
 const ARENA_PX = 560;
 const HUD_W = 300;
@@ -10,6 +11,15 @@ const ENEMY_COLOR: Record<string, string> = {
   brute: '#b8433a',
 };
 
+/** 2026-11-24: 凡例（盤面の左上の角。円の外の空き） */
+const LEGEND: SP.LegendItem[] = [
+  { label: '自分', draw: (c, x, y, s) => SP.drawPlayer(c, x + s / 2, y + s / 2, s, { tool: 'sword', lamp: false }) },
+  { label: '雑兵', draw: (c, x, y, s) => SP.drawEnemy(c, x + s / 2, y + s / 2, s, 'grunt', ENEMY_COLOR.grunt) },
+  { label: '走り屋', draw: (c, x, y, s) => SP.drawEnemy(c, x + s / 2, y + s / 2, s, 'runner', ENEMY_COLOR.runner) },
+  { label: '重兵（大振り）', draw: (c, x, y, s) => SP.drawEnemy(c, x + s / 2, y + s / 2, s, 'brute', ENEMY_COLOR.brute) },
+  { label: '篝火（奉納）', draw: (c, x, y, s) => SP.drawCampfire(c, x + s / 2, y + s * 0.6, s * 0.9) },
+];
+
 const ITEM_LABEL: Record<ShopItemId, string> = {
   blade: '刃（攻撃+4）',
   armor: '鎧（被ダメ×0.88）',
@@ -17,6 +27,11 @@ const ITEM_LABEL: Record<ShopItemId, string> = {
   vitality: '器（最大HP+25）',
 };
 const ITEM_KEY: Record<ShopItemId, string> = { blade: '1', armor: '2', mend: '3', vitality: '4' };
+
+function rgbToHex(rgb: string): string {
+  const m = rgb.match(/\d+/g) ?? ['128', '128', '128'];
+  return '#' + m.slice(0, 3).map((v) => Number(v).toString(16).padStart(2, '0')).join('');
+}
 
 /** 熱の色: 0=灰青 → 50=橙 → 100=白熱 → 100超=青白い過熱（v2で上限を250へ） */
 function heatColor(h: number): string {
@@ -34,6 +49,9 @@ function heatColor(h: number): string {
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
+  /** 2026-11-24: プレイヤーの向き（最後に動いた向き） */
+  private face = 1;
+  private lastPx = 0;
 
   constructor(private canvas: HTMLCanvasElement) {
     canvas.width = ARENA_PX + HUD_W + PAD * 3;
@@ -81,18 +99,22 @@ export class Renderer {
     ctx.arc(cx, cy, s.brazierRadius * scale, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#ffcf6a';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-    ctx.fill();
+    // 2026-11-24: 篝火は薪と炎の絵（熱が高いほど大きく燃える）
+    SP.drawCampfire(ctx, cx, cy, Math.max(18, 0.9 * scale), s.tick, Math.min(1, p.heat / 100));
+    // 地面の小石（闘技場の床だと分かるように）
+    ctx.fillStyle = '#2b262d';
+    for (let i = 0; i < 60; i++) {
+      const a = SP.hash01(i, 1) * Math.PI * 2;
+      const rr = Math.sqrt(SP.hash01(i, 2)) * s.arenaRadius * 0.97;
+      ctx.fillRect(cx + Math.cos(a) * rr * scale, cy + Math.sin(a) * rr * scale, 3, 2);
+    }
+    SP.drawLegend(ctx, PAD + 4, PAD + 4, 18, LEGEND, 120);
 
     // 敵
     for (const e of s.enemies) {
       const r = e.kind === 'brute' ? 0.45 : e.kind === 'runner' ? 0.28 : 0.35;
-      ctx.fillStyle = ENEMY_COLOR[e.kind];
-      ctx.beginPath();
-      ctx.arc(X(e.x), Y(e.y), r * scale, 0, Math.PI * 2);
-      ctx.fill();
+      // 2026-11-24: 敵は種類ごとの怪物の絵（雑兵＝角の丸い体、走り屋＝トゲの細身、重兵＝角と棍棒の大きな体）
+      SP.drawEnemy(ctx, X(e.x), Y(e.y), r * scale * 3.2, e.kind, ENEMY_COLOR[e.kind], e.x > p.x ? -1 : 1);
       // 037: 大振りの予兆。当たる範囲（手の長さ＋余裕）を輪郭で示し、輪が閉じたら打つ。
       // v2（v1中#7 群れの中で重なる）: 塗りは打つ直前（残り4tick以下）だけ、輪郭は残りが短いほど濃く太く
       if (e.windup > 0) {
@@ -148,10 +170,11 @@ export class Renderer {
       ctx.arc(X(p.x), Y(p.y), (0.5 + p.heat / 120) * scale, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.fillStyle = p.iframes > 0 && s.tick % 2 === 0 ? '#fff' : hc;
-    ctx.beginPath();
-    ctx.arc(X(p.x), Y(p.y), 0.4 * scale, 0, Math.PI * 2);
-    ctx.fill();
+    // 2026-11-24: プレイヤーは剣を持った人の形。服の色が熱の色、無敵中は点滅
+    if (Math.abs(p.x - this.lastPx) > 1e-6) this.face = p.x > this.lastPx ? 1 : -1;
+    this.lastPx = p.x;
+    if (!(p.iframes > 0 && s.tick % 2 === 0))
+      SP.drawPlayer(ctx, X(p.x), Y(p.y), 1.3 * scale, { face: this.face, tool: 'sword', lamp: false, body: rgbToHex(hc) });
     if (p.attackCd >= 5) {
       // 斬撃の残像
       ctx.strokeStyle = 'rgba(255,240,200,0.7)';

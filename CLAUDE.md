@@ -7,7 +7,7 @@
 
 ```
 docs/            仕組みのドキュメント（workflow.md, ai-interface.md, routine.md）
-templates/       仕様書・レビューのテンプレート
+templates/       仕様書・レビューのテンプレート、render/sprites.ts（共通の絵: 人・敵・土・石・鉱石・建物・凡例）
 personas/        AIゲーマーのペルソナ定義（pNN-name.md）。実在プレイヤーの分析から作る
 specs/NNN-*/     ゲームごとの仕様書（連番）
 games/NNN-*/     ゲーム実装（specs と同じ連番・名前）。索引は games/README.md
@@ -40,6 +40,8 @@ mobile/          スマホ確認用のページ（mobile/NNN-*.html、ボット�
   - 理由: ロジックが Node で直接動く → AIが描画なしで数千ティックを一瞬で回して評価できる
 - **決定論**: 乱数はシード付きPRNG（`src/core/rng.ts`）のみ。同じシード＋同じ操作列 → 同じ結果
 - **AI Play Interface (AIP)**: 全ゲームは `window.__AIP__` を公開する。契約は docs/ai-interface.md 参照
+- **見た目の最低限**: 自分・敵・地形（土／石／鉱石）・建物をドット（単色の円や四角）だけで描かない。`templates/render/sprites.ts` を
+  `src/render/` にコピーして人の形・怪物・土や石のタイルで描き、凡例を出す（レビューする人が何が何かを見分けられること）
 - 将来のiPad/Android移植は Capacitor 前提。タッチ入力は移植時に `src/render/` へ追加する（core は触らない）
 
 ## よく使うコマンド（各 games/NNN-*/ 内で）
