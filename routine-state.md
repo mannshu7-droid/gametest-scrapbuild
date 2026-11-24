@@ -7,7 +7,11 @@
 - サイクル: 43
 - 要素: **戦闘（combat）単体**。主題は036-final提案(1)「被ダメを読んで減らす戦い方が稼ぎになる（HPで早く帰る型の時計を延ばす戦闘）」
 - 対象ゲーム番号: **037-combat-tellstep**（specs/037-combat-tellstep/spec.md、games/037-combat-tellstep/ v0.3.0）
-- 次に行う回: **4回目（FINAL REVIEW）**（reviews/037-combat-tellstep-final.md、mobile.json と mobile/037-combat-tellstep.html も作る）
+- 次に行う回: **4回目（FINAL REVIEW）**（reviews/037-combat-tellstep-final.md）
+- **スマホ確認ページは公開済み**: https://claude.ai/artifact/QDudzF7fiV9Aq72svAkqaS （`games/037-combat-tellstep/mobile.json` → `mobile/037-combat-tellstep.html`、2026-11-24 人の手元の指示で先に公開）。
+  4回目はこのURLへ更新する（Artifact の publish に `url` を渡す。新しいURLを作らない）
+- **2026-11-24 ユーザー指摘への対応**: (1)「すべてがドットでわからない」→ `templates/render/sprites.ts`（人・怪物・土・石・鉱石・建物・凡例）を作り、036・037 の描画を差し替えた（ロジック無変更、ブラウザ3/3一致）。
+  以後の新ゲームは docs/routine.md 1回目の「見た目の最低限」に従う。(2)「Artifact が1個しかない」→ クラウドにも Artifact ツールがあるので4回目は公開必須に変更（docs/routine.md）
 - 2回目の結果（reviews/037-combat-tellstep-v2.md、v0.2.0、判定FIX、P01約3.6/5・P02約3.6/5）: 熱は振りを速める（`heatHaste 0.7`、予兆 熱0で16tick・熱100で5tick）、判定の余裕0.3、隙の熱0。
   読みの得 p02 +25.2% ≥ p01 +20.5%、p02 は off 4位→2位、反応 0.3/0.6/0.9秒で p02 +25/+17/+7%（坂）、帰るHPの最良 0.5→0.7
 - 3回目の結果（FIX only、v0.3.0、クラウドのルーチン）: **規則の既定値は v2 のまま**（40シードで v2 と全戦略一致、160シードの v2 grid も v2 レビューと一致）。

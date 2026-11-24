@@ -156,7 +156,9 @@ ${safe(botCode)}
   function seed() { return Math.max(1, Number($('seed').value) || 1); }
   function reset() {
     state = aip().reset(seed());
-    bot = CFG.hasBot ? new __BOTLIB__.Bot($('strategy').value) : null;
+    // Bot の作り方はゲームで違う: 名前を渡す型（036など）と、PERSONAS の要素を渡す型（027〜037の戦闘など）
+    const per = CFG.hasBot && __BOTLIB__.PERSONAS ? __BOTLIB__.PERSONAS.find((p) => p.name === $('strategy').value) : null;
+    bot = CFG.hasBot ? new __BOTLIB__.Bot(per ?? $('strategy').value) : null;
     status(state);
   }
   function setRunning(on) { running = on && !!bot; $('playpause').textContent = running ? '⏸ 一時停止' : '▶ 再生'; last = performance.now(); acc = 0; }

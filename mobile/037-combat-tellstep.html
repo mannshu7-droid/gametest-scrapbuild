@@ -1,0 +1,1370 @@
+<title>Tellstep (037)</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+[hidden] { display: none !important; }
+/* 1画面のアプリ: 上に盤面（横幅いっぱい）、下に観戦／操作の切り替えパネル。ゲーム画面に合わせて暗い1色の世界にする */
+:root {
+  --ground: #0e1116; --panel: #171c24; --line: #2a3340; --ink: #e3e7ee; --muted: #8b96a8;
+  --accent: #5fc4d6; --warn: #e0a84a;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--ground); color: var(--ink); font-family: var(--sans); -webkit-tap-highlight-color: transparent;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 8px;
+  box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; overflow-x: hidden; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bar h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+.ver { color: var(--muted); font: 12px var(--mono); }
+#stage { width: 100%; max-width: 960px; align-self: center; }
+#game { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 4px; background: #000; }
+.status { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.status b { color: var(--ink); font-weight: 600; }
+.tabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; width: fit-content; }
+.tabs button { border: 0; border-radius: 0; background: transparent; }
+.tabs button[aria-pressed="true"] { background: var(--accent); color: #062026; }
+button, select, input { font: 14px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-height: 40px; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+input[type=number] { width: 6.5em; font-family: var(--mono); }
+.panel { display: flex; flex-direction: column; gap: 10px; }
+.pad { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+.dpad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 4px; }
+.dpad button { padding: 0; font-size: 20px; min-height: 0; }
+.dpad .c { visibility: hidden; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; align-content: center; }
+.acts button { min-width: 64px; }
+.shop { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop button { padding: 6px 10px; min-height: 36px; font-size: 13px; }
+.down { background: var(--accent) !important; color: #062026 !important; }
+.help { color: var(--muted); font-size: 12px; line-height: 1.6; max-width: 65ch; }
+.note { color: var(--warn); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<div class="bar"><h1>Tellstep (037)</h1><span class="ver">v0.3.0</span></div>
+<div id="stage"><canvas id="game"></canvas></div>
+<div class="status" id="status">読み込み中…</div>
+<div class="bar">
+  <div class="tabs" role="group" aria-label="モード">
+    <button id="tabWatch" aria-pressed="true">ボット観戦</button>
+    <button id="tabPlay" aria-pressed="false">自分で操作</button>
+  </div>
+  <label class="ver" for="seed">シード</label><input id="seed" type="number" min="1" value="501">
+  <button id="reset">最初から</button>
+</div>
+<section class="panel" id="watch">
+  <div class="bar">
+    <label class="ver" for="strategy">戦略</label><select id="strategy"></select>
+    <button id="playpause">▶ 再生</button>
+    <span class="ver">速度</span>
+    <span class="bar" id="speeds"></span>
+  </div>
+  <p class="help">検証ボットが遊ぶ様子を見ます。p01＝野望型、p02＝あき型のペルソナを真似たボットです。同じシードと戦略なら毎回同じ展開になります（ヘッドレスの simulate と一致）。</p>
+</section>
+<section class="panel" id="play" hidden>
+  <div class="pad">
+    <div class="dpad" id="dpad">
+      <span class="c"></span><button data-key="ArrowUp" aria-label="上">▲</button><span class="c"></span>
+      <button data-key="ArrowLeft" aria-label="左">◀</button><span class="c"></span><button data-key="ArrowRight" aria-label="右">▶</button>
+      <span class="c"></span><button data-key="ArrowDown" aria-label="下">▼</button><span class="c"></span>
+    </div>
+    <div class="acts" id="acts"></div>
+  </div>
+  <div class="shop" id="shop"></div>
+  <p class="help" id="help"></p>
+  <p class="note">タッチ操作は動作確認用の仮のボタンです（キーボードがあればそのままキーでも遊べます）。</p>
+</section>
+<script type="module">
+(function(){const t=document.createElement("link").relList;if(t&&t.supports&&t.supports("modulepreload"))return;for(const o of document.querySelectorAll('link[rel="modulepreload"]'))i(o);new MutationObserver(o=>{for(const n of o)if(n.type==="childList")for(const s of n.addedNodes)s.tagName==="LINK"&&s.rel==="modulepreload"&&i(s)}).observe(document,{childList:!0,subtree:!0});function e(o){const n={};return o.integrity&&(n.integrity=o.integrity),o.referrerPolicy&&(n.referrerPolicy=o.referrerPolicy),o.crossOrigin==="use-credentials"?n.credentials="include":o.crossOrigin==="anonymous"?n.credentials="omit":n.credentials="same-origin",n}function i(o){if(o.ep)return;o.ep=!0;const n=e(o);fetch(o.href,n)}})();function W(a){let t=a>>>0;return function(){t|=0,t=t+1831565813|0;let e=Math.imul(t^t>>>15,1|t);return e=e+Math.imul(e^e>>>7,61|e)^e,((e^e>>>14)>>>0)/4294967296}}const D={sessionTicks:6e3,arenaRadius:11,brazierRadius:1.6,wardMargin:.3,fearRadius:4,playerSpeed:.25,baseHp:100,baseAtk:10,attackCd:6,attackRadius:1.5,dashDist:3,dashCd:30,dashIframes:4,channelTicks:15,rewardDiv:25,damageDiv:45,damageExp:2,heatMax:100,heatGraceTicks:40,heatDecay:.25,difficultyPerTick:1/3e3,dmgGrowthShare:.6,enemyDmg:.5,spawnStart:14,spawnEnd:6,maxEnemies:18,heatSpawn:0,heatCap:0,poolLeak:0,rescueClearRadius:5,rescueIframes:20,graceFrac:.3,graceTicks:60,graceDmgMult:.5,graceKnockRadius:2.5,graceKnockDist:2.5,shopBase:40,shopGrowth:1.9,shopMaxLevel:8,typePenalty:1.8,bladeAtk:4,armorMult:.88,mendHeal:2,vitalityHp:25,carryFrac:.8,carryFloor:.2,graceShed:.5,graceShield:.5,mendShield:1,carryStartFrac:.8,carryDmgShare:1,windupScale:1,windupGrunt:0,windupRunner:0,windupBrute:16,strikeSlack:.3,whiffStun:6,punishHeat:0,heatHaste:.7,windupMin:0,windupCreep:0},H=["blade","armor","mend","vitality"],v={grunt:{hp:20,dmg:6,speed:.08,cd:12,embers:4,heat:5,reach:.9},runner:{hp:10,dmg:4,speed:.16,cd:8,embers:3,heat:4,reach:.8},brute:{hp:60,dmg:16,speed:.06,cd:20,embers:12,heat:10,reach:1.1}},I={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};function G(){return{score:0,kills:0,banks:0,downs:0,downsByPhase:{low:0,mid:0,high:0,banking:0},downPhase:"none",lostEmbers:0,lostHeat:0,unbankedAtEnd:0,peakHeat:0,sumBankHeat:0,ticksHighHeat:0,damageTaken:0,channelBreaks:0,spent:0,graces:0,carryEarned:0,carryBanked:0,sumCarry:0,sumBankHpFrac:0,shedHeat:0,shieldAbsorbed:0,hitsTaken:0,whiffs:0,punishes:0}}class ${constructor(t,e={}){this.tick=0,this.over=!1,this.enemies=[],this.nextId=1,this.spawnTimer=20,this.floats=[],this.lastRescue=null,this.lastBank=null,this.hitThisTick=!1,this.sortieStart=0,this.sortieLens=[],this.metrics=G(),this.seed=t,this.tune={...D,...e},this.rng=W(t);const i=this.tune;this.player={x:0,y:0,hp:i.baseHp,maxHp:i.baseHp,facing:"right",attackCd:0,dashCd:0,iframes:0,heat:0,sinceKill:0,pool:0,channel:0,embers:0,levels:{blade:0,armor:0,mend:0,vitality:0},grace:0,graceReady:!0,sortieHeat:0,carryLeft:0,poolCarry:0,shield:0}}rewardMult(){return 1+this.player.heat/this.tune.rewardDiv}damageMult(){const t=this.player.heat-this.player.carryLeft*(1-this.tune.carryDmgShare);return 1+Math.pow(t/this.tune.damageDiv,this.tune.damageExp)}carryPreview(){const t=this.player,e=this.tune,i=Math.min(1,Math.max(0,(t.hp/t.maxHp-e.carryFloor)/(1-e.carryFloor))),o=Math.min(t.heat,t.sortieHeat);return(o*e.carryStartFrac+(t.heat-o)*e.carryFrac)*i}windupFor(t,e=this.player.heat){const i=this.tune,o=(t==="brute"?i.windupBrute:t==="runner"?i.windupRunner:i.windupGrunt)*i.windupScale;if(o<=0)return 0;const n=Math.max(1,Math.round(o*(1-i.heatHaste*e/i.heatMax)));return Math.max(n,Math.min(Math.round(o),i.windupMin))}difficulty(){return 1+this.tick*this.tune.difficultyPerTick}atk(){return this.tune.baseAtk+this.player.levels.blade*this.tune.bladeAtk}shopCost(t){const e=this.player.levels[t],i=this.tune;if(e>=i.shopMaxLevel)return 1/0;const o=H.filter(n=>n!==t&&this.player.levels[n]>0).length;return Math.round(i.shopBase*Math.pow(i.shopGrowth,e)*Math.pow(i.typePenalty,o))}onBrazier(){return Math.hypot(this.player.x,this.player.y)<=this.tune.brazierRadius}step(t){if(this.over)return;const e=this.player,i=this.tune;this.hitThisTick=!1,e.attackCd>0&&e.attackCd--,e.dashCd>0&&e.dashCd--,e.iframes>0&&e.iframes--,e.grace>0&&e.grace--;let o=!1;switch(t.type){case"move":{const[n,s]=I[t.dir];e.facing=t.dir,this.movePlayer(n*i.playerSpeed,s*i.playerSpeed);break}case"dash":{if(e.dashCd===0){const[n,s]=I[t.dir];e.facing=t.dir,this.movePlayer(n*i.dashDist,s*i.dashDist),e.dashCd=i.dashCd,e.iframes=Math.max(e.iframes,i.dashIframes)}break}case"attack":e.attackCd===0&&!this.onBrazier()&&this.attack();break;case"bank":this.onBrazier()&&(o=!0,e.channel++);break;case"buy":this.buy(t.item);break}o||(e.channel=0),this.updateEnemies(),o&&this.hitThisTick&&e.hp>0&&(e.channel=0,this.metrics.channelBreaks++),e.hp<=0?this.rescue(o):o&&e.channel>=i.channelTicks&&this.bank(),i.poolLeak>0&&e.pool>0&&(e.pool-=e.pool*i.poolLeak*Math.pow(e.heat/100,2)),e.sinceKill++,e.sinceKill>i.heatGraceTicks&&e.heat>0&&(e.heat=Math.max(0,e.heat-i.heatDecay)),e.carryLeft>e.heat&&(e.carryLeft=e.heat),e.heat>=60&&this.metrics.ticksHighHeat++,this.spawn();for(const n of this.floats)n.ttl--,n.y-=.03;this.floats=this.floats.filter(n=>n.ttl>0),this.tick++,this.tick>=i.sessionTicks&&(this.over=!0,this.metrics.unbankedAtEnd=Math.round(e.pool))}movePlayer(t,e){const i=this.player;i.x+=t,i.y+=e;const o=Math.hypot(i.x,i.y),n=this.tune.arenaRadius-.4;o>n&&(i.x*=n/o,i.y*=n/o)}attack(){const t=this.player,e=this.tune;t.attackCd=e.attackCd;const i=this.atk();for(const n of this.enemies)Math.hypot(n.x-t.x,n.y-t.y)<=e.attackRadius&&(n.hp-=i,n.open&&(n.open=!1,e.punishHeat>0&&(t.heat=Math.min(e.heatMax,t.heat+e.punishHeat),this.metrics.punishes++)));const o=this.enemies.filter(n=>n.hp<=0);if(o.length!==0){this.enemies=this.enemies.filter(n=>n.hp>0);for(const n of o){const s=v[n.kind],r=s.embers*this.rewardMult();t.pool+=r;const l=s.embers*t.carryLeft/e.rewardDiv;t.poolCarry+=l,this.metrics.carryEarned+=l,t.heat=Math.min(e.heatMax,t.heat+s.heat);const f=t.levels.mend*e.mendHeal;!t.graceReady&&e.mendShield>0?t.shield+=f*e.mendShield:t.hp=Math.min(t.maxHp,t.hp+f),this.metrics.kills++,this.floats.push({x:n.x,y:n.y,text:`+${r.toFixed(0)}`,color:"#ffb347",ttl:12})}t.sinceKill=0,t.heat>this.metrics.peakHeat&&(this.metrics.peakHeat=t.heat)}}buy(t){if(!this.onBrazier())return;const e=this.player,i=this.shopCost(t);e.embers<i||(e.embers-=i,e.levels[t]++,this.metrics.spent+=i,t==="vitality"&&(e.maxHp+=this.tune.vitalityHp,e.hp+=this.tune.vitalityHp))}bank(){const t=this.player,e=Math.round(t.pool);t.embers+=e,this.metrics.score+=e,this.metrics.banks++,this.metrics.sumBankHeat+=t.heat,this.floats.push({x:t.x,y:t.y-.5,text:`奉納 ${e}`,color:"#ffd76a",ttl:20});const i=this.carryPreview();this.metrics.carryBanked+=t.poolCarry,this.metrics.sumCarry+=i,this.metrics.sumBankHpFrac+=Math.max(0,t.hp)/t.maxHp,this.lastBank={tick:this.tick,amount:e,heat:Math.round(t.heat),carry:Math.round(i)},i>=1&&this.floats.push({x:t.x,y:t.y+.4,text:`余熱 ${i.toFixed(0)}`,color:"#ff9f6a",ttl:20}),t.pool=0,t.poolCarry=0,t.heat=i,t.sortieHeat=i,t.carryLeft=i,t.sinceKill=0,t.channel=0,t.hp=t.maxHp,t.graceReady=!0,t.grace=0,t.shield=0,this.endSortie()}endSortie(){this.sortieLens.push(this.tick+1-this.sortieStart),this.sortieStart=this.tick+1}triggerGrace(){const t=this.player,e=this.tune;if(t.graceReady=!1,t.grace=e.graceTicks,this.metrics.graces++,e.graceShed>0&&t.heat>0){const i=t.heat*e.graceShed;t.heat-=i,t.carryLeft>t.heat&&(t.carryLeft=t.heat),t.shield+=i*e.graceShield,this.metrics.shedHeat+=i,this.floats.push({x:t.x,y:t.y+.9,text:`熱−${i.toFixed(0)}→盾${(i*e.graceShield).toFixed(0)}`,color:"#9be7ff",ttl:20})}for(const i of this.enemies){const o=i.x-t.x,n=i.y-t.y,s=Math.hypot(o,n);if(s<e.graceKnockRadius){const r=s>.01?Math.atan2(n,o):this.rng()*Math.PI*2;i.x+=Math.cos(r)*e.graceKnockDist,i.y+=Math.sin(r)*e.graceKnockDist;const l=Math.hypot(i.x,i.y),f=e.arenaRadius-.3;l>f&&(i.x*=f/l,i.y*=f/l)}}this.floats.push({x:t.x,y:t.y-.6,text:"踏ん張り！戻れ",color:"#9be7ff",ttl:20})}rescue(t){const e=this.player,i=this.tune,o=t?"banking":e.heat>=60?"high":e.heat>=30?"mid":"low";this.metrics.downs++,this.metrics.downsByPhase[o]++,this.metrics.downPhase=o,this.metrics.lostEmbers+=Math.round(e.pool),this.metrics.lostHeat+=e.heat,this.lastRescue={tick:this.tick,lostPool:Math.round(e.pool),lostHeat:Math.round(e.heat)},this.floats.push({x:e.x,y:e.y,text:`救助 −${Math.round(e.pool)}`,color:"#ff6b6b",ttl:25}),e.pool=0,e.poolCarry=0,e.heat=0,e.sortieHeat=0,e.carryLeft=0,e.channel=0,e.hp=e.maxHp,e.graceReady=!0,e.grace=0,e.shield=0,this.endSortie(),e.x=0,e.y=0,e.iframes=i.rescueIframes;for(const n of this.enemies){const s=Math.hypot(n.x,n.y);if(s<i.rescueClearRadius){const r=s>.01?Math.atan2(n.y,n.x):this.rng()*Math.PI*2;n.x=Math.cos(r)*(i.arenaRadius-.5),n.y=Math.sin(r)*(i.arenaRadius-.5)}}}updateEnemies(){const t=this.player,e=this.tune,i=this.difficulty(),o=e.enemyDmg*(1+(i-1)*e.dmgGrowthShare)*this.damageMult()*Math.pow(e.armorMult,t.levels.armor);for(const s of this.enemies){const r=v[s.kind];if(s.cd>0&&s.cd--,s.stun>0){s.stun--,s.stun===0&&(s.open=!1);continue}const l=t.x-s.x,f=t.y-s.y,d=Math.hypot(l,f);if(s.windup>0){s.windup--,e.windupCreep>0&&d>r.reach*.85&&(s.x+=l/d*r.speed*e.windupCreep,s.y+=f/d*r.speed*e.windupCreep),s.windup===0&&(d<=r.reach+e.strikeSlack&&t.iframes===0?this.hitPlayer(r.dmg*o):(s.stun=e.whiffStun,s.open=!0,this.metrics.whiffs++,this.floats.push({x:s.x,y:s.y-.4,text:"空振り",color:"#ffe066",ttl:10})));continue}if(d>r.reach*.85&&(s.x+=l/d*r.speed,s.y+=f/d*r.speed),d<=r.reach&&s.cd===0){s.cd=r.cd;const c=this.windupFor(s.kind);c>0?(s.windup=c,s.windupMax=c):t.iframes===0&&this.hitPlayer(r.dmg*o)}}const n=this.onBrazier()&&e.fearRadius>0?e.fearRadius:e.brazierRadius+e.wardMargin;for(const s of this.enemies){const r=Math.hypot(s.x,s.y);r<n&&r>.001&&(s.x*=n/r,s.y*=n/r)}for(let s=0;s<this.enemies.length;s++)for(let r=s+1;r<this.enemies.length;r++){const l=this.enemies[s],f=this.enemies[r],d=f.x-l.x,c=f.y-l.y,h=Math.hypot(d,c);if(h>.001&&h<.6){const p=(.6-h)/2;l.x-=d/h*p,l.y-=c/h*p,f.x+=d/h*p,f.y+=c/h*p}}}hitPlayer(t){const e=this.player,i=this.tune;let o=t*(e.grace>0?i.graceDmgMult:1);if(e.shield>0){const n=Math.min(e.shield,o);e.shield-=n,o-=n,this.metrics.shieldAbsorbed+=n}e.hp-=o,this.metrics.damageTaken+=o,this.metrics.hitsTaken++,this.hitThisTick=!0,e.graceReady&&i.graceTicks>0&&e.hp>0&&e.hp<e.maxHp*i.graceFrac&&this.triggerGrace()}spawn(){const t=this.tune;if(--this.spawnTimer>0)return;const e=Math.min(1,this.tick/t.sessionTicks),i=this.player.heat/100;if(this.spawnTimer=Math.max(1,Math.round((t.spawnStart+(t.spawnEnd-t.spawnStart)*e)/(1+t.heatSpawn*i))),this.enemies.length>=t.maxEnemies+Math.round(t.heatCap*i))return;const o=this.rng(),n=o<.15+.15*e?"brute":o<.45+.1*e?"runner":"grunt",s=this.rng()*Math.PI*2,r=v[n],l=Math.round(r.hp*this.difficulty());this.enemies.push({id:this.nextId++,kind:n,x:Math.cos(s)*(t.arenaRadius-.3),y:Math.sin(s)*(t.arenaRadius-.3),hp:l,maxHp:l,cd:r.cd,windup:0,windupMax:0,stun:0,open:!1})}getState(){const t=this.player,e={};for(const i of H){const o=this.shopCost(i);e[i]=Number.isFinite(o)?o:-1}return{seed:this.seed,tick:this.tick,sessionTicks:this.tune.sessionTicks,over:this.over,arenaRadius:this.tune.arenaRadius,brazierRadius:this.tune.brazierRadius,player:{...t,levels:{...t.levels}},enemies:this.enemies.map(i=>({...i})),rewardMult:this.rewardMult(),damageMult:this.damageMult(),difficulty:this.difficulty(),shopCosts:e,onBrazier:this.onBrazier(),channelNeeded:this.tune.channelTicks,lastRescue:this.lastRescue&&{...this.lastRescue},lastBank:this.lastBank&&{...this.lastBank},floats:this.floats.map(i=>({...i})),goals:[2e3,4e3,6e3],carryPreview:this.carryPreview(),carryFrac:this.tune.carryFrac,heatMax:this.tune.heatMax,typePenalty:this.tune.typePenalty,strikeSlack:this.tune.strikeSlack,bruteWindup:this.windupFor("brute"),bruteWindupMarks:[0,50,100].filter(i=>i<=this.tune.heatMax).map(i=>({heat:i,ticks:this.windupFor("brute",i)})),metrics:{...this.metrics,downsByPhase:{...this.metrics.downsByPhase}}}}}function E(a,t,e=0){let i=a*374761393+t*668265263+e*1442695041|0;return i=Math.imul(i^i>>>13,1274126177),i^=i>>>16,(i>>>0)/4294967296}function A(a,t){const e=parseInt(a.slice(1),16),i=o=>Math.max(0,Math.min(255,Math.round(o*(1+t))));return`rgb(${i(e>>16&255)},${i(e>>8&255)},${i(e&255)})`}function B(a,t,e,i,o={}){const n=o.face??1,s=i/10;a.save(),o.glow&&(a.fillStyle=o.glow,a.beginPath(),a.arc(t,e,i*.62,0,Math.PI*2),a.fill()),a.lineJoin="round",a.strokeStyle="#8a5a2b",a.lineWidth=Math.max(1.5,s*.8),a.beginPath(),a.moveTo(t+n*s*2,e+s*1.5),a.lineTo(t+n*s*4.2,e-s*2.5),a.stroke(),(o.tool??"pick")==="pick"?(a.strokeStyle="#d8dde3",a.lineWidth=Math.max(1.5,s*.9),a.beginPath(),a.moveTo(t+n*s*2.6,e-s*3.6),a.quadraticCurveTo(t+n*s*4.4,e-s*3.4,t+n*s*5.6,e-s*1.6),a.stroke()):(a.strokeStyle="#e8eef5",a.lineWidth=Math.max(1.5,s*.9),a.beginPath(),a.moveTo(t+n*s*4.2,e-s*2.5),a.lineTo(t+n*s*5.4,e-s*5),a.stroke()),a.strokeStyle="#2b2f3a",a.lineWidth=Math.max(1.5,s*1.1),a.beginPath(),a.moveTo(t-s*1,e+s*2),a.lineTo(t-s*1.3,e+s*4.6),a.moveTo(t+s*1,e+s*2),a.lineTo(t+s*1.3,e+s*4.6),a.stroke(),a.fillStyle=o.body??"#2f7fd8",a.strokeStyle="#ffffff",a.lineWidth=Math.max(1,s*.5),a.beginPath(),a.moveTo(t-s*2.2,e+s*2.4),a.lineTo(t-s*1.8,e-s*1.2),a.lineTo(t+s*1.8,e-s*1.2),a.lineTo(t+s*2.2,e+s*2.4),a.closePath(),a.fill(),a.stroke(),a.fillStyle="#f2c9a0",a.beginPath(),a.arc(t,e-s*2.8,s*1.9,0,Math.PI*2),a.fill(),a.stroke(),a.fillStyle="#f1c40f",a.beginPath(),a.arc(t,e-s*3.1,s*2.05,Math.PI,0),a.closePath(),a.fill(),(o.lamp??!0)&&(a.fillStyle="#fffbe0",a.beginPath(),a.arc(t+n*s*1.2,e-s*4.1,s*.6,0,Math.PI*2),a.fill()),a.fillStyle="#1a1a1a",a.fillRect(t+n*s*.4-s*.35,e-s*2.7,s*.7,s*.8),a.fillRect(t+n*s*1.3-s*.35,e-s*2.7,s*.7,s*.8),a.restore()}function S(a,t,e,i,o,n,s=-1){const r=i/10;a.save(),a.lineJoin="round";const l=A(n,-.55);if(a.strokeStyle=l,a.lineWidth=Math.max(1,r*.6),a.beginPath(),a.moveTo(t-r*1.6,e+r*2.6),a.lineTo(t-r*2,e+r*4.6),a.moveTo(t+r*1.6,e+r*2.6),a.lineTo(t+r*2,e+r*4.6),a.stroke(),a.fillStyle=n,o==="brute"){a.strokeStyle="#6b4219",a.lineWidth=Math.max(2,r*1.3),a.beginPath(),a.moveTo(t+s*r*3.4,e+r*1.5),a.lineTo(t+s*r*5.2,e-r*3.5),a.stroke(),a.strokeStyle=l,a.lineWidth=Math.max(1,r*.6),a.beginPath(),a.roundRect(t-r*3.6,e-r*3.6,r*7.2,r*6.6,r*1.6),a.fill(),a.stroke(),a.fillStyle="#efe6d0";for(const d of[-1,1])a.beginPath(),a.moveTo(t+d*r*2.2,e-r*3.4),a.lineTo(t+d*r*3.4,e-r*5.6),a.lineTo(t+d*r*1.2,e-r*3.6),a.closePath(),a.fill()}else if(o==="runner"){a.beginPath(),a.moveTo(t-s*r*3.4,e+r*1.2);for(let d=0;d<=6;d++){const c=Math.PI+d/6*Math.PI,h=d%2?r*3.4:r*2.4;a.lineTo(t+Math.cos(c)*h,e-r*.2+Math.sin(c)*h)}a.lineTo(t+s*r*3.4,e+r*1.2),a.lineTo(t,e+r*2.8),a.closePath(),a.fill(),a.stroke()}else if(o==="archer")a.strokeStyle="#c8a06a",a.lineWidth=Math.max(1.2,r*.6),a.beginPath(),a.arc(t+s*r*2.8,e-r*.5,r*3.2,-Math.PI/2.2,Math.PI/2.2,s<0),a.stroke(),a.strokeStyle=l,a.lineWidth=Math.max(1,r*.6),a.beginPath(),a.moveTo(t,e-r*5),a.lineTo(t+r*2.8,e+r*2.8),a.lineTo(t-r*2.8,e+r*2.8),a.closePath(),a.fill(),a.stroke();else{a.beginPath(),a.arc(t,e,r*3.3,0,Math.PI*2),a.fill(),a.stroke(),a.fillStyle="#efe6d0";for(const d of[-1,1])a.beginPath(),a.moveTo(t+d*r*1.4,e-r*2.8),a.lineTo(t+d*r*2.4,e-r*4.8),a.lineTo(t+d*r*.4,e-r*3.2),a.closePath(),a.fill()}const f=o==="archer"?e-r*1:e-r*1.2;for(const d of[-1,1]){const c=t+d*r*1.2+s*r*.4;a.fillStyle="#fff6d6",a.beginPath(),a.arc(c,f,r*.9,0,Math.PI*2),a.fill(),a.fillStyle="#111",a.beginPath(),a.arc(c+s*r*.3,f+r*.1,r*.45,0,Math.PI*2),a.fill(),a.strokeStyle="#111",a.lineWidth=Math.max(1,r*.45),a.beginPath(),a.moveTo(c-r*.9,f-r*1-d*r*.3),a.lineTo(c+r*.9,f-r*1+d*r*.3),a.stroke()}o!=="archer"&&(a.fillStyle="#2a0c0c",a.fillRect(t-r*1.4,e+r*.6,r*2.8,r*.9),a.fillStyle="#fff",a.beginPath(),a.moveTo(t-r*1.1,e+r*.6),a.lineTo(t-r*.7,e+r*1.4),a.lineTo(t-r*.3,e+r*.6),a.moveTo(t+r*.3,e+r*.6),a.lineTo(t+r*.7,e+r*1.4),a.lineTo(t+r*1.1,e+r*.6),a.fill()),a.restore()}function L(a,t,e,i,o=0,n=.5){a.strokeStyle="#6b4219",a.lineWidth=Math.max(2,i*.12),a.beginPath(),a.moveTo(t-i*.4,e+i*.3),a.lineTo(t+i*.4,e+i*.12),a.moveTo(t+i*.4,e+i*.3),a.lineTo(t-i*.4,e+i*.12),a.stroke(),a.lineWidth=1;const s=(.55+.45*n)*(1+.08*Math.sin(o*.9)),r=(l,f)=>{a.fillStyle=l,a.beginPath(),a.moveTo(t-i*.3*f,e+i*.2),a.quadraticCurveTo(t-i*.35*f,e-i*.2*s*f,t,e-i*.65*s*f),a.quadraticCurveTo(t+i*.35*f,e-i*.2*s*f,t+i*.3*f,e+i*.2),a.closePath(),a.fill()};r("#e8532b",1),r("#ffa630",.72),r("#fff1a8",.42)}function z(a,t,e,i,o,n=1/0){a.save(),a.font=`${Math.max(10,Math.round(i*.62))}px sans-serif`,a.textBaseline="middle";let s=t,r=e;for(const l of o){const f=i+4+a.measureText(l.label).width+10;s+f-t>n&&s>t&&(s=t,r+=i+4),l.draw(a,s,r,i),a.fillStyle="#cfd6e0",a.fillText(l.label,s+i+4,r+i/2),s+=f}return a.restore(),r+i-e}const b=560,P=300,y=12,T={grunt:"#9b8a6a",runner:"#3fb7c9",brute:"#b8433a"},K=[{label:"自分",draw:(a,t,e,i)=>B(a,t+i/2,e+i/2,i,{tool:"sword",lamp:!1})},{label:"雑兵",draw:(a,t,e,i)=>S(a,t+i/2,e+i/2,i,"grunt",T.grunt)},{label:"走り屋",draw:(a,t,e,i)=>S(a,t+i/2,e+i/2,i,"runner",T.runner)},{label:"重兵（大振り）",draw:(a,t,e,i)=>S(a,t+i/2,e+i/2,i,"brute",T.brute)},{label:"篝火（奉納）",draw:(a,t,e,i)=>L(a,t+i/2,e+i*.6,i*.9)}],_={blade:"刃（攻撃+4）",armor:"鎧（被ダメ×0.88）",mend:"癒し（撃破で+2回復）",vitality:"器（最大HP+25）"},N={blade:"1",armor:"2",mend:"3",vitality:"4"};function O(a){return"#"+(a.match(/\d+/g)??["128","128","128"]).slice(0,3).map(e=>Number(e).toString(16).padStart(2,"0")).join("")}function w(a){if(a>100){const e=Math.min(1,(a-100)/150);return`rgb(${Math.round(255-95*e)},${Math.round(250-50*e)},255)`}if(a<50){const e=a/50;return`rgb(${Math.round(120+135*e)},${Math.round(130+20*e)},${Math.round(160-120*e)})`}const t=(a-50)/50;return`rgb(255,${Math.round(150+100*t)},${Math.round(40+200*t)})`}class Y{constructor(t){this.canvas=t,this.face=1,this.lastPx=0,t.width=b+P+y*3,t.height=b+y*2,this.ctx=t.getContext("2d")}draw(t){const e=this.ctx;e.fillStyle="#0e0d10",e.fillRect(0,0,this.canvas.width,this.canvas.height),this.drawArena(t),this.drawHud(t)}drawArena(t){const e=this.ctx,i=y+b/2,o=y+b/2,n=b/2/(t.arenaRadius+.3),s=h=>i+h*n,r=h=>o+h*n,l=t.player;e.fillStyle="#1d1a1f",e.beginPath(),e.arc(i,o,t.arenaRadius*n,0,Math.PI*2),e.fill(),e.strokeStyle="#3a3340",e.lineWidth=2,e.stroke();const f=e.createRadialGradient(i,o,2,i,o,(t.brazierRadius+.3)*n);f.addColorStop(0,"rgba(255,190,90,0.55)"),f.addColorStop(1,"rgba(255,120,40,0.05)"),e.fillStyle=f,e.beginPath(),e.arc(i,o,(t.brazierRadius+.3)*n,0,Math.PI*2),e.fill(),e.setLineDash([4,4]),e.strokeStyle="#ffb347",e.beginPath(),e.arc(i,o,t.brazierRadius*n,0,Math.PI*2),e.stroke(),e.setLineDash([]),L(e,i,o,Math.max(18,.9*n),t.tick,Math.min(1,l.heat/100)),e.fillStyle="#2b262d";for(let h=0;h<60;h++){const p=E(h,1)*Math.PI*2,u=Math.sqrt(E(h,2))*t.arenaRadius*.97;e.fillRect(i+Math.cos(p)*u*n,o+Math.sin(p)*u*n,3,2)}z(e,y+4,y+4,18,K,120);for(const h of t.enemies){const p=h.kind==="brute"?.45:h.kind==="runner"?.28:.35;if(S(e,s(h.x),r(h.y),p*n*3.2,h.kind,T[h.kind],h.x>l.x?-1:1),h.windup>0){const u=(h.kind==="brute"?1.1:h.kind==="runner"?.8:.9)+t.strikeSlack,m=1-h.windup/Math.max(1,h.windupMax);h.windup<=4&&(e.fillStyle="rgba(255,60,40,0.22)",e.beginPath(),e.arc(s(h.x),r(h.y),u*n,0,Math.PI*2),e.fill()),e.strokeStyle=`rgba(255,74,58,${.25+.3*m})`,e.lineWidth=1,e.beginPath(),e.arc(s(h.x),r(h.y),u*n,0,Math.PI*2),e.stroke(),e.strokeStyle=h.windupMax<=8?"#ff3aa0":h.windupMax<=12?"#ff4a5a":"#ff4a3a",e.lineWidth=2+2*m,e.beginPath(),e.arc(s(h.x),r(h.y),u*n,-Math.PI/2,-Math.PI/2+Math.PI*2*m),e.stroke(),e.lineWidth=2,e.fillStyle="#ffdddd",e.font="bold 14px monospace",e.fillText("!",s(h.x)-3,r(h.y)-p*n-8)}h.stun>0&&(e.strokeStyle="#ffe066",e.lineWidth=2,e.beginPath(),e.arc(s(h.x),r(h.y),(p+.15)*n,0,Math.PI*2),e.stroke()),h.hp<h.maxHp&&(e.fillStyle="#400",e.fillRect(s(h.x)-10,r(h.y)-p*n-6,20,3),e.fillStyle="#e44",e.fillRect(s(h.x)-10,r(h.y)-p*n-6,20*h.hp/h.maxHp,3))}const d=w(l.heat);e.strokeStyle="rgba(255,255,255,0.15)",e.beginPath(),e.arc(s(l.x),r(l.y),1.5*n,0,Math.PI*2),e.stroke(),l.heat>0&&(e.fillStyle=d.replace("rgb","rgba").replace(")",`,${.12+l.heat/400})`),e.beginPath(),e.arc(s(l.x),r(l.y),(.5+l.heat/120)*n,0,Math.PI*2),e.fill()),Math.abs(l.x-this.lastPx)>1e-6&&(this.face=l.x>this.lastPx?1:-1),this.lastPx=l.x,l.iframes>0&&t.tick%2===0||B(e,s(l.x),r(l.y),1.3*n,{face:this.face,tool:"sword",lamp:!1,body:O(d)}),l.attackCd>=5&&(e.strokeStyle="rgba(255,240,200,0.7)",e.lineWidth=3,e.beginPath(),e.arc(s(l.x),r(l.y),1.5*n,0,Math.PI*2),e.stroke(),e.lineWidth=2),l.grace>0&&(e.strokeStyle=`rgba(155,231,255,${.4+.5*l.grace/60})`,e.lineWidth=3,e.beginPath(),e.arc(s(l.x),r(l.y),.95*n,0,Math.PI*2),e.stroke(),e.lineWidth=2),l.shield>0&&(e.strokeStyle="rgba(120,200,255,0.9)",e.lineWidth=2+Math.min(4,l.shield/6),e.beginPath(),e.arc(s(l.x),r(l.y),1.15*n,0,Math.PI*2),e.stroke(),e.lineWidth=2),l.channel>0&&(e.strokeStyle="#ffd76a",e.lineWidth=4,e.beginPath(),e.arc(s(l.x),r(l.y),.7*n,-Math.PI/2,-Math.PI/2+Math.PI*2*l.channel/t.channelNeeded),e.stroke(),e.lineWidth=2),e.font="bold 13px monospace";const c=[];for(const h of t.floats){const p=e.measureText(h.text).width,u=s(h.x)-12;let m=r(h.y)-10;for(let k=0;k<6&&c.some(M=>Math.abs(M.y-m)<14&&u<M.x+M.w&&M.x<u+p);k++)m-=14;c.push({x:u,y:m,w:p}),e.fillStyle=h.color,e.fillText(h.text,u,m)}t.over&&(e.fillStyle="rgba(0,0,0,0.7)",e.fillRect(y,o-50,b,100),e.fillStyle="#ffd76a",e.font="bold 26px monospace",e.fillText(`夜明け — 累計奉納 ${t.metrics.score}`,y+40,o),e.font="14px monospace",e.fillStyle="#ddd",e.fillText(`撃破${t.metrics.kills} 奉納${t.metrics.banks}回 救助${t.metrics.downs}回 失った残り火${t.metrics.lostEmbers}  R:もう一度`,y+20,o+28))}drawHud(t){const e=this.ctx,i=t.player,o=y*2+b;let n=y+14;const s=(u,m="#ddd",k="13px monospace")=>{e.font=k,e.fillStyle=m,e.fillText(u,o,n),n+=19},r=Math.max(0,t.sessionTicks-t.tick),l=Math.floor(r/600),f=Math.floor(r%600/10);s(`夜明けまで ${l}:${String(f).padStart(2,"0")}`,"#aab","bold 14px monospace"),e.fillStyle="#311",e.fillRect(o,n-10,P-10,12),e.fillStyle=i.hp<i.maxHp*.3?"#e74c3c":"#58c46b",e.fillRect(o,n-10,(P-10)*Math.max(0,i.hp)/i.maxHp,12),n+=16,s(`HP ${Math.max(0,Math.ceil(i.hp))}/${i.maxHp}${i.shield>0?`  盾 ${Math.ceil(i.shield)}`:""}`),i.grace>0?s(`踏ん張り中 ${(i.grace/10).toFixed(1)}秒 — 被ダメ半分。今のうちに戻れ`,"#9be7ff","bold 12px monospace"):s(i.graceReady?"踏ん張り: 1回（HP3割で熱の半分を盾に）":"踏ん張り: 使用済み（奉納で戻る）",i.graceReady?"#7ab":"#755","11px monospace"),n+=4,s(`熱 ${i.heat.toFixed(0)}`,w(i.heat),"bold 15px monospace");const d=P-10,c=e.createLinearGradient(o,0,o+d,0);c.addColorStop(0,w(0)),c.addColorStop(50/t.heatMax,w(50)),c.addColorStop(Math.min(1,100/t.heatMax),w(100)),c.addColorStop(1,w(t.heatMax)),e.fillStyle="#222",e.fillRect(o,n-12,d,14),e.fillStyle=c,e.fillRect(o,n-12,d*i.heat/t.heatMax,14);for(const u of[25,50,75,100,150,200].filter(m=>m<t.heatMax))e.fillStyle="#555",e.fillRect(o+d*u/t.heatMax,n-12,1,14);e.font="10px monospace";for(const u of t.bruteWindupMarks){const m=o+d*u.heat/t.heatMax;e.fillStyle="#c99";const k=`${(u.ticks/10).toFixed(1)}s`,M=e.measureText(k).width;e.fillText(k,Math.min(o+d-M,Math.max(o,m-M/2)),n+12)}{const u=o+d*Math.min(i.heat,t.heatMax)/t.heatMax;e.fillStyle=t.bruteWindup<=8?"#ff5a4a":"#ffb0a0",e.beginPath(),e.moveTo(u,n+2),e.lineTo(u-4,n+8),e.lineTo(u+4,n+8),e.fill()}n+=14,n+=18,s(`報酬 ×${t.rewardMult.toFixed(2)}   被ダメ ×${t.damageMult.toFixed(2)}`,"#ffcf8a"),i.sinceKill>40&&i.heat>0?s("撃破が途切れて熱が冷めている","#88a"):n+=19;const h=Math.round(t.carryPreview/Math.max(1,i.heat)*100);s(`今帰れば次の出撃は 熱${t.carryPreview.toFixed(0)} から（熱の${i.heat>0?h:0}%を持ち越す）`,"#ff9f6a","bold 12px monospace"),s(`  この出撃は熱${i.sortieHeat.toFixed(0)}から｜HP2割以下は持ち越し0`,"#a87","11px monospace"),s(`抱えた残り火 ${Math.round(i.pool)}`,"#ffb347","bold 14px monospace"),s("（倒れると全て失う。篝火で奉納して確定）","#998"),s(`奉納済み ${i.embers}  累計 ${t.metrics.score}`,"#ffd76a");const p=t.goals.find(u=>u>t.metrics.score);if(s(p?`今夜の目標: 累計 ${p}（${t.goals.filter(u=>u<=t.metrics.score).length}/${t.goals.length}達成）`:"今夜の目標: すべて達成！","#9c9"),n+=6,t.onBrazier){s("篝火の上: B長押しで奉納（被弾で中断）。ここでは斬れない","#ffd76a"),s(`多芸は高くつく: 持っている他の強化1種ごとに価格×${t.typePenalty}`,"#c9a","11px monospace");for(const u of["blade","armor","mend","vitality"]){const m=t.shopCosts[u],k=m>0&&i.embers>=m;s(`${N[u]}: ${_[u]} Lv${i.levels[u]} ${m>0?m:"最大"}`,k?"#fff":"#777","12px monospace")}}else s("篝火（中央）へ戻ると奉納・強化","#887"),s(`刃${i.levels.blade} 鎧${i.levels.armor} 癒し${i.levels.mend} 器${i.levels.vitality}`,"#aaa","12px monospace"),n+=19*3;n+=6,t.lastRescue&&t.tick-t.lastRescue.tick<80?(s(`救助された: 残り火−${t.lastRescue.lostPool}・熱−${t.lastRescue.lostHeat}（余熱なし）`,"#ff6b6b","bold 13px monospace"),s("（装備と奉納済みは無事）","#c88")):t.lastBank&&t.tick-t.lastBank.tick<60&&s(`奉納 +${t.lastBank.amount}（熱${t.lastBank.heat}で）→ 余熱${t.lastBank.carry}で次へ`,"#ffd76a","bold 13px monospace"),n=y+b-78,s("重兵の大振り: 赤い輪が閉じる前に赤い円の外へ一歩引く","#ff8a7a","11px monospace"),s(`空振り ${t.metrics.whiffs}回｜被弾 ${t.metrics.hitsTaken}回`,"#ffe066","11px monospace"),s(`重兵の予兆 ${(t.bruteWindup/10).toFixed(1)}秒（熱が高いほど短い）`,t.bruteWindup<=8?"#ff8a7a":"#ffb0a0","11px monospace"),n+=2,s(`撃破 ${t.metrics.kills}  奉納 ${t.metrics.banks}回  救助 ${t.metrics.downs}回`,"#999","12px monospace"),s(`敵の強さ ×${t.difficulty.toFixed(2)}  失った残り火 ${t.metrics.lostEmbers}`,"#999","12px monospace")}}const R={1:"blade",2:"armor",3:"mend",4:"vitality"};class q{constructor(){this.pressed=new Set,this.queued=[],this.facing="right",window.addEventListener("keydown",t=>{const e=t.key.toLowerCase();!t.repeat&&(e==="shift"||R[e])&&this.queued.push(e),this.pressed.add(e),[" ","arrowup","arrowdown","arrowleft","arrowright"].includes(e)&&t.preventDefault()}),window.addEventListener("keyup",t=>this.pressed.delete(t.key.toLowerCase())),window.addEventListener("blur",()=>this.pressed.clear())}poll(){const t=this.queued.shift();if(t==="shift")return{type:"dash",dir:this.facing};if(t&&R[t])return{type:"buy",item:R[t]};if(this.pressed.has("b"))return{type:"bank"};if(this.pressed.has(" "))return{type:"attack"};const e=[[["w","arrowup"],"up"],[["s","arrowdown"],"down"],[["a","arrowleft"],"left"],[["d","arrowright"],"right"]];for(const[i,o]of e)if(i.some(n=>this.pressed.has(n)))return this.facing=o,{type:"move",dir:o};return{type:"wait"}}}const U=[{type:"wait",description:"何もしない（1tick）"},{type:"move",params:{dir:"up|down|left|right"},description:"移動（0.25タイル/tick）。重兵は手が届くと足を止めて大振りの予兆（windup、熱0で16tick・熱が高いほど短く熱100で5tick）に入る。予兆が終わる時に手の長さ+0.3より外にいれば空振り"},{type:"attack",description:"周囲（半径1.5）の敵全員を斬る。クールダウン6tick。篝火の上では斬れない。v2: 隙への一撃の熱は既定0（punishHeat）"},{type:"dash",params:{dir:"up|down|left|right"},description:"3タイル跳ぶ。4tick無敵、クールダウン30tick"},{type:"bank",description:"篝火の上で送り続けると15tickで奉納: 残り火を確定しHP全快。熱は「熱×0.8×余力（HP割合を20%〜100%で0〜1に）」を次の出撃へ持ち越す（余熱）。被弾で詠唱リセット"},{type:"buy",params:{item:"blade|armor|mend|vitality"},description:"篝火の上で奉納済みの残り火を使って強化"}];function j(a){return{version:1,takeControl:()=>a.setAiControlled(!0),release:()=>a.setAiControlled(!1),reset(t){return a.setGame(new $(t)),a.render(),a.getGame().getState()},getState:()=>a.getGame().getState(),step(t){return a.getGame().step(t??{type:"wait"}),a.render(),a.getGame().getState()},run(t){const e=a.getGame();for(const i of t)if(e.step(i),e.over)break;return a.render(),e.getState()},getActionSpec:()=>U}}const J=100,X=document.getElementById("game"),C=new Y(X),V=new q,Q=new URLSearchParams(location.search);let g=new $(Number(Q.get("seed")??1)),F=!1;window.__AIP__=j({getGame:()=>g,setGame:a=>g=a,render:()=>C.draw(g.getState()),setAiControlled:a=>F=a});window.addEventListener("keydown",a=>{a.key.toLowerCase()==="r"&&g.over&&(g=new $(g.seed))});setInterval(()=>{F||(g.over||g.step(V.poll()),C.draw(g.getState()))},J);C.draw(g.getState());
+
+</script>
+<script>
+"use strict";
+var __BOTLIB__ = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // headless/simulate.ts
+  var simulate_exports = {};
+  __export(simulate_exports, {
+    Bot: () => Bot,
+    PERSONAS: () => PERSONAS,
+    RUNOPT: () => RUNOPT,
+    runOne: () => runOne
+  });
+
+  // src/core/rng.ts
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0;
+      a = a + 1831565813 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // src/core/game.ts
+  var TUNE = {
+    /** 1セッションの長さ（10tps × 600秒） */
+    sessionTicks: 6e3,
+    arenaRadius: 11,
+    brazierRadius: 1.6,
+    /** 篝火の結界の余白（敵が近づける最短距離 = brazierRadius + wardMargin） */
+    wardMargin: 0.3,
+    /**
+     * v2: 火を恐れる半径。プレイヤーが篝火の上にいる間、敵はこの半径より内へ入らない（押し出される）。
+     * 篝火の上では斬れないので、出ていく時と場所をプレイヤーが選ぶ。0で無効
+     */
+    fearRadius: 4,
+    playerSpeed: 0.25,
+    baseHp: 100,
+    baseAtk: 10,
+    attackCd: 6,
+    attackRadius: 1.5,
+    dashDist: 3,
+    dashCd: 30,
+    dashIframes: 4,
+    channelTicks: 15,
+    /** 熱: 報酬倍率 = 1 + heat / rewardDiv、被ダメージ倍率 = 1 + (heat / damageDiv)^damageExp（同じダイヤルに長所と短所） */
+    rewardDiv: 25,
+    damageDiv: 45,
+    damageExp: 2,
+    /** v2で250（上限撤廃）を試したが、篝火の内側から斬れなくすると熱が100を超える前にHPで戻るため差が出ず、100のままにした */
+    heatMax: 100,
+    /** 撃破が途切れて何tickで熱が冷め始めるか、冷める速さ（heat/tick） */
+    heatGraceTicks: 40,
+    heatDecay: 0.25,
+    /** 時間による敵の強化: HPは difficulty 倍、攻撃は (1 + (difficulty-1) * dmgGrowthShare) 倍 */
+    difficultyPerTick: 1 / 3e3,
+    dmgGrowthShare: 0.6,
+    /** v2: 敵の攻撃力の全体倍率（篝火の内側から斬れなくなった分の調整） */
+    enemyDmg: 0.5,
+    spawnStart: 14,
+    spawnEnd: 6,
+    maxEnemies: 18,
+    /**
+     * v3: 熱は敵を呼ぶ。出現間隔 ÷ (1 + heatSpawn × heat/100)、上限 + heatCap × heat/100 体。
+     * 守りを厚くしても熱を上げ続けると敵が増える…はずが、敵の増加は撃破の増加（報酬）になり全ビルドが得をした。
+     * v3で試して不採用（0のまま。--tune heatSpawn=1,heatCap=6 で再現）
+     */
+    heatSpawn: 0,
+    heatCap: 0,
+    /**
+     * 熱が高いほど抱えた残り火が燃え尽きる。1tickごとに pool × poolLeak × (heat/100)^2 を失う。
+     * v3で試して不採用（0のまま）: 守り寄りは熱80に届く前にHPで戻るため、80以上の平らさは変わらず全体が下がるだけ
+     */
+    poolLeak: 0,
+    /** 救助直後: 篝火の周りの敵を押し返す半径と、無敵tick */
+    rescueClearRadius: 5,
+    rescueIframes: 20,
+    /**
+     * v3: 踏ん張り（火の加護）。1回の出撃につき1度、HPが graceFrac を下回った瞬間に篝火が燃え上がり、
+     * 周り（半径 graceKnockRadius）の敵を押し返し、graceTicks の間は被ダメージ × graceDmgMult。
+     * 奉納か救助で再び使えるようになる。v2の新規重大#1（迷いの罰が崖、遅延3秒で−79%）への対応。graceTicks=0で無効
+     */
+    graceFrac: 0.3,
+    /** 033 v2: 30→60（熱の盾と組で、迷いの6秒まで支える） */
+    graceTicks: 60,
+    graceDmgMult: 0.5,
+    graceKnockRadius: 2.5,
+    graceKnockDist: 2.5,
+    /** ショップ */
+    shopBase: 40,
+    shopGrowth: 1.9,
+    shopMaxLevel: 8,
+    /**
+     * v2: 多芸は高くつく。価格 × typePenalty^(この強化以外に持っている強化の種類数)。
+     * v1では価格が強化ごとに上がるため均等に散らすのが常に安く、万能（4種）が全てに勝った。2種への特化と万能を選ばせる
+     */
+    typePenalty: 1.8,
+    bladeAtk: 4,
+    /** 防具1段ごとの被ダメージ係数（乗算） */
+    armorMult: 0.88,
+    /** 癒し1段ごとの撃破時回復 */
+    mendHeal: 2,
+    vitalityHp: 25,
+    /**
+     * 033: 余熱（持ち越す熱）。奉納の瞬間の熱のうち heat × carryFrac × 余力 を次の出撃へ持ち越す。
+     * 余力 = clamp((HP割合 − carryFloor) / (1 − carryFloor), 0, 1)。HPに余裕を残して帰るほど、次の出撃は高い熱（＝高い報酬倍率）から始まる。
+     * 救助では持ち越さない（0）。点を足すのではなく、次の出撃の展開を変える。carryFrac=0 で027と同じ（毎回熱0から）
+     */
+    carryFrac: 0.8,
+    carryFloor: 0.2,
+    /**
+     * 033 v2: 熱の盾（v1重大#1 迷いの崖への対応）。踏ん張りの発動の瞬間に熱の graceShed 割を捨て、
+     * 捨てた熱1につき graceShield のHPを吸う盾に換える（盾は奉納・救助まで残る）。
+     * 熱が下がるので被ダメージ倍率も下がる（凸なので熱70→35で 3.4倍→1.6倍）。代わりに帰り道の撃破の報酬と余熱は減る。
+     * 迷って帰り損ねた人の保険にするが、早めに帰る人（HP3割より上で帰る）は発動しないので遅延0の強さは変わりにくい。graceShed=0で無効
+     */
+    graceShed: 0.5,
+    graceShield: 0.5,
+    /**
+     * 033 v3: 癒しの迷い直し（v2中#1）への対応。この出撃で踏ん張りを使った後は、撃破の回復をHPでなく盾に足す（× mendShield）。
+     * HPが帰る線の上に戻らないので「帰る理由」が消えず、迷いが数え直されない。守りの量は変わらない。0で無効（v2と同じ）
+     */
+    mendShield: 1,
+    /**
+     * 033 v3: 持ち越しを「この出撃で育てた熱」に寄せる（v2中#3）。奉納時の熱のうち、出撃の始まりの熱（余熱）までの分は
+     * carryStartFrac、それより上（この出撃で上げた分）は carryFrac で持ち越す。carryStartFrac=carryFrac でv2と同じ。
+     * v3で試して不採用（0.8のまま）: 0.5/0.3/0 で p02 5655→5466/5423/5286 と下がるだけで、出撃の中央値は7.3→7.4〜7.6秒（帰るのはHPの線のため）
+     */
+    carryStartFrac: 0.8,
+    /**
+     * 033 v3（試験）: 被ダメージ倍率に数える余熱の割合。被ダメージは heat − carryLeft × (1 − carryDmgShare) で計算する。1でv2と同じ（1本のダイヤル）。
+     * v3で試して不採用（1のまま）: 0で p02 5655→9459・banker 5458→8642 と慎重な型だけが跳ね、p02の出撃の中央値は7.3→8.8秒しか伸びない
+     */
+    carryDmgShare: 1,
+    /**
+     * 037: 大振りの予兆（telegraph）。敵は手が届くと足を止め、windup（種類ごと、×windupScale tick）振りかぶってから打つ。
+     * 打つ瞬間にプレイヤーが「手の長さ + strikeSlack」より外にいるか、無敵中なら空振り。空振りした敵は whiffStun tick 動かず攻撃しない（隙）。
+     * 隙の敵への最初の一撃は熱 + punishHeat（報酬倍率と被ダメージ倍率の両方が上がる1本のダイヤル。点は足さない）。
+     * 避けた回数では何も増えない。windupScale=0 で033と同じ（手が届いた瞬間に当たる）
+     */
+    windupScale: 1,
+    /** 種類ごとの予兆の長さ（tick）。0なら033と同じく手が届いた瞬間に当たる */
+    windupGrunt: 0,
+    windupRunner: 0,
+    /** v2: 8→16（v1重大#2 反応0.6秒で読みの得が0になる崖への対応。熱で縮むので熱0で1.6秒・熱100で0.5秒） */
+    windupBrute: 16,
+    /** v2: 0.5→0.3（予兆を長くした分、判定を狭く） */
+    strikeSlack: 0.3,
+    whiffStun: 6,
+    /** v2: 3→0（v1中#4 外しても−0.9%で効かないため、規則を1つに保つ。--tune punishHeat=3 で再現） */
+    punishHeat: 0,
+    /**
+     * 037 v2: 熱は振りを速める（v1重大#1 読みが全員に同じだけ効く への対応）。予兆の長さ × (1 − heatHaste × 熱/熱の上限)。
+     * 熱100では予兆が (1 − heatHaste) 倍に縮み、読みにくくなる。読みの得は「熱を上げすぎずに帰る」慎重な型ほど大きい。
+     * 1本のダイヤル（熱は報酬・被ダメージ・振りの速さを同時に上げる）。点は足さない。0でv1と同じ
+     */
+    heatHaste: 0.7,
+    /**
+     * 037 v3: 予兆の最短（tick）。熱で縮んでもこれより短くならない（v2 中#5 熱100の上限が低い への試し）。0で無効（v2と同じ）
+     */
+    windupMin: 0,
+    /**
+     * 037 v3: 予兆の間に重兵が寄る速さ（通常の速さに対する割合）。予兆だけで手数が減る得（noread）を減らす試し。0で足を止める（v2と同じ）
+     */
+    windupCreep: 0
+  };
+  var SHOP_ITEMS = ["blade", "armor", "mend", "vitality"];
+  var ENEMY_DEFS = {
+    grunt: { hp: 20, dmg: 6, speed: 0.08, cd: 12, embers: 4, heat: 5, reach: 0.9 },
+    runner: { hp: 10, dmg: 4, speed: 0.16, cd: 8, embers: 3, heat: 4, reach: 0.8 },
+    brute: { hp: 60, dmg: 16, speed: 0.06, cd: 20, embers: 12, heat: 10, reach: 1.1 }
+  };
+  var DIR_VEC = {
+    up: [0, -1],
+    down: [0, 1],
+    left: [-1, 0],
+    right: [1, 0]
+  };
+  function emptyMetrics() {
+    return {
+      score: 0,
+      kills: 0,
+      banks: 0,
+      downs: 0,
+      downsByPhase: { low: 0, mid: 0, high: 0, banking: 0 },
+      downPhase: "none",
+      lostEmbers: 0,
+      lostHeat: 0,
+      unbankedAtEnd: 0,
+      peakHeat: 0,
+      sumBankHeat: 0,
+      ticksHighHeat: 0,
+      damageTaken: 0,
+      channelBreaks: 0,
+      spent: 0,
+      graces: 0,
+      carryEarned: 0,
+      carryBanked: 0,
+      sumCarry: 0,
+      sumBankHpFrac: 0,
+      shedHeat: 0,
+      shieldAbsorbed: 0,
+      hitsTaken: 0,
+      whiffs: 0,
+      punishes: 0
+    };
+  }
+  var Game = class {
+    constructor(seed, tune = {}) {
+      this.tick = 0;
+      this.over = false;
+      this.enemies = [];
+      this.nextId = 1;
+      this.spawnTimer = 20;
+      this.floats = [];
+      this.lastRescue = null;
+      this.lastBank = null;
+      /** このtickに被弾したか（詠唱リセット判定） */
+      this.hitThisTick = false;
+      /** 033: 出撃の始まり（奉納・救助）のtick と、各出撃の長さ（tick）。getStateには載せない（毎tickの複製が重い） */
+      this.sortieStart = 0;
+      this.sortieLens = [];
+      this.metrics = emptyMetrics();
+      this.seed = seed;
+      this.tune = { ...TUNE, ...tune };
+      this.rng = mulberry32(seed);
+      const t = this.tune;
+      this.player = {
+        x: 0,
+        y: 0,
+        hp: t.baseHp,
+        maxHp: t.baseHp,
+        facing: "right",
+        attackCd: 0,
+        dashCd: 0,
+        iframes: 0,
+        heat: 0,
+        sinceKill: 0,
+        pool: 0,
+        channel: 0,
+        embers: 0,
+        levels: { blade: 0, armor: 0, mend: 0, vitality: 0 },
+        grace: 0,
+        graceReady: true,
+        sortieHeat: 0,
+        carryLeft: 0,
+        poolCarry: 0,
+        shield: 0
+      };
+    }
+    // ---- 派生値 ----
+    rewardMult() {
+      return 1 + this.player.heat / this.tune.rewardDiv;
+    }
+    damageMult() {
+      const h = this.player.heat - this.player.carryLeft * (1 - this.tune.carryDmgShare);
+      return 1 + Math.pow(h / this.tune.damageDiv, this.tune.damageExp);
+    }
+    /** 033: 今奉納したら次の出撃が何の熱から始まるか（余熱） */
+    carryPreview() {
+      const p = this.player;
+      const t = this.tune;
+      const share = Math.min(1, Math.max(0, (p.hp / p.maxHp - t.carryFloor) / (1 - t.carryFloor)));
+      const old = Math.min(p.heat, p.sortieHeat);
+      return (old * t.carryStartFrac + (p.heat - old) * t.carryFrac) * share;
+    }
+    /** 037 v2: 今の熱での予兆の長さ（tick）。熱が高いほど振りが速い（heatHaste）。最短1tick、0なら予兆なし */
+    windupFor(kind, heat = this.player.heat) {
+      const t = this.tune;
+      const base = (kind === "brute" ? t.windupBrute : kind === "runner" ? t.windupRunner : t.windupGrunt) * t.windupScale;
+      if (base <= 0) return 0;
+      const w = Math.max(1, Math.round(base * (1 - t.heatHaste * heat / t.heatMax)));
+      return Math.max(w, Math.min(Math.round(base), t.windupMin));
+    }
+    difficulty() {
+      return 1 + this.tick * this.tune.difficultyPerTick;
+    }
+    atk() {
+      return this.tune.baseAtk + this.player.levels.blade * this.tune.bladeAtk;
+    }
+    shopCost(item) {
+      const lv = this.player.levels[item];
+      const t = this.tune;
+      if (lv >= t.shopMaxLevel) return Infinity;
+      const others = SHOP_ITEMS.filter((it) => it !== item && this.player.levels[it] > 0).length;
+      return Math.round(t.shopBase * Math.pow(t.shopGrowth, lv) * Math.pow(t.typePenalty, others));
+    }
+    onBrazier() {
+      return Math.hypot(this.player.x, this.player.y) <= this.tune.brazierRadius;
+    }
+    // ---- 進行 ----
+    step(action) {
+      if (this.over) return;
+      const p = this.player;
+      const t = this.tune;
+      this.hitThisTick = false;
+      if (p.attackCd > 0) p.attackCd--;
+      if (p.dashCd > 0) p.dashCd--;
+      if (p.iframes > 0) p.iframes--;
+      if (p.grace > 0) p.grace--;
+      let channeling = false;
+      switch (action.type) {
+        case "move": {
+          const [dx, dy] = DIR_VEC[action.dir];
+          p.facing = action.dir;
+          this.movePlayer(dx * t.playerSpeed, dy * t.playerSpeed);
+          break;
+        }
+        case "dash": {
+          if (p.dashCd === 0) {
+            const [dx, dy] = DIR_VEC[action.dir];
+            p.facing = action.dir;
+            this.movePlayer(dx * t.dashDist, dy * t.dashDist);
+            p.dashCd = t.dashCd;
+            p.iframes = Math.max(p.iframes, t.dashIframes);
+          }
+          break;
+        }
+        case "attack":
+          if (p.attackCd === 0 && !this.onBrazier()) this.attack();
+          break;
+        case "bank":
+          if (this.onBrazier()) {
+            channeling = true;
+            p.channel++;
+          }
+          break;
+        case "buy":
+          this.buy(action.item);
+          break;
+        case "wait":
+          break;
+      }
+      if (!channeling) p.channel = 0;
+      this.updateEnemies();
+      if (channeling && this.hitThisTick && p.hp > 0) {
+        p.channel = 0;
+        this.metrics.channelBreaks++;
+      }
+      if (p.hp <= 0) this.rescue(channeling);
+      else if (channeling && p.channel >= t.channelTicks) this.bank();
+      if (t.poolLeak > 0 && p.pool > 0) p.pool -= p.pool * t.poolLeak * Math.pow(p.heat / 100, 2);
+      p.sinceKill++;
+      if (p.sinceKill > t.heatGraceTicks && p.heat > 0) p.heat = Math.max(0, p.heat - t.heatDecay);
+      if (p.carryLeft > p.heat) p.carryLeft = p.heat;
+      if (p.heat >= 60) this.metrics.ticksHighHeat++;
+      this.spawn();
+      for (const f of this.floats) {
+        f.ttl--;
+        f.y -= 0.03;
+      }
+      this.floats = this.floats.filter((f) => f.ttl > 0);
+      this.tick++;
+      if (this.tick >= t.sessionTicks) {
+        this.over = true;
+        this.metrics.unbankedAtEnd = Math.round(p.pool);
+      }
+    }
+    movePlayer(dx, dy) {
+      const p = this.player;
+      p.x += dx;
+      p.y += dy;
+      const r = Math.hypot(p.x, p.y);
+      const lim = this.tune.arenaRadius - 0.4;
+      if (r > lim) {
+        p.x *= lim / r;
+        p.y *= lim / r;
+      }
+    }
+    attack() {
+      const p = this.player;
+      const t = this.tune;
+      p.attackCd = t.attackCd;
+      const dmg = this.atk();
+      for (const e of this.enemies) {
+        if (Math.hypot(e.x - p.x, e.y - p.y) <= t.attackRadius) {
+          e.hp -= dmg;
+          if (e.open) {
+            e.open = false;
+            if (t.punishHeat > 0) {
+              p.heat = Math.min(t.heatMax, p.heat + t.punishHeat);
+              this.metrics.punishes++;
+            }
+          }
+        }
+      }
+      const dead = this.enemies.filter((e) => e.hp <= 0);
+      if (dead.length === 0) return;
+      this.enemies = this.enemies.filter((e) => e.hp > 0);
+      for (const e of dead) {
+        const def = ENEMY_DEFS[e.kind];
+        const gain = def.embers * this.rewardMult();
+        p.pool += gain;
+        const fromCarry = def.embers * p.carryLeft / t.rewardDiv;
+        p.poolCarry += fromCarry;
+        this.metrics.carryEarned += fromCarry;
+        p.heat = Math.min(t.heatMax, p.heat + def.heat);
+        const heal = p.levels.mend * t.mendHeal;
+        if (!p.graceReady && t.mendShield > 0) p.shield += heal * t.mendShield;
+        else p.hp = Math.min(p.maxHp, p.hp + heal);
+        this.metrics.kills++;
+        this.floats.push({ x: e.x, y: e.y, text: `+${gain.toFixed(0)}`, color: "#ffb347", ttl: 12 });
+      }
+      p.sinceKill = 0;
+      if (p.heat > this.metrics.peakHeat) this.metrics.peakHeat = p.heat;
+    }
+    buy(item) {
+      if (!this.onBrazier()) return;
+      const p = this.player;
+      const cost = this.shopCost(item);
+      if (p.embers < cost) return;
+      p.embers -= cost;
+      p.levels[item]++;
+      this.metrics.spent += cost;
+      if (item === "vitality") {
+        p.maxHp += this.tune.vitalityHp;
+        p.hp += this.tune.vitalityHp;
+      }
+    }
+    bank() {
+      const p = this.player;
+      const amount = Math.round(p.pool);
+      p.embers += amount;
+      this.metrics.score += amount;
+      this.metrics.banks++;
+      this.metrics.sumBankHeat += p.heat;
+      this.floats.push({ x: p.x, y: p.y - 0.5, text: `\u5949\u7D0D ${amount}`, color: "#ffd76a", ttl: 20 });
+      const carry = this.carryPreview();
+      this.metrics.carryBanked += p.poolCarry;
+      this.metrics.sumCarry += carry;
+      this.metrics.sumBankHpFrac += Math.max(0, p.hp) / p.maxHp;
+      this.lastBank = { tick: this.tick, amount, heat: Math.round(p.heat), carry: Math.round(carry) };
+      if (carry >= 1) this.floats.push({ x: p.x, y: p.y + 0.4, text: `\u4F59\u71B1 ${carry.toFixed(0)}`, color: "#ff9f6a", ttl: 20 });
+      p.pool = 0;
+      p.poolCarry = 0;
+      p.heat = carry;
+      p.sortieHeat = carry;
+      p.carryLeft = carry;
+      p.sinceKill = 0;
+      p.channel = 0;
+      p.hp = p.maxHp;
+      p.graceReady = true;
+      p.grace = 0;
+      p.shield = 0;
+      this.endSortie();
+    }
+    endSortie() {
+      this.sortieLens.push(this.tick + 1 - this.sortieStart);
+      this.sortieStart = this.tick + 1;
+    }
+    /** v3: 踏ん張り。倒れる前の「戻れ」の合図と猶予（1出撃に1度） */
+    triggerGrace() {
+      const p = this.player;
+      const t = this.tune;
+      p.graceReady = false;
+      p.grace = t.graceTicks;
+      this.metrics.graces++;
+      if (t.graceShed > 0 && p.heat > 0) {
+        const shed = p.heat * t.graceShed;
+        p.heat -= shed;
+        if (p.carryLeft > p.heat) p.carryLeft = p.heat;
+        p.shield += shed * t.graceShield;
+        this.metrics.shedHeat += shed;
+        this.floats.push({ x: p.x, y: p.y + 0.9, text: `\u71B1\u2212${shed.toFixed(0)}\u2192\u76FE${(shed * t.graceShield).toFixed(0)}`, color: "#9be7ff", ttl: 20 });
+      }
+      for (const e of this.enemies) {
+        const dx = e.x - p.x;
+        const dy = e.y - p.y;
+        const d = Math.hypot(dx, dy);
+        if (d < t.graceKnockRadius) {
+          const a = d > 0.01 ? Math.atan2(dy, dx) : this.rng() * Math.PI * 2;
+          e.x += Math.cos(a) * t.graceKnockDist;
+          e.y += Math.sin(a) * t.graceKnockDist;
+          const r = Math.hypot(e.x, e.y);
+          const lim = t.arenaRadius - 0.3;
+          if (r > lim) {
+            e.x *= lim / r;
+            e.y *= lim / r;
+          }
+        }
+      }
+      this.floats.push({ x: p.x, y: p.y - 0.6, text: "\u8E0F\u3093\u5F35\u308A\uFF01\u623B\u308C", color: "#9be7ff", ttl: 20 });
+    }
+    /** HP0: 死ではなく救助。失うのは未奉納の残り火と熱だけ（お金・時間・装備は失わない） */
+    rescue(channeling) {
+      const p = this.player;
+      const t = this.tune;
+      const phase = channeling ? "banking" : p.heat >= 60 ? "high" : p.heat >= 30 ? "mid" : "low";
+      this.metrics.downs++;
+      this.metrics.downsByPhase[phase]++;
+      this.metrics.downPhase = phase;
+      this.metrics.lostEmbers += Math.round(p.pool);
+      this.metrics.lostHeat += p.heat;
+      this.lastRescue = { tick: this.tick, lostPool: Math.round(p.pool), lostHeat: Math.round(p.heat) };
+      this.floats.push({ x: p.x, y: p.y, text: `\u6551\u52A9 \u2212${Math.round(p.pool)}`, color: "#ff6b6b", ttl: 25 });
+      p.pool = 0;
+      p.poolCarry = 0;
+      p.heat = 0;
+      p.sortieHeat = 0;
+      p.carryLeft = 0;
+      p.channel = 0;
+      p.hp = p.maxHp;
+      p.graceReady = true;
+      p.grace = 0;
+      p.shield = 0;
+      this.endSortie();
+      p.x = 0;
+      p.y = 0;
+      p.iframes = t.rescueIframes;
+      for (const e of this.enemies) {
+        const d = Math.hypot(e.x, e.y);
+        if (d < t.rescueClearRadius) {
+          const a = d > 0.01 ? Math.atan2(e.y, e.x) : this.rng() * Math.PI * 2;
+          e.x = Math.cos(a) * (t.arenaRadius - 0.5);
+          e.y = Math.sin(a) * (t.arenaRadius - 0.5);
+        }
+      }
+    }
+    updateEnemies() {
+      const p = this.player;
+      const t = this.tune;
+      const diff = this.difficulty();
+      const dmgScale = t.enemyDmg * (1 + (diff - 1) * t.dmgGrowthShare) * this.damageMult() * Math.pow(t.armorMult, p.levels.armor);
+      for (const e of this.enemies) {
+        const def = ENEMY_DEFS[e.kind];
+        if (e.cd > 0) e.cd--;
+        if (e.stun > 0) {
+          e.stun--;
+          if (e.stun === 0) e.open = false;
+          continue;
+        }
+        const dx = p.x - e.x;
+        const dy = p.y - e.y;
+        const d = Math.hypot(dx, dy);
+        if (e.windup > 0) {
+          e.windup--;
+          if (t.windupCreep > 0 && d > def.reach * 0.85) {
+            e.x += dx / d * def.speed * t.windupCreep;
+            e.y += dy / d * def.speed * t.windupCreep;
+          }
+          if (e.windup === 0) {
+            if (d <= def.reach + t.strikeSlack && p.iframes === 0) this.hitPlayer(def.dmg * dmgScale);
+            else {
+              e.stun = t.whiffStun;
+              e.open = true;
+              this.metrics.whiffs++;
+              this.floats.push({ x: e.x, y: e.y - 0.4, text: "\u7A7A\u632F\u308A", color: "#ffe066", ttl: 10 });
+            }
+          }
+          continue;
+        }
+        if (d > def.reach * 0.85) {
+          e.x += dx / d * def.speed;
+          e.y += dy / d * def.speed;
+        }
+        if (d <= def.reach && e.cd === 0) {
+          e.cd = def.cd;
+          const w = this.windupFor(e.kind);
+          if (w > 0) {
+            e.windup = w;
+            e.windupMax = w;
+          } else if (p.iframes === 0) this.hitPlayer(def.dmg * dmgScale);
+        }
+      }
+      const ward = this.onBrazier() && t.fearRadius > 0 ? t.fearRadius : t.brazierRadius + t.wardMargin;
+      for (const e of this.enemies) {
+        const d = Math.hypot(e.x, e.y);
+        if (d < ward && d > 1e-3) {
+          e.x *= ward / d;
+          e.y *= ward / d;
+        }
+      }
+      for (let i = 0; i < this.enemies.length; i++) {
+        for (let j = i + 1; j < this.enemies.length; j++) {
+          const a = this.enemies[i];
+          const b = this.enemies[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 1e-3 && d < 0.6) {
+            const push = (0.6 - d) / 2;
+            a.x -= dx / d * push;
+            a.y -= dy / d * push;
+            b.x += dx / d * push;
+            b.y += dy / d * push;
+          }
+        }
+      }
+    }
+    /** 敵の一撃が当たった（033の被弾処理。盾→HP→踏ん張りの判定） */
+    hitPlayer(raw) {
+      const p = this.player;
+      const t = this.tune;
+      let dmg = raw * (p.grace > 0 ? t.graceDmgMult : 1);
+      if (p.shield > 0) {
+        const absorbed = Math.min(p.shield, dmg);
+        p.shield -= absorbed;
+        dmg -= absorbed;
+        this.metrics.shieldAbsorbed += absorbed;
+      }
+      p.hp -= dmg;
+      this.metrics.damageTaken += dmg;
+      this.metrics.hitsTaken++;
+      this.hitThisTick = true;
+      if (p.graceReady && t.graceTicks > 0 && p.hp > 0 && p.hp < p.maxHp * t.graceFrac) this.triggerGrace();
+    }
+    spawn() {
+      const t = this.tune;
+      if (--this.spawnTimer > 0) return;
+      const frac = Math.min(1, this.tick / t.sessionTicks);
+      const hf = this.player.heat / 100;
+      this.spawnTimer = Math.max(1, Math.round((t.spawnStart + (t.spawnEnd - t.spawnStart) * frac) / (1 + t.heatSpawn * hf)));
+      if (this.enemies.length >= t.maxEnemies + Math.round(t.heatCap * hf)) return;
+      const r = this.rng();
+      const kind = r < 0.15 + 0.15 * frac ? "brute" : r < 0.45 + 0.1 * frac ? "runner" : "grunt";
+      const a = this.rng() * Math.PI * 2;
+      const def = ENEMY_DEFS[kind];
+      const hp = Math.round(def.hp * this.difficulty());
+      this.enemies.push({
+        id: this.nextId++,
+        kind,
+        x: Math.cos(a) * (t.arenaRadius - 0.3),
+        y: Math.sin(a) * (t.arenaRadius - 0.3),
+        hp,
+        maxHp: hp,
+        cd: def.cd,
+        windup: 0,
+        windupMax: 0,
+        stun: 0,
+        open: false
+      });
+    }
+    getState() {
+      const p = this.player;
+      const costs = {};
+      for (const it of SHOP_ITEMS) {
+        const c = this.shopCost(it);
+        costs[it] = Number.isFinite(c) ? c : -1;
+      }
+      return {
+        seed: this.seed,
+        tick: this.tick,
+        sessionTicks: this.tune.sessionTicks,
+        over: this.over,
+        arenaRadius: this.tune.arenaRadius,
+        brazierRadius: this.tune.brazierRadius,
+        player: { ...p, levels: { ...p.levels } },
+        enemies: this.enemies.map((e) => ({ ...e })),
+        rewardMult: this.rewardMult(),
+        damageMult: this.damageMult(),
+        difficulty: this.difficulty(),
+        shopCosts: costs,
+        onBrazier: this.onBrazier(),
+        channelNeeded: this.tune.channelTicks,
+        lastRescue: this.lastRescue && { ...this.lastRescue },
+        lastBank: this.lastBank && { ...this.lastBank },
+        floats: this.floats.map((f) => ({ ...f })),
+        goals: [2e3, 4e3, 6e3],
+        carryPreview: this.carryPreview(),
+        carryFrac: this.tune.carryFrac,
+        heatMax: this.tune.heatMax,
+        typePenalty: this.tune.typePenalty,
+        strikeSlack: this.tune.strikeSlack,
+        bruteWindup: this.windupFor("brute"),
+        bruteWindupMarks: [0, 50, 100].filter((h) => h <= this.tune.heatMax).map((h) => ({ heat: h, ticks: this.windupFor("brute", h) })),
+        metrics: { ...this.metrics, downsByPhase: { ...this.metrics.downsByPhase } }
+      };
+    }
+  };
+
+  // headless/simulate.ts
+  var PERSONAS = [
+    { name: "p01", order: ["blade", "armor", "blade", "mend", "armor", "vitality"], bankHeat: 100, bankHpFrac: 0.35, read: true, note: "P01: \u653B\u9632\u3092\u4EA4\u4E92\u3001\u71B1100\u307E\u3067\u653B\u3081\u308B" },
+    { name: "p02", order: ["vitality", "armor", "mend", "blade"], bankHeat: 40, bankHpFrac: 0.6, read: true, note: "P02: \u65E9\u3081\u306B\u5F15\u304F\u3002\u71B1+40\u304BHP6\u5272\u3067\u623B\u308B" },
+    { name: "bare", order: ["blade"], bankHeat: 60, bankHpFrac: 0.3, read: false, note: "\u5BFE\u7167\u7FA4: \u751F\u5B58\u306B\u6295\u8CC7\u3057\u306A\u3044\u653B\u52E2\uFF08\u5203\u3060\u3051\uFF09\u3002037: \u4E88\u5146\u3082\u8AAD\u307E\u306A\u3044\uFF08\u907F\u3051\u306A\u3044\uFF09" },
+    { name: "noshop", order: [], bankHeat: 50, bankHpFrac: 0.4, read: true, note: "\u5BFE\u7167\u7FA4: \u4F55\u3082\u8CB7\u308F\u306A\u3044" },
+    { name: "tank", order: ["armor", "vitality"], bankHeat: 100, bankHpFrac: 0.25, read: true, note: "\u93A7\u3068\u5668\u306E2\u7A2E\uFF08\u5203\u306A\u3057\uFF09\u3001\u71B1100\u307E\u3067\u7C98\u308B" },
+    { name: "mender", order: ["mend", "blade"], bankHeat: 60, bankHpFrac: 0.3, read: true, note: "\u7652\u3057\u3068\u5203\u306E2\u7A2E\u3001\u6483\u7834\u3067\u56DE\u5FA9\u3057\u306A\u304C\u3089\u653B\u3081\u308B" },
+    { name: "even", order: ["vitality", "armor", "mend", "blade"], bankHeat: 80, bankHpFrac: 0.5, read: true, note: "v1\u91CD\u5927#1: 4\u7A2E\u3092\u5747\u7B49\u306B\u7A4D\u307FHP\u534A\u5206\u3067\u623B\u308B\uFF08\u71B180\uFF09" },
+    { name: "duel", order: ["blade", "armor"], bankHeat: 80, bankHpFrac: 0.3, read: true, note: "\u5203\u3068\u93A7\u306E2\u7A2E\u306B\u7279\u5316" },
+    { name: "warden", order: ["armor", "mend"], bankHeat: 100, bankHpFrac: 0.3, read: true, note: "\u93A7\u3068\u7652\u3057\u306E2\u7A2E\u306B\u7279\u5316\uFF08\u5203\u306A\u3057\uFF09" },
+    { name: "banker", order: ["blade", "armor", "vitality", "mend"], bankHeat: 20, bankHpFrac: 0.6, read: true, note: "\u71B120\u3067\u3053\u307E\u3081\u306B\u5949\u7D0D\uFF08\u614E\u91CD\uFF09" },
+    { name: "pusher", order: ["blade", "armor", "mend", "vitality"], bankHeat: 9999, bankHpFrac: 0.2, read: true, note: "\u71B1\u3067\u306F\u623B\u3089\u305A\u3001HP2\u5272\u307E\u3067\u7C98\u308B" },
+    { name: "sprinter", order: ["vitality", "armor", "mend", "blade"], bankHeat: 15, bankHpFrac: 0.85, read: true, note: "033: \u5358\u8ABF\u306A\u51FA\u5165\u308A\uFF08\u71B1+15\u304BHP85%\u3067\u5373\u5E30\u308B\uFF09\u3002\u4F59\u71B1\u3092\u6700\u5927\u306B\u4FDD\u3064" }
+  ];
+  var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  function towards(dx, dy) {
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+    return dy > 0 ? "down" : "up";
+  }
+  var Bot = class {
+    constructor(persona, delay = 0, delayMode = "reset", readLag = 3, read = persona.read) {
+      this.pendingDelay = -1;
+      this.banking = false;
+      this.purchases = 0;
+      /** 037: 帰ると決めた理由（HPの線か熱の線か）の数。遠征を終わらせた時計を読む（036の学び） */
+      this.hpReturns = 0;
+      this.heatReturns = 0;
+      /** 037: 予兆を見て引いた（避けの一歩を踏んだ）tick数 */
+      this.dodgeSteps = 0;
+      this.persona = persona;
+      this.delay = delay;
+      this.delayMode = delayMode;
+      this.readLag = readLag;
+      this.read = read;
+    }
+    /**
+     * 037: 予兆の読み。振りかぶりが見えてから readLag tick 後に、当たる位置にいる予兆から外れる向きへ一歩引く。
+     * 残りtickで外へ出られない予兆は無視（その時は斬り合う）。斬れば倒せる予兆は斬って止める。
+     * 4方向それぞれ「残りtickで外へ出られる予兆の重み（敵の攻撃力）」が最大の向きを選ぶ。
+     */
+    dodge(s, atk) {
+      const p = s.player;
+      const slack = s.strikeSlack;
+      const threats = [];
+      for (const e of s.enemies) {
+        if (e.windup <= 0 || e.windupMax - e.windup < this.readLag) continue;
+        const def = ENEMY_DEFS[e.kind];
+        if (Math.hypot(e.x - p.x, e.y - p.y) <= def.reach + slack) threats.push({ e, reach: def.reach + slack, dmg: def.dmg });
+      }
+      if (!threats.length || p.iframes > 1) return null;
+      if (p.attackCd === 0 && !s.onBrazier && threats.every((t) => t.e.hp <= atk && Math.hypot(t.e.x - p.x, t.e.y - p.y) <= TUNE.attackRadius))
+        return { type: "attack" };
+      let best = null;
+      for (const dir of ["up", "down", "left", "right"]) {
+        const [vx, vy] = DIRS[dir];
+        let v = 0;
+        let far = 0;
+        for (const t of threats) {
+          const k = t.e.windup;
+          const nx = p.x + vx * TUNE.playerSpeed * k;
+          const ny = p.y + vy * TUNE.playerSpeed * k;
+          if (Math.hypot(nx, ny) > TUNE.arenaRadius - 0.5) continue;
+          const d = Math.hypot(t.e.x - nx, t.e.y - ny);
+          if (d > t.reach + 0.02) v += t.dmg;
+          far += d;
+        }
+        if (v > 0 && (!best || v > best.v || v === best.v && far > best.far)) best = { dir, v, far };
+      }
+      if (!best) return null;
+      this.dodgeSteps++;
+      return { type: "move", dir: best.dir };
+    }
+    decide(s) {
+      const p = s.player;
+      const per = this.persona;
+      const atkR = TUNE.attackRadius;
+      if (s.onBrazier && p.pool === 0 && per.order.length > 0) {
+        const item = per.order[this.purchases % per.order.length];
+        const cost = s.shopCosts[item];
+        if (cost > 0 && p.embers >= cost) {
+          this.purchases++;
+          return { type: "buy", item };
+        }
+      }
+      const want = p.pool > 0 && (p.heat - p.sortieHeat >= per.bankHeat || p.hp < p.maxHp * per.bankHpFrac);
+      if (!this.banking) {
+        if (want) {
+          if (this.pendingDelay < 0) this.pendingDelay = this.delay;
+          if (this.pendingDelay === 0) {
+            this.banking = true;
+            if (p.hp < p.maxHp * per.bankHpFrac) this.hpReturns++;
+            else this.heatReturns++;
+            this.pendingDelay = -1;
+          } else this.pendingDelay--;
+        } else if (this.delayMode === "reset") this.pendingDelay = -1;
+      }
+      if (p.pool === 0) {
+        if (this.banking) this.banking = false;
+        if (this.pendingDelay >= 0 && !want) this.pendingDelay = -1;
+      }
+      let nearest = null;
+      let inRange = 0;
+      for (const e of s.enemies) {
+        const dx = e.x - p.x;
+        const dy = e.y - p.y;
+        const d = Math.hypot(dx, dy);
+        if (d <= atkR) inRange++;
+        if (!nearest || d < nearest.d) nearest = { dx, dy, d };
+      }
+      if (nearest && nearest.d < 1 && p.hp < p.maxHp * 0.25 && p.dashCd === 0 && !s.onBrazier) {
+        return { type: "dash", dir: towards(-p.x, -p.y) };
+      }
+      if (this.read) {
+        const a = this.dodge(s, TUNE.baseAtk + p.levels.blade * TUNE.bladeAtk);
+        if (a) return a;
+      }
+      if (this.banking) {
+        if (inRange > 0 && p.attackCd === 0 && !s.onBrazier) return { type: "attack" };
+        if (s.onBrazier && Math.hypot(p.x, p.y) < 0.4) return { type: "bank" };
+        return { type: "move", dir: towards(-p.x, -p.y) };
+      }
+      if (!nearest) {
+        if (Math.hypot(p.x, p.y) > 2) return { type: "move", dir: towards(-p.x, -p.y) };
+        return { type: "wait" };
+      }
+      if (inRange > 0 && !s.onBrazier) return p.attackCd === 0 ? { type: "attack" } : { type: "wait" };
+      return { type: "move", dir: towards(nearest.dx, nearest.dy) };
+    }
+  };
+  function runOne(persona, seed, tune = {}, delay = 0, delayMode = "reset", readLag = RUNOPT.readLag, read = RUNOPT.noRead ? false : persona.read) {
+    const g = new Game(seed, tune);
+    const bot = new Bot(persona, delay, delayMode, readLag, read);
+    while (!g.over) g.step(bot.decide(g.getState()));
+    const m = g.metrics;
+    return {
+      name: persona.name,
+      seed,
+      score: m.score,
+      kills: m.kills,
+      banks: m.banks,
+      downs: m.downs,
+      low: m.downsByPhase.low,
+      mid: m.downsByPhase.mid,
+      high: m.downsByPhase.high,
+      banking: m.downsByPhase.banking,
+      lostEmbers: m.lostEmbers,
+      unbanked: m.unbankedAtEnd,
+      avgBankHeat: m.banks ? m.sumBankHeat / m.banks : 0,
+      peakHeat: m.peakHeat,
+      highHeatSec: m.ticksHighHeat / 10,
+      channelBreaks: m.channelBreaks,
+      graces: m.graces,
+      levels: { ...g.player.levels },
+      carryBanked: Math.round(m.carryBanked),
+      shedHeat: Math.round(m.shedHeat),
+      shieldAbsorbed: Math.round(m.shieldAbsorbed),
+      avgCarry: m.banks ? m.sumCarry / m.banks : 0,
+      avgBankHp: m.banks ? m.sumBankHpFrac / m.banks : 0,
+      sorties: g.sortieLens.length,
+      medSortieSec: median(g.sortieLens) / 10,
+      shortShare: g.sortieLens.length ? g.sortieLens.filter((l) => l <= 100).length / g.sortieLens.length : 0,
+      dmgPerSec: m.damageTaken / (g.tick / 10),
+      hitsTaken: m.hitsTaken,
+      whiffs: m.whiffs,
+      punishes: m.punishes,
+      dodgeSteps: bot.dodgeSteps,
+      hpReturns: bot.hpReturns,
+      heatReturns: bot.heatReturns
+    };
+  }
+  var RUNOPT = { readLag: 3, noRead: false };
+  function median(xs) {
+    if (!xs.length) return 0;
+    const a = [...xs].sort((x, y) => x - y);
+    const m = a.length >> 1;
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+  function mean(xs) {
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+  }
+  function summarize(rs) {
+    const lv = (k) => +mean(rs.map((r) => r.levels[k])).toFixed(1);
+    return {
+      name: rs[0].name,
+      score: +mean(rs.map((r) => r.score)).toFixed(1),
+      minScore: Math.min(...rs.map((r) => r.score)),
+      maxScore: Math.max(...rs.map((r) => r.score)),
+      kills: +mean(rs.map((r) => r.kills)).toFixed(1),
+      banks: +mean(rs.map((r) => r.banks)).toFixed(1),
+      downs: +mean(rs.map((r) => r.downs)).toFixed(2),
+      downPhase: {
+        low: +mean(rs.map((r) => r.low)).toFixed(2),
+        mid: +mean(rs.map((r) => r.mid)).toFixed(2),
+        high: +mean(rs.map((r) => r.high)).toFixed(2),
+        banking: +mean(rs.map((r) => r.banking)).toFixed(2)
+      },
+      lostEmbers: +mean(rs.map((r) => r.lostEmbers)).toFixed(1),
+      lostShare: +(mean(rs.map((r) => r.lostEmbers)) / Math.max(1, mean(rs.map((r) => r.lostEmbers + r.score)))).toFixed(3),
+      unbanked: +mean(rs.map((r) => r.unbanked)).toFixed(1),
+      avgBankHeat: +mean(rs.map((r) => r.avgBankHeat)).toFixed(1),
+      highHeatSec: +mean(rs.map((r) => r.highHeatSec)).toFixed(1),
+      channelBreaks: +mean(rs.map((r) => r.channelBreaks)).toFixed(1),
+      graces: +mean(rs.map((r) => r.graces)).toFixed(2),
+      levels: { blade: lv("blade"), armor: lv("armor"), mend: lv("mend"), vitality: lv("vitality") },
+      carryBanked: +mean(rs.map((r) => r.carryBanked)).toFixed(1),
+      shedHeat: +mean(rs.map((r) => r.shedHeat)).toFixed(1),
+      shieldAbsorbed: +mean(rs.map((r) => r.shieldAbsorbed)).toFixed(1),
+      avgCarry: +mean(rs.map((r) => r.avgCarry)).toFixed(1),
+      avgBankHp: +mean(rs.map((r) => r.avgBankHp)).toFixed(2),
+      sorties: +mean(rs.map((r) => r.sorties)).toFixed(1),
+      medSortieSec: +mean(rs.map((r) => r.medSortieSec)).toFixed(1),
+      shortShare: +mean(rs.map((r) => r.shortShare)).toFixed(3),
+      dmgPerSec: +mean(rs.map((r) => r.dmgPerSec)).toFixed(2),
+      whiffs: +mean(rs.map((r) => r.whiffs)).toFixed(1),
+      hitsTaken: +mean(rs.map((r) => r.hitsTaken)).toFixed(1),
+      punishes: +mean(rs.map((r) => r.punishes)).toFixed(1),
+      dodgeSteps: +mean(rs.map((r) => r.dodgeSteps)).toFixed(1),
+      hpReturns: +mean(rs.map((r) => r.hpReturns)).toFixed(1),
+      heatReturns: +mean(rs.map((r) => r.heatReturns)).toFixed(1)
+    };
+  }
+  function roundRobin(all, names) {
+    const n = all[names[0]].length;
+    const beat = (a, b) => all[a].filter((r, i) => r.score > all[b][i].score).length > n / 2;
+    const wins = {};
+    const beatenBy = {};
+    for (const a of names) {
+      wins[a] = names.filter((b) => b !== a && beat(a, b)).length;
+      beatenBy[a] = names.filter((b) => b !== a && beat(b, a));
+    }
+    return { wins, beatenBy };
+  }
+  var CONDS = [
+    { label: "d0", delay: 0, mode: "reset" },
+    // v2: v1の#6（戦闘ではsumとresetがほぼ同じ）で 6s-sum を外し、遅延1秒を足した
+    { label: "1s-reset", delay: 10, mode: "reset" },
+    { label: "3s-sum", delay: 30, mode: "sum" },
+    { label: "3s-reset", delay: 30, mode: "reset" },
+    { label: "6s-reset", delay: 60, mode: "reset" }
+  ];
+  var isMain = typeof process !== "undefined" && !!process.argv?.[1] && process.argv[1].replace(/\\/g, "/").endsWith("headless/simulate.ts");
+  if (isMain) {
+    const args = process.argv.slice(2);
+    const opt = (k) => {
+      const i = args.indexOf(k);
+      return i >= 0 ? args[i + 1] : void 0;
+    };
+    const seeds = Number(opt("--seeds") ?? 40);
+    const start = Number(opt("--start") ?? 1);
+    const delay = Number(opt("--delay") ?? 0);
+    const delayMode = opt("--delayMode") ?? "reset";
+    const bankAt = opt("--bankAt");
+    RUNOPT.readLag = Number(opt("--readLag") ?? 3);
+    RUNOPT.noRead = args.includes("--noRead");
+    const tune = {};
+    for (const kv of (opt("--tune") ?? "").split(",").filter(Boolean)) {
+      const [k, v] = kv.split("=");
+      if (!(k in TUNE)) throw new Error(`unknown tune key: ${k}`);
+      tune[k] = Number(v);
+    }
+    const only = opt("--only")?.split(",");
+    let personas = PERSONAS.filter((p) => !only || only.includes(p.name));
+    if (bankAt) personas = personas.map((p) => ({ ...p, bankHeat: Number(bankAt) }));
+    const seedList = Array.from({ length: seeds }, (_, i) => start + i);
+    const sweep = opt("--sweep");
+    if (args.includes("--grid")) {
+      const names = personas.map((p) => p.name);
+      const out = { seeds, start, tune };
+      const base = {};
+      const d0 = {};
+      for (const c of CONDS) {
+        const all = {};
+        for (const p of personas) all[p.name] = seedList.map((sd) => runOne(p, sd, tune, c.delay, c.mode));
+        if (c.label === "d0") Object.assign(d0, all);
+        const rr = roundRobin(all, names);
+        const rows = personas.map((p) => {
+          const sm = summarize(all[p.name]);
+          if (c.label === "d0") base[p.name] = sm.score;
+          return {
+            name: p.name,
+            score: Math.round(sm.score),
+            pen: c.label === "d0" ? "" : `${((sm.score - base[p.name]) / base[p.name] * 100).toFixed(1)}%`,
+            wins: rr.wins[p.name],
+            downs: sm.downs,
+            carry: sm.avgCarry,
+            bankHp: sm.avgBankHp,
+            carryBanked: Math.round(sm.carryBanked),
+            shed: sm.shedHeat,
+            sorties: sm.sorties,
+            medSec: sm.medSortieSec,
+            short: sm.shortShare,
+            lv: `${sm.levels.blade}/${sm.levels.armor}/${sm.levels.mend}/${sm.levels.vitality}`
+          };
+        });
+        const bareBeats = names.filter((b) => b !== "bare" && rr.beatenBy[b].includes("bare"));
+        console.log(`== ${c.label}\uFF08\u30B7\u30FC\u30C9${start}\u301C${start + seeds - 1}\uFF09 bare\u304C\u904E\u534A\u6570\u3067\u52DD\u3064\u76F8\u624B: ${bareBeats.join(",") || "0"}`);
+        console.table(rows);
+        out[c.label] = { rows, bareBeats };
+      }
+      const no = {};
+      for (const p of personas) no[p.name] = seedList.map((sd) => runOne(p, sd, { ...tune, carryFrac: 0 }, 0));
+      const rrNo = roundRobin(no, names);
+      const ctrl = personas.map((p) => {
+        const a = d0[p.name];
+        const b = no[p.name];
+        const same = a.filter((r, i) => r.score - r.carryBanked === b[i].score).length;
+        return {
+          name: p.name,
+          score: Math.round(mean(a.map((r) => r.score))),
+          minusCarry: Math.round(mean(a.map((r) => r.score - r.carryBanked))),
+          noCarry: Math.round(mean(b.map((r) => r.score))),
+          sameRuns: `${same}/${a.length}`,
+          winsNo: rrNo.wins[p.name],
+          sortiesNo: +mean(b.map((r) => r.sorties)).toFixed(1),
+          medSecNo: +mean(b.map((r) => r.medSortieSec)).toFixed(1),
+          downsNo: +mean(b.map((r) => r.downs)).toFixed(2)
+        };
+      });
+      console.log("== \u4F59\u71B1\u306A\u3057\u5BFE\u7167\uFF08carryFrac=0\u3001\u9045\u5EF60\uFF09: score \u2212 \u4F59\u71B1\u306E\u4E0A\u4E57\u305B = \u4F59\u71B1\u306A\u3057 \u304C\u4E00\u81F4\u3057\u305F\u30E9\u30F3\u6570\uFF08\u4E00\u81F4\uFF1D\u884C\u52D5\u304C\u5909\u308F\u3063\u3066\u3044\u306A\u3044\uFF09");
+      console.table(ctrl);
+      out.noCarry = ctrl;
+      if (args.includes("--json")) console.log(JSON.stringify(out));
+    } else if (args.includes("--sweepHp")) {
+      const Hs = (opt("--Hs") ?? "0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9").split(",").map(Number);
+      const conds = CONDS.filter((c) => (opt("--conds") ?? "d0,3s-reset,6s-reset").split(",").includes(c.label));
+      const rows = [];
+      for (const c of conds)
+        for (const base of personas)
+          for (const H of Hs) {
+            const rs = seedList.map((sd) => runOne({ ...base, bankHpFrac: H }, sd, tune, c.delay, c.mode));
+            rows.push({
+              cond: c.label,
+              name: base.name,
+              H,
+              score: Math.round(mean(rs.map((r) => r.score))),
+              downs: +mean(rs.map((r) => r.downs)).toFixed(2),
+              // v2: 最良線どうしの総当たり用にシードごとのscoreも出す
+              scores: rs.map((r) => r.score)
+            });
+          }
+      console.log(JSON.stringify({ sweepHp: true, seeds, start, tune, rows }));
+    } else if (args.includes("--bestPairs")) {
+      const Ts = (opt("--Ts") ?? "40,60,80,100,120,150,180,210").split(",").map(Number);
+      const half = Math.floor(seedList.length / 2);
+      const train = seedList.slice(0, half);
+      const test = seedList.slice(half);
+      const chosen = {};
+      const rows = [];
+      for (const base of personas) {
+        let best = { T: 0, v: -1 };
+        for (const T of Ts) {
+          const v = mean(train.map((sd) => runOne({ ...base, bankHeat: T }, sd, tune, delay, delayMode).score));
+          if (v > best.v) best = { T, v };
+        }
+        chosen[base.name] = test.map((sd) => runOne({ ...base, bankHeat: best.T }, sd, tune, delay, delayMode));
+        rows.push({ name: base.name, bestT: best.T, train: Math.round(best.v), test: Math.round(mean(chosen[base.name].map((r) => r.score))) });
+      }
+      console.table(rows);
+      const names = personas.map((p) => p.name);
+      const table = {};
+      for (const a of names) {
+        table[a] = {};
+        for (const b of names) table[a][b] = a === b ? "-" : chosen[a].filter((r, i) => r.score > chosen[b][i].score).length;
+      }
+      console.log(`\u6700\u826F\u95BE\u5024\u3069\u3046\u3057\u306E\u5BFE\u6BD4\u8F03\uFF08\u5F8C\u534A${test.length}\u30B7\u30FC\u30C9\u3001\u884C\u304C\u5217\u306B\u52DD\u3063\u305F\u6570\uFF09`);
+      console.table(table);
+      console.table(
+        names.map((a) => ({ name: a, beatenBy: names.filter((b) => b !== a && Number(table[b][a]) > test.length / 2).join(",") || "\uFF08\u306A\u3057\uFF09" }))
+      );
+    } else if (args.includes("--sweepAll")) {
+      const Ts = (opt("--Ts") ?? "40,60,80,100,120,150,180,210,999").split(",").map(Number);
+      const half = Math.floor(seedList.length / 2);
+      const rows = [];
+      for (const base of personas) {
+        const row = { name: base.name };
+        let best = { T: 0, v: -1 };
+        let bestA = { T: 0, v: -1 };
+        let bestB = { T: 0, v: -1 };
+        for (const T of Ts) {
+          const rs = seedList.map((sd) => runOne({ ...base, bankHeat: T }, sd, tune, delay, delayMode));
+          const v = mean(rs.map((r) => r.score));
+          const a = mean(rs.slice(0, half).map((r) => r.score));
+          const b = mean(rs.slice(half).map((r) => r.score));
+          row[`T${T}`] = Math.round(v);
+          if (v > best.v) best = { T, v };
+          if (a > bestA.v) bestA = { T, v: a };
+          if (b > bestB.v) bestB = { T, v: b };
+        }
+        row.best = `${best.T}(${bestA.T}/${bestB.T})`;
+        rows.push(row);
+      }
+      console.log(JSON.stringify({ sweepAll: true, seeds, delay, tune, rows }));
+      console.table(rows);
+    } else if (sweep) {
+      const base = PERSONAS.find((p) => p.name === sweep);
+      if (!base) throw new Error(`unknown persona: ${sweep}`);
+      const rows = [];
+      for (const T of [20, 40, 60, 80, 100, 120, 150, 180, 210, 999]) {
+        const rs = seedList.map((sd) => runOne({ ...base, bankHeat: T }, sd, tune, delay, delayMode));
+        const sm = summarize(rs);
+        const half = Math.floor(rs.length / 2);
+        rows.push({
+          T,
+          score: sm.score,
+          scoreA: +mean(rs.slice(0, half).map((r) => r.score)).toFixed(1),
+          scoreB: +mean(rs.slice(half).map((r) => r.score)).toFixed(1),
+          downs: sm.downs,
+          high: sm.downPhase.high,
+          lostShare: sm.lostShare,
+          avgBankHeat: sm.avgBankHeat
+        });
+      }
+      console.log(JSON.stringify({ sweep, seeds, delay, tune, rows }, null, 1));
+      console.table(rows);
+    } else {
+      const all = {};
+      for (const p of personas) all[p.name] = seedList.map((sd) => runOne(p, sd, tune, delay, delayMode));
+      const summary = personas.map((p) => summarize(all[p.name]));
+      if (args.includes("--brief")) {
+        const scores = Object.fromEntries(personas.map((p) => [p.name, all[p.name].map((r) => r.score)]));
+        console.log(JSON.stringify({ seeds, start, delay, delayMode, tune, summary, scores }));
+        process.exit(0);
+      }
+      if (args.includes("--json")) console.log(JSON.stringify({ seeds, start, delay, tune, summary }, null, 1));
+      if (args.includes("--compact")) {
+        for (const s of summary)
+          console.log(
+            `${s.name.padEnd(9)} ${String(Math.round(s.score)).padStart(6)} downs ${s.downs} hiSec ${s.highHeatSec} dps ${s.dmgPerSec} whiff ${s.whiffs} hit ${s.hitsTaken} pun ${s.punishes} hp/heat ${s.hpReturns}/${s.heatReturns} med ${s.medSortieSec} bankHp ${s.avgBankHp}`
+          );
+        process.exit(0);
+      }
+      console.table(
+        summary.map((s) => ({
+          name: s.name,
+          score: s.score,
+          min: s.minScore,
+          max: s.maxScore,
+          kills: s.kills,
+          banks: s.banks,
+          downs: s.downs,
+          "L/M/H/B": `${s.downPhase.low}/${s.downPhase.mid}/${s.downPhase.high}/${s.downPhase.banking}`,
+          lost: s.lostShare,
+          bankHeat: s.avgBankHeat,
+          hiSec: s.highHeatSec,
+          grace: s.graces,
+          carry: s.avgCarry,
+          bankHp: s.avgBankHp,
+          sorties: s.sorties,
+          medSec: s.medSortieSec,
+          short: s.shortShare,
+          dps: s.dmgPerSec,
+          whiff: s.whiffs,
+          hit: s.hitsTaken,
+          pun: s.punishes,
+          "hp/heat": `${s.hpReturns}/${s.heatReturns}`,
+          lv: `${s.levels.blade}/${s.levels.armor}/${s.levels.mend}/${s.levels.vitality}`
+        }))
+      );
+      if (args.includes("--pairs")) {
+        const names = personas.map((p) => p.name);
+        const table = {};
+        for (const a of names) {
+          table[a] = {};
+          for (const b of names) {
+            if (a === b) {
+              table[a][b] = "-";
+              continue;
+            }
+            let w = 0;
+            let t = 0;
+            all[a].forEach((r, i) => {
+              const o = all[b][i].score;
+              if (r.score > o) w++;
+              else if (r.score === o) t++;
+            });
+            table[a][b] = t ? `${w}(${t})` : `${w}`;
+          }
+        }
+        console.log(`\u5BFE\u6BD4\u8F03: \u884C\u304C\u5217\u306B\u52DD\u3063\u305F\u30B7\u30FC\u30C9\u6570\uFF08\u62EC\u5F27\u306F\u540C\u70B9\uFF09/ ${seeds}\u30B7\u30FC\u30C9`);
+        console.table(table);
+        const beatenBy = names.map((a) => ({
+          name: a,
+          beatenBy: names.filter((b) => b !== a && Number(table[b][a].split("(")[0]) > seeds / 2).join(",") || "\uFF08\u306A\u3057\uFF09"
+        }));
+        console.table(beatenBy);
+      }
+      const chk = runOne(personas[0], start, tune, delay, delayMode);
+      console.log(`determinism: ${chk.score === all[personas[0].name][0].score ? "OK" : "NG"}`);
+      void ENEMY_DEFS;
+      void DIRS;
+    }
+  }
+  return __toCommonJS(simulate_exports);
+})();
+
+</script>
+<script>
+(() => {
+  const CFG = {"name":"037-combat-tellstep","title":"Tellstep (037)","version":"0.3.0","strategies":["p02","p01","even","banker","bare"],"maxTicks":6000,"actions":[{"label":"斬る","key":" "},{"label":"ダッシュ","key":"Shift"},{"label":"奉納(長押し)","key":"b","hold":true}],"shop":[{"label":"1 刃","key":"1"},{"label":"2 鎧","key":"2"},{"label":"3 癒し","key":"3"},{"label":"4 器","key":"4"}],"help":"十字で移動、「斬る」で周りの敵全員を斬る。撃破で熱が上がり、報酬も被ダメも上がる。赤い角の重兵は足を止めて大振りの予兆（赤い輪）を出すので、輪が閉じる前に一歩引けば空振りする。熱が高いほど振りが速い。中央の篝火で「奉納」を長押しすると抱えた残り火を確定し、篝火の上で強化を買える。倒れると抱えた残り火と熱を失う。","hasBot":true};
+  const $ = (id) => document.getElementById(id);
+  const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true }));
+  let mode = 'watch', running = false, speed = 4, bot = null, last = 0, acc = 0, state = null;
+
+  function aip() { return window.__AIP__; }
+  function status(s) {
+    if (!s) return;
+    const m = s.metrics || {}, p = s.player || {};
+    const parts = ['tick <b>' + s.tick + '</b>'];
+    if (m.score !== undefined) parts.push('score <b>' + Math.round(m.score) + '</b>');
+    if (p.hp !== undefined) parts.push('HP <b>' + Math.round(p.hp) + '</b>');
+    if (m.moneyEarned !== undefined) parts.push('稼ぎ <b>' + Math.round(m.moneyEarned) + '</b>');
+    if (m.rescues !== undefined) parts.push('救助 <b>' + m.rescues + '</b>');
+    if (s.over) parts.push('<b>終了</b>');
+    else if (mode === 'watch' && s.tick >= CFG.maxTicks) parts.push('<b>' + CFG.maxTicks + 'tickで終了</b>');
+    $('status').innerHTML = parts.join('　');
+  }
+  function seed() { return Math.max(1, Number($('seed').value) || 1); }
+  function reset() {
+    state = aip().reset(seed());
+    // Bot の作り方はゲームで違う: 名前を渡す型（036など）と、PERSONAS の要素を渡す型（027〜037の戦闘など）
+    const per = CFG.hasBot && __BOTLIB__.PERSONAS ? __BOTLIB__.PERSONAS.find((p) => p.name === $('strategy').value) : null;
+    bot = CFG.hasBot ? new __BOTLIB__.Bot(per ?? $('strategy').value) : null;
+    status(state);
+  }
+  function setRunning(on) { running = on && !!bot; $('playpause').textContent = running ? '⏸ 一時停止' : '▶ 再生'; last = performance.now(); acc = 0; }
+  function frame(now) {
+    if (mode === 'watch' && running && state) {
+      acc += Math.min(250, now - last) / 100 * speed;
+      const t0 = performance.now();
+      while (acc >= 1 && !state.over && state.tick < CFG.maxTicks && performance.now() - t0 < 12) { state = aip().step(bot.decide(state)); acc -= 1; }
+      if (acc > 8 * speed) acc = 0; // 端末が遅い時は追いつこうとしない
+      if (state.over || state.tick >= CFG.maxTicks) setRunning(false);
+      status(state);
+    } else if (mode === 'play') {
+      status(aip().getState());
+    }
+    last = now;
+    requestAnimationFrame(frame);
+  }
+  function setMode(m) {
+    mode = m;
+    $('tabWatch').setAttribute('aria-pressed', String(m === 'watch'));
+    $('tabPlay').setAttribute('aria-pressed', String(m === 'play'));
+    $('watch').hidden = m !== 'watch';
+    $('play').hidden = m !== 'play';
+    if (m === 'watch') { aip().takeControl(); } else { setRunning(false); aip().release(); }
+  }
+  function holdButton(btn, k) {
+    const down = (e) => { e.preventDefault(); btn.classList.add('down'); key('keydown', k); };
+    const up = (e) => { e.preventDefault(); if (!btn.classList.contains('down')) return; btn.classList.remove('down'); key('keyup', k); };
+    btn.addEventListener('pointerdown', down);
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('pointerleave', up);
+  }
+  function tapButton(btn, k) {
+    btn.addEventListener('pointerdown', (e) => { e.preventDefault(); key('keydown', k); setTimeout(() => key('keyup', k), 120); });
+  }
+  function toggleButton(btn, k) {
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', String(on));
+      key(on ? 'keydown' : 'keyup', k);
+    });
+  }
+  function build() {
+    for (const s of CFG.strategies) { const o = document.createElement('option'); o.value = o.textContent = s; $('strategy').appendChild(o); }
+    for (const v of [1, 4, 16]) {
+      const b = document.createElement('button'); b.textContent = '×' + v; b.setAttribute('aria-pressed', String(v === speed));
+      b.onclick = () => { speed = v; for (const x of $('speeds').children) x.setAttribute('aria-pressed', String(x === b)); };
+      $('speeds').appendChild(b);
+    }
+    for (const b of $('dpad').querySelectorAll('button')) holdButton(b, b.dataset.key);
+    for (const a of CFG.actions) {
+      const b = document.createElement('button'); b.textContent = a.label; $('acts').appendChild(b);
+      (a.toggle ? toggleButton : a.hold ? holdButton : tapButton)(b, a.key);
+    }
+    for (const a of CFG.shop) { const b = document.createElement('button'); b.textContent = a.label; $('shop').appendChild(b); tapButton(b, a.key); }
+    $('help').textContent = CFG.help;
+    if (!CFG.hasBot) { $('tabWatch').disabled = true; }
+    $('playpause').onclick = () => setRunning(!running);
+    $('reset').onclick = () => { reset(); if (mode === 'watch') setRunning(false); };
+    $('strategy').onchange = () => { reset(); setRunning(false); };
+    $('tabWatch').onclick = () => setMode('watch');
+    $('tabPlay').onclick = () => { setMode('play'); reset(); };
+  }
+  function start() {
+    if (!window.__AIP__) return setTimeout(start, 30);
+    build();
+    setMode(CFG.hasBot ? 'watch' : 'play');
+    reset();
+    requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
+  }
+  start();
+})();
+</script>

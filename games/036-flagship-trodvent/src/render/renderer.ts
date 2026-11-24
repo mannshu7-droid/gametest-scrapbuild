@@ -1,9 +1,13 @@
 import { DAY_LENGTH, FIELD_WIDTH, LANE_COUNT, LENGTH, NIGHT_LENGTH, TUNE } from '../core/game';
 import { TILE, type GameState } from '../core/types';
+import * as SP from './sprites';
 
-const TILE_PX = 28;
+// 2026-11-24: 28→40px（人・敵・土・石が見分けられる大きさ）。絵は sprites.ts（templates/render/sprites.ts のコピー）
+const TILE_PX = 40;
 const VIEW_W = 20;
 const HUD_PX = 152;
+/** 凡例の帯（盤面の下・HUDの上） */
+const LEGEND_PX = 30;
 const PHASE_BAR_PX = 8;
 
 const TILE_COLOR: Record<number, string> = {
@@ -25,6 +29,45 @@ const ENEMY_COLOR: Record<string, string> = {
   brute: '#c0392b',
 };
 
+const ENEMY_SHAPE: Record<string, SP.EnemyShape> = {
+  skirmisher: 'grunt',
+  archer: 'archer',
+  brute: 'brute',
+};
+
+/** 2026-11-24: 地形はドットでなく、土・石・鉱石・ガス・崩れ・霧・割れ目の絵で描く */
+function drawTile(ctx: CanvasRenderingContext2D, t: number, x: number, y: number, s: number, tx: number, ty: number, tick: number): void {
+  switch (t) {
+    case TILE.FLOOR: return SP.tileFloor(ctx, x, y, s, tx, ty);
+    case TILE.DIRT: return SP.tileDirt(ctx, x, y, s, tx, ty);
+    case TILE.ROCK: return SP.tileRock(ctx, x, y, s, tx, ty);
+    case TILE.ORE_COPPER: return SP.tileOre(ctx, x, y, s, tx, ty, '#e08a45');
+    case TILE.ORE_IRON: return SP.tileOre(ctx, x, y, s, tx, ty, '#c6d6e2');
+    case TILE.ORE_GOLD: return SP.tileOre(ctx, x, y, s, tx, ty, '#ffd84a');
+    case TILE.GAS: return SP.tileGas(ctx, x, y, s, tx, ty, tick);
+    case TILE.UNSTABLE: return SP.tileUnstable(ctx, x, y, s, tx, ty);
+    case TILE.UNSCANNED: return SP.tileFog(ctx, x, y, s);
+    case TILE.RIFT: return SP.tileRift(ctx, x, y, s, tick);
+    default:
+      ctx.fillStyle = TILE_COLOR[t] ?? '#000';
+      ctx.fillRect(x, y, s, s);
+  }
+}
+
+const LEGEND: SP.LegendItem[] = [
+  { label: '自分', draw: (c, x, y, s) => SP.drawPlayer(c, x + s / 2, y + s / 2, s) },
+  { label: '敵', draw: (c, x, y, s) => SP.drawEnemy(c, x + s / 2, y + s / 2, s, 'grunt', ENEMY_COLOR.skirmisher) },
+  { label: '射手', draw: (c, x, y, s) => SP.drawEnemy(c, x + s / 2, y + s / 2, s, 'archer', ENEMY_COLOR.archer) },
+  { label: '重兵', draw: (c, x, y, s) => SP.drawEnemy(c, x + s / 2, y + s / 2, s, 'brute', ENEMY_COLOR.brute) },
+  { label: '土', draw: (c, x, y, s) => SP.tileDirt(c, x, y, s, 1, 2) },
+  { label: '石', draw: (c, x, y, s) => SP.tileRock(c, x, y, s, 3, 1) },
+  { label: '鉱石', draw: (c, x, y, s) => SP.tileOre(c, x, y, s, 2, 2, '#ffd84a') },
+  { label: '崩れ', draw: (c, x, y, s) => SP.tileUnstable(c, x, y, s, 1, 1) },
+  { label: '柵', draw: (c, x, y, s) => SP.drawBarricade(c, x, y, s) },
+  { label: '砲台', draw: (c, x, y, s) => SP.drawTurret(c, x, y, s, -Math.PI / 3) },
+  { label: '拠点', draw: (c, x, y, s) => SP.drawHouse(c, x + s / 2, y + s, s) },
+];
+
 const RISK_COLOR: Record<string, string> = {
   safe: '#2ecc71',
   caution: '#f1c40f',
@@ -39,6 +82,9 @@ function rescueHint(fee: number): string {
 }
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
+  /** 2026-11-24: プレイヤーの向き（最後に動いた向き） */
+  private face = 1;
+  private lastPx = 0;
 
   /** バリケード/タレットの品質・連携表示（020新規）。品質は左下の小さな四角の色、連携中はシアンの枠 */
   private drawObstacleMarks(sx: number, sy: number, quality: number, linked: boolean, shielded = false): void {
@@ -100,7 +146,7 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     canvas.width = VIEW_W * TILE_PX;
-    canvas.height = PHASE_BAR_PX + LANE_COUNT * TILE_PX + HUD_PX;
+    canvas.height = PHASE_BAR_PX + LANE_COUNT * TILE_PX + LEGEND_PX + HUD_PX;
     this.ctx = canvas.getContext('2d')!;
   }
 
@@ -133,8 +179,7 @@ export class Renderer {
       if (x >= LENGTH) continue;
       for (let y = 0; y < LANE_COUNT; y++) {
         const t = s.map.tiles[x * LANE_COUNT + y];
-        ctx.fillStyle = TILE_COLOR[t] ?? '#000';
-        ctx.fillRect(col * TILE_PX, fieldTop + y * TILE_PX, TILE_PX, TILE_PX);
+        drawTile(ctx, t, col * TILE_PX, fieldTop + y * TILE_PX, TILE_PX, x, y, s.tick);
         // 036: 踏み固め。掘った床の下から石畳の高さで進み具合（packSteps回で満ち、固めた坑道は縁取り）
         const k = s.player.packSteps;
         const tr = s.map.trod[x * LANE_COUNT + y];
@@ -180,11 +225,7 @@ export class Renderer {
       for (const q of s.map.props) {
         const col = q.x - camLeft;
         if (col < 0 || col >= VIEW_W) continue;
-        ctx.fillStyle = '#c88a3e';
-        ctx.fillRect(col * TILE_PX + TILE_PX / 2 - 3, fieldTop, 6, viewH);
-        ctx.fillStyle = '#6b4219';
-        ctx.fillRect(col * TILE_PX + 2, fieldTop, TILE_PX - 4, 4);
-        ctx.fillRect(col * TILE_PX + 2, fieldTop + viewH - 4, TILE_PX - 4, 4);
+        SP.drawProp(ctx, col * TILE_PX, fieldTop, TILE_PX, viewH);
       }
     }
     if (s.player.propWork) {
@@ -225,6 +266,8 @@ export class Renderer {
       ctx.fillRect(sx - r * TILE_PX, fieldTop, r * 2 * TILE_PX, viewH);
       ctx.fillStyle = base.isHome ? '#3498db' : '#2ecc71';
       ctx.fillRect(sx - 2, fieldTop, 4, viewH);
+      // 2026-11-24: 拠点は家の絵（ホームは青い屋根、前哨は緑の屋根）
+      SP.drawHouse(ctx, sx, fieldTop + viewH - 2, TILE_PX * 0.9, base.isHome ? '#3498db' : '#2ecc71');
       // 拠点HPバー（保護帯の上端）
       ctx.fillStyle = '#000';
       ctx.fillRect(sx - r * TILE_PX, fieldTop, r * 2 * TILE_PX, 4);
@@ -250,8 +293,7 @@ export class Renderer {
       const sx = (b.x - camLeft) * TILE_PX;
       if (sx < -TILE_PX || sx > VIEW_W * TILE_PX) continue;
       const sy = fieldTop + b.y * TILE_PX;
-      ctx.fillStyle = '#8b5a2b';
-      ctx.fillRect(sx + 1, sy + 1, TILE_PX - 2, TILE_PX - 2);
+      SP.drawBarricade(ctx, sx, sy, TILE_PX);
       const ratio = Math.max(0, b.hp / b.maxHp);
       ctx.fillStyle = '#000';
       ctx.fillRect(sx, sy - 4, TILE_PX, 3);
@@ -265,10 +307,7 @@ export class Renderer {
       const sx = (t.x - camLeft) * TILE_PX;
       if (sx < -TILE_PX || sx > VIEW_W * TILE_PX) continue;
       const sy = fieldTop + t.y * TILE_PX;
-      ctx.fillStyle = '#1b3a5c';
-      ctx.fillRect(sx + 1, sy + 1, TILE_PX - 2, TILE_PX - 2);
-      ctx.fillStyle = '#4aa3e0';
-      ctx.fillRect(sx + 6, sy + 6, TILE_PX - 12, TILE_PX - 12);
+      SP.drawTurret(ctx, sx, sy, TILE_PX, -Math.PI / 2 + Math.sin(s.tick / 15 + t.id) * 0.9);
       const ratio = Math.max(0, t.hp / t.maxHp);
       ctx.fillStyle = '#000';
       ctx.fillRect(sx, sy - 4, TILE_PX, 3);
@@ -306,11 +345,13 @@ export class Renderer {
       if (sx < -TILE_PX || sx > VIEW_W * TILE_PX) continue;
       const sy = fieldTop + e.y * TILE_PX;
       if (e.isRaider) {
-        ctx.fillStyle = '#e74c3c';
-        ctx.fillRect(sx + 1, sy + 1, TILE_PX - 2, TILE_PX - 2);
+        // 夜のレイダーは赤い光の輪
+        ctx.fillStyle = 'rgba(231,76,60,0.35)';
+        ctx.beginPath();
+        ctx.arc(sx + TILE_PX / 2, sy + TILE_PX / 2, TILE_PX * 0.55, 0, Math.PI * 2);
+        ctx.fill();
       }
-      ctx.fillStyle = ENEMY_COLOR[e.type] ?? '#999';
-      ctx.fillRect(sx + 3, sy + 3, TILE_PX - 6, TILE_PX - 6);
+      SP.drawEnemy(ctx, sx + TILE_PX / 2, sy + TILE_PX * 0.48, TILE_PX * 0.92, ENEMY_SHAPE[e.type] ?? 'grunt', ENEMY_COLOR[e.type] ?? '#999', e.x > s.player.x ? -1 : 1);
       const ratio = Math.max(0, e.hp / e.maxHp);
       ctx.fillStyle = '#000';
       ctx.fillRect(sx, sy - 4, TILE_PX, 3);
@@ -321,15 +362,13 @@ export class Renderer {
     // プレイヤー
     const psx = (s.player.x - camLeft) * TILE_PX;
     const psy = fieldTop + s.player.y * TILE_PX;
-    ctx.fillStyle = s.player.dashCd === 0 ? '#f1c40f' : '#f5f5f5';
-    ctx.fillRect(psx + 1, psy + 1, TILE_PX - 2, TILE_PX - 2);
-    // 2回目（v1軽微#5）: 金鉱石・割れ目の近くでも見分けられるよう白い縁取りと黒い芯
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(psx + 1, psy + 1, TILE_PX - 2, TILE_PX - 2);
-    ctx.lineWidth = 1;
-    ctx.fillStyle = '#111';
-    ctx.fillRect(psx + TILE_PX / 2 - 2, psy + TILE_PX / 2 - 2, 4, 4);
+    // 2026-11-24: プレイヤーは人の形（黄色いヘルメット・青い服・つるはし）。ダッシュ可能な時は黄色い光
+    if (s.player.x !== this.lastPx) this.face = s.player.x > this.lastPx ? 1 : -1;
+    this.lastPx = s.player.x;
+    SP.drawPlayer(ctx, psx + TILE_PX / 2, psy + TILE_PX * 0.5, TILE_PX * 0.95, {
+      face: this.face,
+      glow: s.player.dashCd === 0 ? 'rgba(241,196,15,0.28)' : 'rgba(255,255,255,0.12)',
+    });
     // 028: 踏ん張りの発動中は青い輪と残り秒数
     if (s.player.gritTicks > 0) {
       ctx.strokeStyle = '#4da6ff';
@@ -376,8 +415,12 @@ export class Renderer {
     }
 
     // HUD（030: 028の17行を「揺れゲージ1本＋5行」に集約。注意線・危険線・被ダメ倍率・踏ん張りの点・割れ目の残り・粘った秒数はゲージに載せる）
-    const hudY = fieldTop + viewH;
     const W = VIEW_W * TILE_PX;
+    // 2026-11-24: 凡例（何が人・敵・土・石・鉱石・建物か）
+    ctx.fillStyle = '#0b0d10';
+    ctx.fillRect(0, fieldTop + viewH, W, LEGEND_PX);
+    SP.drawLegend(ctx, 6, fieldTop + viewH + 5, 20, LEGEND, W - 12);
+    const hudY = fieldTop + viewH + LEGEND_PX;
     ctx.fillStyle = '#111';
     ctx.fillRect(0, hudY, W, HUD_PX);
     if (s.resource === 'tremor') this.drawTremorGauge(s, 6, hudY + 6, W - 12);

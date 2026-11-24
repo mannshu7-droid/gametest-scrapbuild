@@ -39,7 +39,11 @@
 ### 1回目: BUILD ＋ REVIEW（新ゲーム作成とレビュー）
 1. `reviews/` の全 Learnings と `personas/` を読む
 2. 今サイクルの要素で仕様書を書く（`templates/spec-template.md` 使用、タッチ操作の想定を含める）
-3. `games/NNN-<要素>-<名前>/` に実装（コアループが1周回る最小構成、AIP・simulate 必須）
+3. `games/NNN-<要素>-<名前>/` に実装（コアループが1周回る最小構成、AIP・simulate 必須）。
+   **見た目の最低限（2026-11-24追加）**: `templates/render/sprites.ts` を `src/render/sprites.ts` にコピーして使い、
+   自分（人の形）・敵（種類ごとの怪物）・地形（土／石／鉱石など）・建物（柵・砲台・拠点・篝火など）を**単色の円や四角（ドット）だけで描かない**。
+   盤面の端に凡例（`drawLegend`）を出す。1マス（または自分の大きさ）は画面で32px以上を目安にする。
+   スクリーンショット（Playwright の Chromium）で「どれが自分・敵・土・石か」を見分けられることを確かめ、v1 レビューに一言書く
 4. `npm run build` と `npm run simulate` で動作確認
 5. **P01（野望型）と P02（あき型）の両ペルソナでプレイ**（simulate＋可能ならブラウザAIP）し、
    各ペルソナの評価基準・ネガティブ基準で採点、改善点を列挙して `reviews/NNN-…-v1.md` を書く
@@ -61,9 +65,10 @@
 2. **スマホで動作確認できるページを作って公開する**（2026-11-20追加）:
    - ゲームのフォルダに `mobile.json`（観戦できる戦略・タッチのボタンの割り当て・短い遊び方。書式は `games/036-flagship-trodvent/mobile.json`）を置き、
      `node tools/mobile-html.mjs games/NNN-…` で `mobile/NNN-….html` を作る（ゲーム本体は変えない外付けのページ。ボット観戦×1〜×16とタッチ操作）
-   - **Artifact の公開ツールが使える環境なら**、そのファイルを Artifact として公開し（同じゲームの2回目以降は同じURLへ更新）、
-     URL を final レビューの冒頭・`games/README.md` の行・PR 本文に書く
-   - **使えない環境（クラウドのルーチンなど）では** `mobile/NNN-….html` をコミットするだけにし、`routine-state.md` の備考に
+   - **Artifact の公開は必須**（2026-11-24: クラウドのルーチンにも Artifact ツールがあることを確認した）。そのファイルを Artifact として公開し
+     （`routine-state.md` や `games/README.md` に既に URL があるゲームはその URL へ更新）、URL を final レビューの冒頭・`games/README.md` の行・PR 本文・`routine-state.md` に書く
+   - 公開前に Playwright の Chromium（スマホの画面サイズ）でページを開き、ボット観戦が動いてエラーが無いこと、盤面の絵が見分けられることを確かめる
+   - Artifact ツールが本当に無い環境に限り `mobile/NNN-….html` をコミットするだけにし、`routine-state.md` の備考に
      「スマホ確認ページ未公開: mobile/NNN-….html」と書く。次に Artifact を使える環境で動いた回（または人の手元のセッション）が公開して備考を消す
    - 外部への公開（GitHub Pages 等）はしない
 3. `routine-state.md` を次サイクル（次の要素・run 1）に更新する
@@ -72,8 +77,10 @@
 
 このルーチンは claude.ai のクラウドのルーチン（Linux のサンドボックス、リポジトリを毎回クローン）でも動く。手元の Windows との違い:
 
-- **ブラウザペインが無い**: ブラウザAIPの実プレイ（3ラン一致・HUDの文字列読み）はできない。代わりに `npm run simulate` で同じ3ランを再現し、
-  `node tools/mobile-html.mjs` が通ること（単一ページがビルドできること）を確かめ、レビューに「ブラウザAIPはクラウド実行のため未実施」と明記する
+- **ブラウザペインは無いが、Playwright の Chromium がある**: `node tools/single-html.mjs` の単一HTMLに
+  `npx esbuild headless/simulate.ts --bundle --format=iife --global-name=__BOTLIB__` のボットを埋め込んで `__AIP__` で3ランを回し、ヘッドレスと一致することとスクリーンショット（盤面の絵が見分けられるか）を確かめる。
+  レビューには「ブラウザペインの代わりに Playwright Chromium で実施」と書く
+- **Artifact ツールはある**: 4回目のスマホ確認ページは公開まで行う（上の4回目の2.）
 - **並列数は `nproc` に合わせる**（手元は21並列。クラウドは少ないことが多いので、160シード×5条件の全グリッドが時間内に終わらない時は 1〜80 の2組に絞り、絞ったことをレビューに書く）
 - 一時ファイルは `/tmp` ではなくリポジトリの外の作業用ディレクトリ（例: `$HOME/work`）に置き、コミットしない
 - `npm install` は各ゲームのフォルダで最初に1回（`node_modules` はクローンに含まれない）
