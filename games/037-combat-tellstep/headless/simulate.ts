@@ -449,8 +449,8 @@ if (isMain) {
     out.noCarry = ctrl;
     if (args.includes('--json')) console.log(JSON.stringify(out));
   } else if (args.includes('--sweepHp')) {
-    // 033: 帰るHPの線（bankHpFrac）の掃引。遅延0と3秒resetで、戦略ごとの平均scoreを1行JSONで出す（最良線の罰はスクリプトで集計）
-    const Hs = (opt('--Hs') ?? '0.2,0.3,0.4,0.5,0.6,0.7').split(',').map(Number);
+    // 033: 帰るHPの線（bankHpFrac）の掃引（037 v3: 既定を0.9まで広げた。v2は0.7の上端に張り付いた）。遅延0と3秒resetで、戦略ごとの平均scoreを1行JSONで出す（最良線の罰はスクリプトで集計）
+    const Hs = (opt('--Hs') ?? '0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9').split(',').map(Number);
     const conds = CONDS.filter((c) => (opt('--conds') ?? 'd0,3s-reset,6s-reset').split(',').includes(c.label));
     const rows = [];
     for (const c of conds)
