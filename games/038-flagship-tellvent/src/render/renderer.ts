@@ -376,12 +376,15 @@ export class Renderer {
         ctx.arc(sx + TILE_PX / 2, sy + TILE_PX / 2, TILE_PX * (0.5 + 0.9 * left), 0, Math.PI * 2);
         ctx.stroke();
         ctx.lineWidth = 1;
-        // 手の届く8マスを薄く示す（ここから出れば空振り）
-        ctx.strokeStyle = 'rgba(255,120,200,0.55)';
-        ctx.strokeRect(sx - TILE_PX * (e.range + TUNE.strikeSlack), sy - TILE_PX * (e.range + TUNE.strikeSlack), TILE_PX * (1 + 2 * (e.range + TUNE.strikeSlack)), TILE_PX * (1 + 2 * (e.range + TUNE.strikeSlack)));
+        // 2回目（v1軽微#7）: 手の届くマス（ここから出れば空振り）は打つ直前4tickだけ、枠と塗りで示す（ふだんは輪だけ＝隣の敵にかからない）
         if ((e.windup ?? 0) <= 4) {
-          ctx.fillStyle = 'rgba(255,60,160,0.35)';
-          ctx.fillRect(sx - TILE_PX * e.range, sy - TILE_PX * e.range, TILE_PX * (1 + 2 * e.range), TILE_PX * (1 + 2 * e.range));
+          const r = e.range + TUNE.strikeSlack;
+          ctx.fillStyle = 'rgba(255,60,160,0.28)';
+          ctx.fillRect(sx - TILE_PX * r, sy - TILE_PX * r, TILE_PX * (1 + 2 * r), TILE_PX * (1 + 2 * r));
+          ctx.strokeStyle = 'rgba(255,120,200,0.85)';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(sx - TILE_PX * r, sy - TILE_PX * r, TILE_PX * (1 + 2 * r), TILE_PX * (1 + 2 * r));
+          ctx.lineWidth = 1;
         }
       } else if ((e.stun ?? 0) > 0) {
         ctx.strokeStyle = '#ffe066';
@@ -482,8 +485,6 @@ export class Renderer {
         (TUNE.carryFrac > 0 ? (p.estTremorAtReturn === null ? (p.glow >= 1 ? ` 余熱: 次は揺れ${Math.round(p.glow)}から` : '') : ` 今帰れば次は揺れ${p.glowPreview}から${p.glowSpare < 1 ? `（冷め${Math.round((1 - p.glowSpare) * 100)}%）` : ''}`) : '') +
         (p.shield > 0 ? ` 盾${Math.round(p.shield)}` : '') +
         `  被ダメ×${p.dmgMult.toFixed(1)}  ` +
-        // 038: 今の揺れでの重兵の振りかぶり（予兆）の長さ
-        (p.bruteWindup > 0 ? `重兵の振り${(p.bruteWindup / 10).toFixed(1)}秒(揺れで速い)  ` : '') +
         // 032: 帰還の宣言の後は「帰るだけ」を最優先で出す
         (p.returnOnly ? (p.returnOnlyBy === 'rest' ? '休んだ＝帰るだけ（もう掘れない）' : '割れ目で帰るだけ（もう掘れない）') : '') +
         // 2回目: 踊り場の上では休んだ時の下がり方と代償（帰るだけ・帰り道の割れ目も無し）を先に見せる
@@ -708,8 +709,14 @@ export class Renderer {
       `揺れ${Math.round(t)} 帰着${est ?? '-'} 売値+${Math.round(p.tremorBonus * 100)}% 落盤${Math.round(danger * 100)}% ${arrow}${p.dusk ? ` 夕×${TUNE.duskMult}` : ''}${riftText}${overLineText(s)}`,
       x,
       y + 10,
-      w - 190,
+      w - (p.bruteWindup > 0 ? 300 : 190),
     );
+    // 2回目（v1軽微#7）: 今の揺れでの重兵の振りの秒数をゲージの見出しの右へ大きく（短いほど赤紫）
+    if (p.bruteWindup > 0) {
+      const fast = Math.min(1, Math.max(0, (16 - p.bruteWindup) / 11));
+      ctx.fillStyle = `rgb(255,${Math.round(200 - 150 * fast)},${Math.round(80 + 150 * fast)})`;
+      this.fitText(`重兵の振り ${(p.bruteWindup / 10).toFixed(1)}秒`, x + w - 296, y + 11, 106, 14);
+    }
     // 036: 固めの状態（右端）。固めの上で効いている間は水色、上限を越えたら灰色、落盤で崩れたら3秒だけ赤
     const lost = p.packLost && s.tick - p.packLost.tick < 30 ? p.packLost : null;
     if (lost) {

@@ -401,16 +401,33 @@ export const TUNE = {
    */
   windupScale: 1,
   windupBrute: 16,
-  /** 打つ瞬間の判定の余裕（マス、チェビシェフ）。0＝隣の8マスから出れば空振り */
-  strikeSlack: 0,
+  /**
+   * 打つ瞬間の判定の余裕（マス、チェビシェフ）。0＝隣の8マスから出れば空振り（v0.1.0）。
+   * 2回目（v1重大#2）: 1＝5×5の外まで下がる（2歩）。格子は1歩1tickなので、1歩では打つ1tick前に気付けば必ずかわせた
+   */
+  strikeSlack: 1,
   whiffStun: 6,
   /**
    * 038: 揺れは振りを速める（037 v2の「熱は振りを速める」の翻訳）。予兆の長さ × (1 − heatHaste × min(1, 揺れ/hasteFull))。
    * 本命の揺れは注意線30・危険線45で帰るので、037の熱100に当たる「振りが最も速い揺れ」を hasteFull（既定60）に置く。
-   * 揺れ0で1.6秒、揺れ30で1.0秒、揺れ60以上で0.5秒
+   * 2回目（v1重大#2）: hasteFull を危険線45へ（v0.1.0は60）。揺れ0で1.6秒、注意線30で0.9秒、危険線45以上で0.5秒。
+   * 2マス下がるのに2tick要るので（予兆≧反応＋2tick）、反応0.3秒なら危険線まで、0.6秒なら揺れ約34まで、0.9秒なら約20までかわせる＝攻める揺れほど読めない
+   * `--tune strikeSlack=0,hasteFull=60` で v0.1.0 と同じ規則
    */
   heatHaste: 0.7,
-  hasteFull: 60,
+  hasteFull: 45,
+  /**
+   * 038 2回目（v1重大#3の候補）: 振りかぶりの間に寄る（037 v3 の windupCreep の翻訳）。0＝足を止める（v0.1.0）。
+   * >0 なら振りかぶりの間も、手の外にいるプレイヤーへ moveCdMax/windupCreep tick ごとに1歩寄る
+   */
+  windupCreep: 0,
+  /**
+   * 038 2回目（v1重大#3の候補）: 振りかぶりの構え。振りかぶっている重兵へのプレイヤーの一撃 × windupGuard（1＝v0.1.0）。
+   * 小さくすると「止まった重兵を先に殴り倒す」得が消え、下がって空振りさせてから隙（whiffStun）に殴るのが得になる
+   */
+  windupGuard: 1,
+  /** 2回目: 空振りの隙の重兵へのプレイヤーの一撃 × stunPunish（1＝v0.1.0） */
+  stunPunish: 1,
 };
 /** 036 2回目: `--preset v1`（036 v0.1.0と同じ規則）。固めは揺れのたまる速さ×0.1、上限40の崖 */
 export const PRESET_V1: Partial<typeof TUNE> = {
@@ -3128,6 +3145,14 @@ export class Game {
       if (e.windup && e.windup > 0) {
         e.windup--;
         if (e.atkCd > 0) e.atkCd--;
+        // 2回目: 振りかぶりの間に寄る（windupCreep、既定0）
+        if (TUNE.windupCreep > 0 && chebyshev(e.x, e.y, this.player.x, this.player.y) > e.range) {
+          if (e.moveCd > 0) e.moveCd--;
+          else {
+            e.moveCd = Math.max(1, Math.round(ENEMY_DEFS[e.type].moveCdMax / TUNE.windupCreep));
+            this.stepTowardBlocked(e, this.player.x, this.player.y);
+          }
+        }
         if (e.windup === 0) {
           const d = chebyshev(e.x, e.y, this.player.x, this.player.y);
           const hit = d <= e.range + TUNE.strikeSlack && this.player.dashInvulnTicks <= 0;
@@ -3406,7 +3431,9 @@ export class Game {
     }
     if (!target) return;
     this.player.atkCd = ATK_CD_MAX;
-    target.hp -= this.player.atk;
+    // 2回目: 振りかぶりの構え（windupGuard）と空振りの隙（stunPunish）。既定1で v0.1.0 と同じ
+    const mult = (target.windup ?? 0) > 0 ? TUNE.windupGuard : (target.stun ?? 0) > 0 ? TUNE.stunPunish : 1;
+    target.hp -= mult === 1 ? this.player.atk : this.player.atk * mult;
     if (target.hp <= 0) this.killEnemy(target, true);
   }
 
@@ -4074,7 +4101,7 @@ export class Game {
         packActive: this.isPacked(p.x, p.y) && p.tremor < this.packCap() + TUNE.packSlope,
         packCap: this.packCap() === Infinity ? 999 : this.packCap(),
         bruteWindup: this.windupFor(),
-        windupMarks: TUNE.windupScale > 0 ? [0, 30, 60].map((t) => ({ tremor: t, ticks: this.windupFor(t) })) : [],
+        windupMarks: TUNE.windupScale > 0 ? [0, TUNE.cautionAt, TUNE.hasteFull].map((t) => ({ tremor: t, ticks: this.windupFor(t) })) : [],
         packRate: TUNE.packMode === 1 ? TUNE.packCave : TUNE.packRate,
         packMode: TUNE.packMode,
         packSteps: TUNE.packSteps,
