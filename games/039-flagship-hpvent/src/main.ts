@@ -1,4 +1,4 @@
-import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, PRESET_V1, type Resource } from './core/game';
+import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, PRESET_V1, PRESET_038, type Resource } from './core/game';
 import { Renderer } from './render/renderer';
 import { Input } from './render/input';
 import { createAIP } from './aip';
@@ -23,6 +23,8 @@ else if (params.get('preset') === '030') Object.assign(TUNE, PRESET_030);
 else if (params.get('preset') === '032') Object.assign(TUNE, PRESET_032);
 // 036新規: ?preset=034 で034-glowvent v0.3.0と同じ規則（固め・走るなし）
 else if (params.get('preset') === '034') Object.assign(TUNE, PRESET_034);
+// 039 2回目: ?preset=038 で038-tellvent v0.3.0と同じ回復と救助（HPを残して帰る規則a/b/cを無効）
+else if (params.get('preset') === '038') Object.assign(TUNE, PRESET_038);
 else if (params.get('preset') === 'v1') Object.assign(TUNE, PRESET_V1);
 // 038新規: ?tune=windupScale=0 のように調整値を上書き（windupScale=0 で036 v0.3.0と同じ＝予兆なし）
 for (const kv of (params.get('tune') ?? '').split(',').filter(Boolean)) {

@@ -72,7 +72,7 @@
  *   `--preset 032`で032 v0.3.0と同じ規則。ボットの帰還線は「この遠征で上げた分」（帰着線−始まりの揺れ×LINE_REL）で測る（033と同じ）。
  *   `--lineRel 0`で絶対値の帰着線。`--hp p02=0.6`で戦略ごとの帰るHPを上書き。`--grid`で5条件×戦略の一括実行（JSON行）
  */
-import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, PRESET_V1, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
+import { Game, TUNE, PRESET_026, PRESET_028, PRESET_030, PRESET_032, PRESET_034, PRESET_V1, PRESET_038, type Resource, FIELD_WIDTH, LANE_COUNT, LENGTH, BAND_SIZE, bandAt, requiredDrillPower } from '../src/core/game';
 import { TILE, type Action, type DeathPhase, type Dir, type Enemy, type GameState, type ShopItemId, type TileId, type Turret } from '../src/core/types';
 
 /** 032: 支柱を建て始める拠点からの距離（列）と、拠点の買い物で残す支柱の本数 */
@@ -80,8 +80,8 @@ const PROP_FROM = 20;
 const PROP_RESERVE = 0;
 /** 2回目: 支柱の下の手当てで戻すHP（最大HP比） */
 const HEAL_TO = 0.8;
-/** 039: 拠点を出る前に待つHP割合（--departHp、0なら038と同じく待たない） */
-let DEPART_HP = 0;
+/** 039: 拠点を出る前に待つHP割合（--departHp、0なら038と同じく待たない）。2回目で既定0.7（`--preset 038` では0） */
+let DEPART_HP = 0.7;
 /** 032: `--props auto|none|all`（auto＝bare以外は建てる。規則に支柱が無ければ建てない） */
 let PROPS_DEFAULT: 'auto' | 'none' | 'all' = 'auto';
 /** 032: 戦略名（`weave+P`・`bare-P`）を、元の戦略と支柱を建てるかに分ける */
@@ -1638,6 +1638,8 @@ else if (PRESET === '032') Object.assign(TUNE, PRESET_032);
 else if (PRESET === '034') Object.assign(TUNE, PRESET_034);
 // 036 2回目: --preset v1 で036 v0.1.0の固め（揺れ×0.1・上限40の崖）
 else if (PRESET === 'v1') Object.assign(TUNE, PRESET_V1);
+// 039 2回目: --preset 038 で038 v0.3.0と同じ回復と救助（a/b/cを無効）、ボットは拠点で待たない
+else if (PRESET === '038') Object.assign(TUNE, PRESET_038);
 else if (PRESET !== null) throw new Error(`unknown preset: ${PRESET}`);
 // 030新規: --ignoreRifts でボットが割れ目を見ない（割れ目は開くが取らない）、--riftSlack N で割れ目を追う余裕
 RIFT_CHASE = !args.includes('--ignoreRifts');
@@ -1646,9 +1648,9 @@ BOT_RUN = !args.includes('--noRun');
 BOT_FIX = !args.includes('--bot034');
 BOT_READ = !args.includes('--noRead');
 READ_LAG = Number(argVal('readLag') ?? 3);
-DEPART_HP = Number(argVal('departHp') ?? 0);
+DEPART_HP = Number(argVal('departHp') ?? (PRESET === '038' ? 0 : 0.7));
 // `--preset 026/028`では帰還線をその版のまま（028と全フィールド一致させる）
-if ((PRESET !== null && PRESET !== '030' && PRESET !== '032' && PRESET !== '034' && PRESET !== 'v1') || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
+if ((PRESET !== null && PRESET !== '030' && PRESET !== '032' && PRESET !== '034' && PRESET !== 'v1' && PRESET !== '038') || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
 const propsArg = argVal('props');
 if (propsArg === 'none' || propsArg === 'all' || propsArg === 'auto') PROPS_DEFAULT = propsArg;
 else if (propsArg !== undefined) throw new Error(`unknown --props: ${propsArg}`);

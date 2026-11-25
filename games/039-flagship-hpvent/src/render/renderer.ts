@@ -520,10 +520,23 @@ export class Renderer {
       hudY + 60,
       W - 12,
     );
+    // 039 2回目（v1軽微#6）: 拠点で治っている間は盤面の上に大きく「全快まであとN秒」（拠点の外では出さない）
+    if (p.inBase && p.healFullSecs > 0 && (TUNE.baseRegen !== 4 || TUNE.healKnee > 0)) {
+      ctx.save();
+      ctx.font = 'bold 22px sans-serif';
+      const msg = `全快まであと${p.healFullSecs.toFixed(1)}秒${p.baseRegen < TUNE.baseRegen ? '（傷が深い）' : ''}`;
+      const mw = ctx.measureText(msg).width + 20;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect((W - mw) / 2, fieldTop + 8, mw, 32);
+      ctx.fillStyle = p.baseRegen < TUNE.baseRegen ? '#ff9f43' : '#7ee787';
+      ctx.textAlign = 'center';
+      ctx.fillText(msg, W / 2, fieldTop + 32);
+      ctx.restore();
+    }
     // 2行目: 身体と財布
     ctx.fillStyle = '#fff';
     this.fitText(
-      `HP ${Math.max(0, Math.round(p.hp))}/${p.maxHp}  ATK ${p.atk}  防具Lv${p.armorLv}  ¥${p.money}${p.money < 0 ? '(借金)' : ''}  ドリル${p.drillPower}${p.baseRegen !== 4 ? `  拠点で回復${(p.baseRegen * 10).toFixed(0)}/秒${p.baseRegen < TUNE.baseRegen ? '(傷が深い)' : ''}` : ''}  x${p.x}/${FIELD_WIDTH}${p.teleportUnlocked ? ' [T]' : ''}`,
+      `HP ${Math.max(0, Math.round(p.hp))}/${p.maxHp}  ATK ${p.atk}  防具Lv${p.armorLv}  ¥${p.money}${p.money < 0 ? '(借金)' : ''}  ドリル${p.drillPower}${TUNE.baseRegen !== 4 || TUNE.healKnee > 0 ? (p.inBase && p.healFullSecs > 0 ? `  回復${(p.baseRegen * 10).toFixed(0)}/秒${p.baseRegen < TUNE.baseRegen ? '(傷が深い)' : ''}` : TUNE.healKnee > 0 ? `  HP${Math.round(TUNE.healKnee * 100)}%未満は治りが遅い` : '') : ''}  x${p.x}/${FIELD_WIDTH}${p.teleportUnlocked ? ' [T]' : ''}`,
       6,
       hudY + 77,
       W - 12,
