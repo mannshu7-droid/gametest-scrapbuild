@@ -434,18 +434,29 @@ export const TUNE = {
   windupGuard: 1,
   /** 2回目: 空振りの隙の重兵へのプレイヤーの一撃 × stunPunish（1＝v0.1.0） */
   stunPunish: 1,
-  // ---- 039新規（038-finalの提案(1)「HPを残して帰る」に価値を持たせる）。既定は全部無効＝038 v0.3.0と同じ規則 ----
+  // ---- 039新規（038-finalの提案(1)「HPを残して帰る」に価値を持たせる）。v0.1.0は既定で無効、
+  // 2回目（v0.2.0）で D3＝(a)0.5＋(b)1.5＋(c)回復2・膝0.8・救助後HP5割 を既定に（v2レビュー）。`--preset 038`/`?preset=038` で038 v0.3.0と同じ規則 ----
   /** (a) 救助では抱えた積荷に加え、失った積荷×rescueBankMultを救助費として所持金から取る（払えなければ借金）。0で無効 */
-  rescueBankMult: 0,
+  rescueBankMult: 0.5,
   /** (b) HPが低いほど被ダメが増える: ×(1+hpDmgLow×(1−HP割合)^hpDmgExp)。0で無効 */
-  hpDmgLow: 0,
+  hpDmgLow: 1.5,
   hpDmgExp: 2,
   /** (c) 拠点での回復（1tickあたりHP）。038は4（100HPを2.5秒で全快＝ほぼ無料） */
-  baseRegen: 4,
+  baseRegen: 2,
   /** (c) 傷が深いほど治りが遅い: HP割合がhealKnee未満なら回復×max(healFloor, HP割合/healKnee)。0で無効 */
-  healKnee: 0,
+  healKnee: 0.8,
   healFloor: 0.25,
   /** (c) 救助で運ばれた後のHP割合（038は1＝全快。救助が「無料の全快」にならないように下げる） */
+  rescueHp: 0.5,
+};
+/** 039 2回目: `--preset 038`（038-tellvent v0.3.0と同じ回復と救助＝候補a/b/cを全部無効）。ボットは拠点で待たない（departHp 0） */
+export const PRESET_038: Partial<typeof TUNE> = {
+  rescueBankMult: 0,
+  hpDmgLow: 0,
+  hpDmgExp: 2,
+  baseRegen: 4,
+  healKnee: 0,
+  healFloor: 0.25,
   rescueHp: 1,
 };
 /** 036 2回目: `--preset v1`（036 v0.1.0と同じ規則）。固めは揺れのたまる速さ×0.1、上限40の崖 */
@@ -2097,6 +2108,20 @@ export class Game {
     const frac = this.player.hp / this.maxHp();
     const f = TUNE.healKnee > 0 && frac < TUNE.healKnee ? Math.max(TUNE.healFloor, frac / TUNE.healKnee) : 1;
     return TUNE.baseRegen * f;
+  }
+  /** 039 2回目（v1軽微#6）: 拠点で今のHPから全快までの秒（回復の曲線どおりに数える。HUD用で規則には効かない） */
+  healFullSecs(): number {
+    if (this.resource !== 'tremor') return 0;
+    const max = this.maxHp();
+    let hp = this.player.hp;
+    let t = 0;
+    while (hp < max && t < 10000) {
+      const frac = hp / max;
+      const f = TUNE.healKnee > 0 && frac < TUNE.healKnee ? Math.max(TUNE.healFloor, frac / TUNE.healKnee) : 1;
+      hp += TUNE.baseRegen * f;
+      t++;
+    }
+    return t / 10;
   }
   /** 今倒れたら取られる救助費（HUD・ボットにも見せる） */
   private rescueFeeNow(): number {
@@ -4070,6 +4095,8 @@ export class Game {
         stakeRescue: this.resource === 'tremor' && TUNE.stakeRescue > 0,
         baseRegen: this.baseRegenNow(),
         rescueHp: TUNE.rescueHp,
+        inBase: this.inBaseRadius(p.x),
+        healFullSecs: this.healFullSecs(),
         canTeleport: this.canTeleport(),
         atk: p.atk,
         atkCd: p.atkCd,

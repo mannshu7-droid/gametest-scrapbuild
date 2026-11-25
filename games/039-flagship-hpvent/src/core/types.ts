@@ -471,6 +471,9 @@ export interface GameState {
     /** 039: 拠点での今の回復（HP/tick、傷が深いほど遅い）と、救助の後に戻るHPの割合 */
     baseRegen: number;
     rescueHp: number;
+    /** 039 2回目: 拠点圏の中か、拠点で今のHPから全快までの秒 */
+    inBase: boolean;
+    healFullSecs: number;
     canTeleport: boolean;
     atk: number;
     atkCd: number;
