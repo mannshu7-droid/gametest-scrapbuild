@@ -71,6 +71,17 @@ const LEGEND: SP.LegendItem[] = [
       c.lineWidth = 1;
     },
   },
+  {
+    label: '空振り',
+    draw: (c, x, y, s) => {
+      c.fillStyle = 'rgba(120,255,140,0.9)';
+      for (const k of [0.2, 0.5, 0.8]) {
+        c.beginPath();
+        c.arc(x + s * k, y + s / 2, Math.max(2, s * 0.12), 0, Math.PI * 2);
+        c.fill();
+      }
+    },
+  },
   { label: '土', draw: (c, x, y, s) => SP.tileDirt(c, x, y, s, 1, 2) },
   { label: '石', draw: (c, x, y, s) => SP.tileRock(c, x, y, s, 3, 1) },
   { label: '鉱石', draw: (c, x, y, s) => SP.tileOre(c, x, y, s, 2, 2, '#ffd84a') },
@@ -385,6 +396,21 @@ export class Renderer {
           ctx.lineWidth = 2;
           ctx.strokeRect(sx - TILE_PX * r, sy - TILE_PX * r, TILE_PX * (1 + 2 * r), TILE_PX * (1 + 2 * r));
           ctx.lineWidth = 1;
+          // 3回目（v2軽微）: 枠のすぐ外の床に「ここなら空振り」の緑の点（プレイヤーに近い側の辺だけ＝逃げ先が一目で分かる）
+          const dxp = Math.sign(s.player.x - e.x);
+          const dyp = Math.sign(s.player.y - e.y);
+          ctx.fillStyle = 'rgba(120,255,140,0.9)';
+          for (let k = -r - 1; k <= r + 1; k++) {
+            const pts: [number, number][] = [];
+            if (dxp !== 0) pts.push([dxp * (r + 1), k]);
+            if (dyp !== 0) pts.push([k, dyp * (r + 1)]);
+            if (dxp === 0 && dyp === 0) pts.push([k, -r - 1], [k, r + 1]);
+            for (const [ox, oy] of pts) {
+              ctx.beginPath();
+              ctx.arc(sx + TILE_PX * (ox + 0.5), sy + TILE_PX * (oy + 0.5), Math.max(2, TILE_PX * 0.12), 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
         }
       } else if ((e.stun ?? 0) > 0) {
         ctx.strokeStyle = '#ffe066';
@@ -715,7 +741,7 @@ export class Renderer {
     if (p.bruteWindup > 0) {
       const fast = Math.min(1, Math.max(0, (16 - p.bruteWindup) / 11));
       ctx.fillStyle = `rgb(255,${Math.round(200 - 150 * fast)},${Math.round(80 + 150 * fast)})`;
-      this.fitText(`重兵の振り ${(p.bruteWindup / 10).toFixed(1)}秒`, x + w - 296, y + 11, 106, 14);
+      this.fitText(`重兵の振り ${(p.bruteWindup / 10).toFixed(1)}秒${p.hasteKills > 0 ? ` 撃破${Math.min(p.tripKills, p.hasteKills)}/${p.hasteKills}` : ''}`, x + w - 296, y + 11, 106, 14);
     }
     // 036: 固めの状態（右端）。固めの上で効いている間は水色、上限を越えたら灰色、落盤で崩れたら3秒だけ赤
     const lost = p.packLost && s.tick - p.packLost.tick < 30 ? p.packLost : null;

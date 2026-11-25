@@ -564,6 +564,9 @@ export interface GameState {
     /** 038: 今の揺れでの重兵の予兆の長さ（tick、0なら予兆なし）と、揺れ0/30/60での長さ（ゲージの目盛り） */
     bruteWindup: number;
     windupMarks: { tremor: number; ticks: number }[];
+    /** 038 3回目: この遠征で倒した数と、振りが最速になる撃破数（0＝撃破では速まらない） */
+    tripKills: number;
+    hasteKills: number;
     packRate: number;
     /** 036 2回目: 0＝揺れ×packRate（v1）、1＝落盤×packRate */
     packMode: number;
