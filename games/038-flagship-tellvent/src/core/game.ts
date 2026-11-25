@@ -417,6 +417,12 @@ export const TUNE = {
   heatHaste: 0.7,
   hasteFull: 45,
   /**
+   * 038 3回目（v2重大#2の候補）: 振りの速さを「この遠征でプレイヤーが倒した数」でも速める（037 の熱＝撃破で上がる、の翻訳）。
+   * 0＝無効（v0.2.0）。>0 なら hasteKills 体で最速。揺れの割合 min(1, 揺れ/hasteFull) と撃破の割合 min(1, 撃破/hasteKills) の大きい方を使う。
+   * 拠点圏に戻る・救助されると撃破数は0に戻る（攻めるほど次の振りが読みにくい＝読まずに殴る型にだけ時計がかかる）
+   */
+  hasteKills: 0,
+  /**
    * 038 2回目（v1重大#3の候補）: 振りかぶりの間に寄る（037 v3 の windupCreep の翻訳）。0＝足を止める（v0.1.0）。
    * >0 なら振りかぶりの間も、手の外にいるプレイヤーへ moveCdMax/windupCreep tick ごとに1歩寄る
    */
@@ -1128,6 +1134,8 @@ export class Game {
   private lastFieldTremor = 0;
   /** 034: いまの遠征を始めたtick（拠点圏から出た時）。-1なら拠点の中 */
   private tripStartTick = -1;
+  /** 038 3回目: この遠征でプレイヤーが倒した数（hasteKills用。拠点圏に戻る・救助で0） */
+  tripKills = 0;
   private keptBefore = 0;
   tick = 0;
   /**
@@ -1899,10 +1907,11 @@ export class Game {
     return Math.round(this.glowAmount(p.tremor, this.glowSpare()));
   }
   /** 038: 今の揺れでの重兵の予兆の長さ（tick）。0なら予兆なし（windupScale=0） */
-  windupFor(tremor = this.player.tremor): number {
+  windupFor(tremor = this.player.tremor, kills = this.tripKills): number {
     const base = TUNE.windupBrute * TUNE.windupScale;
     if (base <= 0) return 0;
-    const f = TUNE.hasteFull > 0 ? Math.min(1, Math.max(0, tremor) / TUNE.hasteFull) : 0;
+    let f = TUNE.hasteFull > 0 ? Math.min(1, Math.max(0, tremor) / TUNE.hasteFull) : 0;
+    if (TUNE.hasteKills > 0) f = Math.max(f, Math.min(1, kills / TUNE.hasteKills));
     return Math.max(1, Math.round(base * (1 - TUNE.heatHaste * f)));
   }
   private dmgMult(): number {
@@ -2039,6 +2048,7 @@ export class Game {
     p.glowKeep = 0;
     p.gritThisTrip = false;
     this.tripStartTick = -1;
+    this.tripKills = 0;
     p.hp = this.maxHp();
     // v2（重大#1・案B）: 夜のフィールドで倒れたら朝まで手当て（拠点の防衛に参加できない）
     const untilDawn = this.phase === 'night' ? this.phaseTicksLeft : this.phaseTicksLeft + NIGHT_LENGTH;
@@ -3434,7 +3444,10 @@ export class Game {
     // 2回目: 振りかぶりの構え（windupGuard）と空振りの隙（stunPunish）。既定1で v0.1.0 と同じ
     const mult = (target.windup ?? 0) > 0 ? TUNE.windupGuard : (target.stun ?? 0) > 0 ? TUNE.stunPunish : 1;
     target.hp -= mult === 1 ? this.player.atk : this.player.atk * mult;
-    if (target.hp <= 0) this.killEnemy(target, true);
+    if (target.hp <= 0) {
+      this.killEnemy(target, true);
+      if (!this.inBaseRadius(this.player.x)) this.tripKills++;
+    }
   }
 
   /** ダッシュ: 既に掘った道(FLOOR)しか通れない。壁に当たったらそこで止まる */
@@ -3874,6 +3887,7 @@ export class Game {
         this.metrics.propHealed += this.player.hp - before;
       }
     }
+    if (inBase) this.tripKills = 0;
     if (inBase && !this.wasInBase) {
       this.lastTripOverLine = this.tripOverLine;
       this.tripOverLine = 0;
@@ -4101,7 +4115,9 @@ export class Game {
         packActive: this.isPacked(p.x, p.y) && p.tremor < this.packCap() + TUNE.packSlope,
         packCap: this.packCap() === Infinity ? 999 : this.packCap(),
         bruteWindup: this.windupFor(),
-        windupMarks: TUNE.windupScale > 0 ? [0, TUNE.cautionAt, TUNE.hasteFull].map((t) => ({ tremor: t, ticks: this.windupFor(t) })) : [],
+        tripKills: this.tripKills,
+        hasteKills: TUNE.hasteKills,
+        windupMarks: TUNE.windupScale > 0 ? [0, TUNE.cautionAt, TUNE.hasteFull].map((t) => ({ tremor: t, ticks: this.windupFor(t, 0) })) : [],
         packRate: TUNE.packMode === 1 ? TUNE.packCave : TUNE.packRate,
         packMode: TUNE.packMode,
         packSteps: TUNE.packSteps,
