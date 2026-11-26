@@ -33,7 +33,7 @@ export class Renderer {
     } else {
       tileDirt(ctx, x, y, CELL, tx, ty);
       if (s.ground === 'marsh') {
-        ctx.fillStyle = 'rgba(40,110,120,0.42)';
+        ctx.fillStyle = 'rgba(70,165,175,0.36)';
         ctx.fillRect(x, y, CELL, CELL);
         if ((tx * 7 + ty * 3) % 5 === 0) {
           ctx.strokeStyle = 'rgba(170,230,235,0.55)';
@@ -67,12 +67,14 @@ export class Renderer {
     }
     drawTurret(ctx, x, y - 4, CELL, t.aim, s.night);
     // 高さの縦ゲージ（右側）
-    const gx = x + CELL - 2;
-    const seg = Math.min(5, (CELL * 1.6) / Math.max(12, t.h));
+    const gx = x + CELL - 4;
+    const seg = Math.min(6, (CELL * 1.7) / Math.max(10, t.h));
+    ctx.fillStyle = '#000';
+    ctx.fillRect(gx - 1, y + CELL - 3 - t.h * seg, 12, t.h * seg + 2);
     for (let i = 0; i < t.h; i++) {
       const lvl = i + 1;
       ctx.fillStyle = lvl <= t.beamTop ? '#8a8f98' : lvl - t.beamTop <= s.slender ? '#3fa2ff' : '#ff4040';
-      ctx.fillRect(gx, y + CELL - 2 - (i + 1) * seg, 6, seg - 1);
+      ctx.fillRect(gx, y + CELL - 2 - (i + 1) * seg, 10, seg - 1);
     }
     ctx.font = 'bold 12px sans-serif';
     ctx.fillStyle = t.over > 0 ? '#ff6b6b' : '#ffffff';
@@ -142,6 +144,26 @@ export class Renderer {
       ctx.lineWidth = 1;
     }
     for (const t of s.towers) this.tower(s, t);
+    // 射手の矢（撃ってから0.6秒、拠点へは赤・梁へは橙の線）
+    for (const e of s.enemies) {
+      if (e.kind !== 'archer' || e.shotAt < 0 || s.tick - e.shotAt > 6) continue;
+      let tx = c(s.baseX);
+      let ty = c(s.baseY);
+      if (e.shotEdge >= 0) {
+        const b = s.beams[e.shotEdge];
+        tx = (c(s.towers[b.a].x) + c(s.towers[b.b].x)) / 2;
+        ty = (c(s.towers[b.a].y) + c(s.towers[b.b].y)) / 2;
+      }
+      ctx.strokeStyle = e.shotEdge >= 0 ? 'rgba(255,170,60,0.9)' : 'rgba(255,60,60,0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(e.x * CELL + CELL / 2, e.y * CELL + CELL / 2);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
+    }
     // 敵
     for (const e of s.enemies) {
       const ex = e.x * CELL + CELL / 2;
@@ -165,7 +187,7 @@ export class Renderer {
     }
     // 夜の暗さ
     if (s.night) {
-      ctx.fillStyle = 'rgba(10,20,60,0.25)';
+      ctx.fillStyle = 'rgba(10,20,60,0.16)';
       ctx.fillRect(0, 0, BOARD, BOARD);
     }
     this.hud(s);
@@ -228,6 +250,20 @@ export class Renderer {
           c.lineWidth = 1;
         },
       },
+      {
+        label: '矢（赤=拠点へ 橙=梁へ）',
+        draw: (c, x, y, s) => {
+          c.strokeStyle = '#ff3c3c';
+          c.lineWidth = 2;
+          c.setLineDash([5, 3]);
+          c.beginPath();
+          c.moveTo(x, y + s);
+          c.lineTo(x + s, y);
+          c.stroke();
+          c.setLineDash([]);
+          c.lineWidth = 1;
+        },
+      },
       { label: '拠点', draw: (c, x, y, s) => drawHouse(c, x + s / 2, y + s, s, '#c0392b') },
       { label: '岩', draw: (c, x, y, s) => tileRock(c, x, y, s, 1, 1, '#6f6f73') },
       { label: '土', draw: (c, x, y, s) => tileDirt(c, x, y, s, 2, 1) },
@@ -235,7 +271,7 @@ export class Renderer {
         label: '湿地',
         draw: (c, x, y, s) => {
           tileDirt(c, x, y, s, 3, 1);
-          c.fillStyle = 'rgba(40,110,120,0.5)';
+          c.fillStyle = 'rgba(70,165,175,0.42)';
           c.fillRect(x, y, s, s);
         },
       },

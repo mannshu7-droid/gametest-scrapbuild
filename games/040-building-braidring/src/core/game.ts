@@ -5,7 +5,7 @@
  * - 塔は高いほど射程が長い。ただし地盤で決まる「自由長の上限」を超えて積むと、夜の突風で上の段が折れうる
  * - 梁は2塔の低い方の高さに架かり、両塔の自由長をその高さから数え直す（さらに上へ積める）。
  *   梁は拠点を囲む輪の1辺でもあり、横切ろうとする敵を止める（敵は梁を叩いて壊す）
- * - 敵の来る向き（北だけ／北と南／全周）と地盤（岩／土／湿地）が条件。スコアは最後の所持金（稼ぎ−建築費−盗まれた額）
+ * - 敵の来る向き（北だけ／北と南／全周）と地盤（岩／土／湿地）が条件。スコアは守りの稼ぎ（撃破報酬−荒らされた額）
  */
 import { mulberry32, type Rng } from './rng';
 import type { Action, AttackDir, BeamState, EnemyState, GameState, Ground, Metrics, TowerState } from './types';
@@ -17,7 +17,7 @@ export const TUNE = {
   startGold: 50,
   incomePerTick: 0.1,
   bounty: 5,
-  plunder: 10,
+  plunder: 15,
   enemyBase: 10,
   enemyPerNight: 4,
   enemyHp0: 3,
@@ -26,7 +26,11 @@ export const TUNE = {
   spawnWindow: 300,
   spawnR: 9.5,
   /** 射手の割合（出現ごとに抽選） */
-  archerShare: 0.3,
+  archerShare: 0.15,
+  /** 夜ごとの射手の割合の振れ（奇数夜は −、偶数夜は ＋。0=毎夜同じ） */
+  archerSwing: 0,
+  /** 振れ方: 0=奇数夜は少なく偶数夜は多く、1=夜ごとにシードで抽選、2=ランごとに1回抽選（±archerSwing の一様。2は最初から見える） */
+  archerMode: 0,
   /** 射手が止まる拠点からの距離 */
   siegeR: 7,
   archerShotTicks: 20,
@@ -52,7 +56,9 @@ export const TUNE = {
   slenderRock: 5,
   slenderSoil: 4,
   slenderMarsh: 3,
-  gustK: 0.35,
+  gustK: 1,
+  /** 折れた段が隣の梁に落ちる: 失った1段あたり、両隣の梁の最大耐久のこの割合を削る（0=無し） */
+  fallBeamDmg: 0,
   gustMin: 0.6,
   gustMax: 1.4,
   maxH: 12,
@@ -121,6 +127,8 @@ export class Game {
   private spawnRng: Rng;
   private gustRng: Rng;
   private fallRng: Rng;
+  private mixRng: Rng;
+  private runMix = 0;
   private spawnQueue: Array<{ at: number; x: number; y: number; archer: boolean }> = [];
   private nextId = 1;
   private baseCd = 0;
@@ -130,6 +138,8 @@ export class Game {
     this.spawnRng = mulberry32(seed * 2654435761);
     this.gustRng = mulberry32(seed * 40503 + 17);
     this.fallRng = mulberry32(seed * 97 + 5);
+    this.mixRng = mulberry32(seed * 7919 + 3);
+    this.runMix = this.mixRng() * 2 - 1;
     // 条件を指定しなければシードで決める（人が遊ぶ時に毎回違う条件になる）
     const dir = opts.dir ?? DIRS[seed % 3];
     const ground = opts.ground ?? GROUNDS[Math.floor(seed / 3) % 3];
@@ -166,6 +176,7 @@ export class Game {
       phaseLeft: TUNE.dayTicks,
       dir,
       ground,
+      archerShare: TUNE.archerMode === 2 ? Math.max(0, Math.min(1, TUNE.archerShare + TUNE.archerSwing * this.runMix)) : TUNE.archerShare,
       slender: slenderOf(ground),
       gold: TUNE.startGold,
       player: { x: BASE_X, y: BASE_Y + 1, busy: 0, busyKind: '', busyTarget: -1, moveCd: 0, face: 1 },
@@ -242,6 +253,14 @@ export class Game {
     this.s.metrics.lostLevels += lost;
     this.log(`${why}で塔${t.id + 1}が折れた（−${lost}段）`);
     this.refreshTowers();
+    if (TUNE.fallBeamDmg > 0) {
+      for (const e of [t.id, (t.id + 7) % 8]) {
+        const b = this.s.beams[e];
+        if (b.h <= 0) continue;
+        b.hp -= Math.ceil(b.maxHp * TUNE.fallBeamDmg * lost);
+        if (b.hp <= 0) this.breakBeam(b);
+      }
+    }
   }
 
   private pay(cost: number): void {
@@ -254,12 +273,15 @@ export class Game {
     const n = s.day;
     const count = TUNE.enemyBase + TUNE.enemyPerNight * (n - 1);
     const q: Array<{ at: number; x: number; y: number; archer: boolean }> = [];
+    const u = TUNE.archerMode === 2 ? this.runMix : TUNE.archerMode === 1 ? this.mixRng() * 2 - 1 : n % 2 === 1 ? -1 : 1;
+    const share = Math.max(0, Math.min(1, TUNE.archerShare + TUNE.archerSwing * u));
+    s.archerShare = share;
     for (let i = 0; i < count; i++) {
       const at = Math.floor((TUNE.spawnWindow * i) / count + this.spawnRng() * (TUNE.spawnWindow / count));
       let ang: number;
       const off = (this.spawnRng() * 2 - 1) * TUNE.spawnSpread;
       const r = this.spawnRng();
-      const archer = this.spawnRng() < TUNE.archerShare;
+      const archer = this.spawnRng() < share;
       if (s.dir === 'one') ang = -Math.PI / 2 + off;
       else if (s.dir === 'two') ang = (i % 2 === 0 ? -Math.PI / 2 : Math.PI / 2) + off;
       else ang = r * Math.PI * 2;
@@ -382,6 +404,8 @@ export class Game {
         best = b;
       }
     }
+    e.shotAt = s.tick;
+    e.shotEdge = best ? best.edge : -1;
     if (best) {
       best.hp -= 1;
       if (best.hp <= 0) this.breakBeam(best);
@@ -458,7 +482,7 @@ export class Game {
       while (this.spawnQueue.length && this.spawnQueue[0].at <= nt) {
         const q = this.spawnQueue.shift()!;
         const hp = TUNE.enemyHp0 + TUNE.enemyHpPerNight * (s.day - 1);
-        s.enemies.push({ id: this.nextId++, kind: q.archer ? 'archer' : 'walker', siege: false, x: q.x, y: q.y, hp, maxHp: hp, holdEdge: -1, hitCd: q.archer ? TUNE.archerShotTicks : TUNE.beamHitTicks });
+        s.enemies.push({ id: this.nextId++, kind: q.archer ? 'archer' : 'walker', siege: false, x: q.x, y: q.y, hp, maxHp: hp, holdEdge: -1, hitCd: q.archer ? TUNE.archerShotTicks : TUNE.beamHitTicks, shotAt: -1, shotEdge: -1 });
         s.metrics.spawned++;
         s.toSpawn--;
       }
