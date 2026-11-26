@@ -55,6 +55,9 @@ export interface EnemyState {
   /** 梁に止められている時はその辺の番号、歩いている時は -1 */
   holdEdge: number;
   hitCd: number;
+  /** 射手が最後に撃ったtick（-1=まだ）と的（-1=拠点、0〜7=梁の辺）。矢の線の描画用 */
+  shotAt: number;
+  shotEdge: number;
 }
 
 export interface PlayerState {
@@ -105,6 +108,8 @@ export interface GameState {
   ground: Ground;
   /** 地盤による自由長の上限 */
   slender: number;
+  /** 今夜の射手の割合 */
+  archerShare: number;
   gold: number;
   player: PlayerState;
   towers: TowerState[];

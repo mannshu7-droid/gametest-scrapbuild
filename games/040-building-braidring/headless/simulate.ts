@@ -8,6 +8,7 @@
  *   npm run simulate -- --strat weave,spireAll        … 戦略を絞る
  *   npm run simulate -- --tune beamHpBase=30          … TUNE を上書き
  *   npm run simulate -- --runs                        … 各ランを JSON 行で出す
+ *   npm run simulate -- --dupes                       … 計画が同じになる戦略も残す（既定は条件ごとに重複を除く）
  *   npm run simulate -- --json                        … 要約を JSON で出す
  *
  * 判定（仕様書「AI評価の観点」）: セルごとに総当たり（同じシードで scoreが上なら勝ち、過半数のシードで勝てば「勝ち越し」）。
@@ -68,7 +69,7 @@ export const PERSONAS: Persona[] = [
     plan: (d, L) => {
       const F = FACING[d].plots;
       const E = FACING[d].edges;
-      return [...rr(F, 0, L), ...beams(E, L), ...rr(F, L, 2 * L), ...beams(E, 2 * L), ...rr(F, 2 * L, 12)];
+      return [...rr(F, 0, L), ...beams(E, L), ...rr(F, L, 2 * L), ...beams(E, 2 * L), ...(F.length < 8 ? rr(ALL, 0, L) : []), ...rr(F, 2 * L, 12)];
     },
   },
   /** 全部を梁で編む: 全台座を上限→全周に梁→上限の2倍→梁→最高まで */
@@ -92,6 +93,17 @@ export const PERSONAS: Persona[] = [
   /** 対照群: 何も建てない */
   { name: 'bare', repair: 0.5, plan: () => [] },
 ];
+
+/** 条件で計画が同じになる戦略は先の1つだけ残す（全周では spire＝spireAll、weave＝weaveAll） */
+export function distinct(personas: Persona[], dir: AttackDir, L: number): Persona[] {
+  const seen = new Set<string>();
+  return personas.filter((p) => {
+    const k = JSON.stringify(p.plan(dir, L)) + '|' + p.repair;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
 
 export class Bot {
   private tasks: Task[] = [];
@@ -264,19 +276,22 @@ function main(): void {
   const dirs = (args.dir ? args.dir.split(',') : DIRS) as AttackDir[];
   const grounds = (args.ground ? args.ground.split(',') : GROUNDS) as Ground[];
   const personas = args.strat ? PERSONAS.filter((p) => args.strat.split(',').includes(p.name)) : PERSONAS;
-  const strats = personas.map((p) => p.name);
   const results: RunResult[] = [];
   const t0 = Date.now();
+  const cellStrats: Record<string, string[]> = {};
   for (const d of dirs)
-    for (const g of grounds)
-      for (const p of personas)
+    for (const g of grounds) {
+      const ps = args.dupes ? personas : distinct(personas, d, slenderOf(g));
+      cellStrats[d + '/' + g] = ps.map((p) => p.name);
+      for (const p of ps)
         for (let sd = from; sd < from + seeds; sd++) {
           const r = runOne(p, sd, d, g);
           results.push(r);
           if (args.runs) console.log(JSON.stringify(r));
         }
+    }
   const cells = [];
-  for (const d of dirs) for (const g of grounds) cells.push(summarize(results, strats, d, g));
+  for (const d of dirs) for (const g of grounds) cells.push(summarize(results, cellStrats[d + '/' + g], d, g));
   if (args.json) {
     console.log(JSON.stringify({ seeds: [from, from + seeds - 1], cells }, null, 1));
     return;
@@ -290,7 +305,7 @@ function main(): void {
     console.log('  順位 戦略      score   撃破  荒らし  建築費  折れ  梁壊  勝ち越し');
     c.rows.forEach((r, i) =>
       console.log(
-        `  ${String(i + 1).padStart(2)}  ${r.strat.padEnd(9)} ${r.mean.toFixed(0).padStart(6)} ${r.kills.toFixed(1).padStart(6)} ${r.leaks.toFixed(1).padStart(6)} ${r.spent.toFixed(0).padStart(7)} ${r.collapses.toFixed(2).padStart(5)} ${r.beamBreaks.toFixed(1).padStart(5)}   ${r.wins}/${strats.length - 1}`,
+        `  ${String(i + 1).padStart(2)}  ${r.strat.padEnd(9)} ${r.mean.toFixed(0).padStart(6)} ${r.kills.toFixed(1).padStart(6)} ${r.leaks.toFixed(1).padStart(6)} ${r.spent.toFixed(0).padStart(7)} ${r.collapses.toFixed(2).padStart(5)} ${r.beamBreaks.toFixed(1).padStart(5)}   ${r.wins}/${c.rows.length - 1}`,
       ),
     );
   }
