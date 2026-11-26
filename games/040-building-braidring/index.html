@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Braidring (040)</title>
+    <style>
+      body {
+        margin: 0;
+        background: #111;
+        color: #ddd;
+        font-family: monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 12px;
+      }
+      canvas {
+        border: 1px solid #444;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div>
+      矢印/WASD: 移動 | E: 隣の台座の塔を1段積む | B/V: 梁を時計回り/反時計回りの隣へ架ける（高さ=低い方の塔。梁は歩兵を止め、両塔の自由長を数え直す） | 何も押さない: 待つ | R: 再開（終了後） | ?seed=N で条件が変わる
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
