@@ -448,6 +448,13 @@ export const TUNE = {
   healFloor: 0.25,
   /** (c) 救助で運ばれた後のHP割合（038は1＝全快。救助が「無料の全快」にならないように下げる） */
   rescueHp: 0.5,
+  /**
+   * 039 3回目（v2重大#1の候補）: 傷が深いと積荷をこぼす。拠点の外でHP割合が woundBelow 未満の時に受けた被ダメージ1回ごとに、
+   * 積荷の min(1, woundSpill × 被ダメージ/最大HP) を落とす（落盤のこぼれと同じく割れ目の取り分も同じ割合で減る）。
+   * 救助以外で「低HPで粘る」に代償を付ける（点は足さない）。0で無効（v0.2.0）
+   */
+  woundSpill: 0,
+  woundBelow: 0.3,
 };
 /** 039 2回目: `--preset 038`（038-tellvent v0.3.0と同じ回復と救助＝候補a/b/cを全部無効）。ボットは拠点で待たない（departHp 0） */
 export const PRESET_038: Partial<typeof TUNE> = {
@@ -458,6 +465,8 @@ export const PRESET_038: Partial<typeof TUNE> = {
   healKnee: 0,
   healFloor: 0.25,
   rescueHp: 1,
+  woundSpill: 0,
+  woundBelow: 0.3,
 };
 /** 036 2回目: `--preset v1`（036 v0.1.0と同じ規則）。固めは揺れのたまる速さ×0.1、上限40の崖 */
 export const PRESET_V1: Partial<typeof TUNE> = {
@@ -1303,6 +1312,8 @@ export class Game {
     caveIns: 0,
     caveInDamage: 0,
     caveInLostValue: 0,
+    woundLostValue: 0,
+    woundSpills: 0,
     tremorBonusValue: 0,
     rescues: 0,
     rescueNightField: 0,
@@ -1977,6 +1988,19 @@ export class Game {
     }
     p.hp -= dmg;
     if (!this.inBaseRadius(p.x)) this.metrics.fieldDamageTaken += dmg;
+    // 039 3回目: 傷が深いと積荷をこぼす（HPが0になった一撃は救助が積荷を全部取るので数えない）
+    if (TUNE.woundSpill > 0 && dmg > 0 && p.hp > 0 && p.cargoUnits > 0 && p.cargoValue > 0 && !this.inBaseRadius(p.x) && p.hp < this.maxHp() * TUNE.woundBelow) {
+      const f = Math.min(1, (TUNE.woundSpill * dmg) / this.maxHp());
+      const lost = Math.round(p.cargoValue * f);
+      if (lost > 0) {
+        this.riftCargo *= 1 - lost / p.cargoValue;
+        p.cargoUnits = Math.max(0, Math.round(p.cargoUnits * (1 - f)));
+        p.cargoValue -= lost;
+        if (p.cargoUnits === 0) p.cargoValue = 0;
+        this.metrics.woundLostValue += lost;
+        this.metrics.woundSpills++;
+      }
+    }
     if (TUNE.gritTicks > 0 && p.gritLeft > 0 && p.gritTicks <= 0 && p.hp > 0 && p.hp < this.maxHp() * TUNE.gritFrac && !this.inBaseRadius(p.x)) {
       p.gritLeft--;
       p.gritTicks = TUNE.gritTicks;

@@ -82,6 +82,8 @@ const PROP_RESERVE = 0;
 const HEAL_TO = 0.8;
 /** 039: 拠点を出る前に待つHP割合（--departHp、0なら038と同じく待たない）。2回目で既定0.7（`--preset 038` では0） */
 let DEPART_HP = 0.7;
+/** 039 3回目（v2重大#2の候補）: >0なら出発の線を max(DEPART_HP, 帰るHP＋DEPART_REL) ではなく 帰るHP＋DEPART_REL（上限1）にする（--departRel） */
+let DEPART_REL = 0;
 /** 032: `--props auto|none|all`（auto＝bare以外は建てる。規則に支柱が無ければ建てない） */
 let PROPS_DEFAULT: 'auto' | 'none' | 'all' = 'auto';
 /** 032: 戦略名（`weave+P`・`bare-P`）を、元の戦略と支柱を建てるかに分ける */
@@ -966,7 +968,8 @@ export class Bot {
       }
       if (s.phase === 'night') return { type: 'wait' };
       // 039: 拠点で HP が DEPART_HP（帰るHPの線より上）まで戻るのを待ってから出る。0なら038と同じ（待たずに出る）
-      if (DEPART_HP > 0 && p.hp < p.maxHp * Math.max(DEPART_HP, HP_RETREAT_THRESHOLD[this.strategy])) {
+      const departAt = DEPART_REL > 0 ? Math.min(1, HP_RETREAT_THRESHOLD[this.strategy] + DEPART_REL) : Math.max(DEPART_HP, HP_RETREAT_THRESHOLD[this.strategy]);
+      if (DEPART_HP > 0 && p.hp < p.maxHp * departAt) {
         this.departWaits++;
         return { type: 'wait' };
       }
@@ -1294,6 +1297,8 @@ interface RunResult {
   caveIns: number;
   caveInDamage: number;
   caveInLostValue: number;
+  woundLostValue: number;
+  woundSpills: number;
   tremorBonusValue: number;
   rescues: number;
   rescueNightField: number;
@@ -1527,6 +1532,8 @@ function runOne(seed: number, strategy: string, maxTicks: number): RunResult {
     caveIns: s.metrics.caveIns,
     caveInDamage: s.metrics.caveInDamage,
     caveInLostValue: s.metrics.caveInLostValue,
+    woundLostValue: s.metrics.woundLostValue,
+    woundSpills: s.metrics.woundSpills,
     tremorBonusValue: s.metrics.tremorBonusValue,
     rescues: s.metrics.rescues,
     rescueNightField: s.metrics.rescueNightField,
@@ -1649,6 +1656,7 @@ BOT_FIX = !args.includes('--bot034');
 BOT_READ = !args.includes('--noRead');
 READ_LAG = Number(argVal('readLag') ?? 3);
 DEPART_HP = Number(argVal('departHp') ?? (PRESET === '038' ? 0 : 0.7));
+DEPART_REL = Number(argVal('departRel') ?? 0);
 // `--preset 026/028`では帰還線をその版のまま（028と全フィールド一致させる）
 if ((PRESET !== null && PRESET !== '030' && PRESET !== '032' && PRESET !== '034' && PRESET !== 'v1' && PRESET !== '038') || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
 const propsArg = argVal('props');

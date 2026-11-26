@@ -533,10 +533,11 @@ export class Renderer {
       ctx.fillText(msg, W / 2, fieldTop + 32);
       ctx.restore();
     }
-    // 2行目: 身体と財布
-    ctx.fillStyle = '#fff';
+    // 2行目: 身体と財布。039 3回目（v2軽微#5）: 回復の速さを色で出す（緑＝浅い傷で速く治る、橙＝傷が深く遅い、赤＝積荷をこぼす深さ）
+    const hpFrac = p.hp / p.maxHp;
+    ctx.fillStyle = TUNE.woundSpill > 0 && hpFrac < TUNE.woundBelow && !p.inBase ? '#ff6b6b' : TUNE.healKnee > 0 && hpFrac < TUNE.healKnee ? '#ff9f43' : TUNE.healKnee > 0 ? '#7ee787' : '#fff';
     this.fitText(
-      `HP ${Math.max(0, Math.round(p.hp))}/${p.maxHp}  ATK ${p.atk}  防具Lv${p.armorLv}  ¥${p.money}${p.money < 0 ? '(借金)' : ''}  ドリル${p.drillPower}${TUNE.baseRegen !== 4 || TUNE.healKnee > 0 ? (p.inBase && p.healFullSecs > 0 ? `  回復${(p.baseRegen * 10).toFixed(0)}/秒${p.baseRegen < TUNE.baseRegen ? '(傷が深い)' : ''}` : TUNE.healKnee > 0 ? `  HP${Math.round(TUNE.healKnee * 100)}%未満は治りが遅い` : '') : ''}  x${p.x}/${FIELD_WIDTH}${p.teleportUnlocked ? ' [T]' : ''}`,
+      `HP ${Math.max(0, Math.round(p.hp))}/${p.maxHp}  ATK ${p.atk}  防具Lv${p.armorLv}  ¥${p.money}${p.money < 0 ? '(借金)' : ''}  ドリル${p.drillPower}${TUNE.baseRegen !== 4 || TUNE.healKnee > 0 ? (p.inBase && p.healFullSecs > 0 ? `  回復${(p.baseRegen * 10).toFixed(0)}/秒${p.baseRegen < TUNE.baseRegen ? '(傷が深い)' : ''}` : TUNE.healKnee > 0 ? `  HP${Math.round(TUNE.healKnee * 100)}%未満は治りが遅い${TUNE.woundSpill > 0 ? `・${Math.round(TUNE.woundBelow * 100)}%未満は被弾で積荷をこぼす` : ''}` : '') : ''}  x${p.x}/${FIELD_WIDTH}${p.teleportUnlocked ? ' [T]' : ''}`,
       6,
       hudY + 77,
       W - 12,

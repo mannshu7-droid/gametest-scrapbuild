@@ -297,6 +297,9 @@ export interface Metrics {
   caveIns: number;
   caveInDamage: number;
   caveInLostValue: number;
+  /** 039 3回目: 傷が深い時の被ダメージでこぼした積荷の額・回数 */
+  woundLostValue: number;
+  woundSpills: number;
   /** 揺れの売値ボーナスで上乗せされた稼ぎ（掘った時点の積荷価値ベース） */
   tremorBonusValue: number;
   /** HP0からの救助の回数と、その内訳（夜のフィールド/昼のフィールド/拠点圏内）、救助費と失った積荷 */
