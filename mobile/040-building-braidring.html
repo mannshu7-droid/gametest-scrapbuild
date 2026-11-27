@@ -1,0 +1,1052 @@
+<title>Braidring (040)</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+[hidden] { display: none !important; }
+/* 1画面のアプリ: 上に盤面（横幅いっぱい）、下に観戦／操作の切り替えパネル。ゲーム画面に合わせて暗い1色の世界にする */
+:root {
+  --ground: #0e1116; --panel: #171c24; --line: #2a3340; --ink: #e3e7ee; --muted: #8b96a8;
+  --accent: #5fc4d6; --warn: #e0a84a;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--ground); color: var(--ink); font-family: var(--sans); -webkit-tap-highlight-color: transparent;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 8px;
+  box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; overflow-x: hidden; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bar h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+.ver { color: var(--muted); font: 12px var(--mono); }
+#stage { width: 100%; max-width: 960px; align-self: center; }
+#game { display: block; width: 100%; height: auto; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 4px; background: #000; }
+.status { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+.status b { color: var(--ink); font-weight: 600; }
+.tabs { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; width: fit-content; }
+.tabs button { border: 0; border-radius: 0; background: transparent; }
+.tabs button[aria-pressed="true"] { background: var(--accent); color: #062026; }
+button, select, input { font: 14px var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-height: 40px; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+input[type=number] { width: 6.5em; font-family: var(--mono); }
+.panel { display: flex; flex-direction: column; gap: 10px; }
+.pad { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+.dpad { display: grid; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(3, 56px); gap: 4px; }
+.dpad button { padding: 0; font-size: 20px; min-height: 0; }
+.dpad .c { visibility: hidden; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; align-content: center; }
+.acts button { min-width: 64px; }
+.shop { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop button { padding: 6px 10px; min-height: 36px; font-size: 13px; }
+.down { background: var(--accent) !important; color: #062026 !important; }
+.help { color: var(--muted); font-size: 12px; line-height: 1.6; max-width: 65ch; }
+.note { color: var(--warn); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<div class="bar"><h1>Braidring (040)</h1><span class="ver">v0.3.0</span></div>
+<div id="stage"><canvas id="game"></canvas></div>
+<div class="status" id="status">読み込み中…</div>
+<div class="bar">
+  <div class="tabs" role="group" aria-label="モード">
+    <button id="tabWatch" aria-pressed="true">ボット観戦</button>
+    <button id="tabPlay" aria-pressed="false">自分で操作</button>
+  </div>
+  <label class="ver" for="seed">シード</label><input id="seed" type="number" min="1" value="501">
+  <button id="reset">最初から</button>
+</div>
+<section class="panel" id="watch">
+  <div class="bar">
+    <label class="ver" for="strategy">戦略</label><select id="strategy"></select>
+    <button id="playpause">▶ 再生</button>
+    <span class="ver">速度</span>
+    <span class="bar" id="speeds"></span>
+  </div>
+  <p class="help">検証ボットが遊ぶ様子を見ます。p01＝野望型、p02＝あき型のペルソナを真似たボットです。同じシードと戦略なら毎回同じ展開になります（ヘッドレスの simulate と一致）。</p>
+</section>
+<section class="panel" id="play" hidden>
+  <div class="pad">
+    <div class="dpad" id="dpad">
+      <span class="c"></span><button data-key="ArrowUp" aria-label="上">▲</button><span class="c"></span>
+      <button data-key="ArrowLeft" aria-label="左">◀</button><span class="c"></span><button data-key="ArrowRight" aria-label="右">▶</button>
+      <span class="c"></span><button data-key="ArrowDown" aria-label="下">▼</button><span class="c"></span>
+    </div>
+    <div class="acts" id="acts"></div>
+  </div>
+  <div class="shop" id="shop"></div>
+  <p class="help" id="help"></p>
+  <p class="note">タッチ操作は動作確認用の仮のボタンです（キーボードがあればそのままキーでも遊べます）。</p>
+</section>
+<script type="module">
+(function(){const t=document.createElement("link").relList;if(t&&t.supports&&t.supports("modulepreload"))return;for(const a of document.querySelectorAll('link[rel="modulepreload"]'))s(a);new MutationObserver(a=>{for(const r of a)if(r.type==="childList")for(const o of r.addedNodes)o.tagName==="LINK"&&o.rel==="modulepreload"&&s(o)}).observe(document,{childList:!0,subtree:!0});function e(a){const r={};return a.integrity&&(r.integrity=a.integrity),a.referrerPolicy&&(r.referrerPolicy=a.referrerPolicy),a.crossOrigin==="use-credentials"?r.credentials="include":a.crossOrigin==="anonymous"?r.credentials="omit":r.credentials="same-origin",r}function s(a){if(a.ep)return;a.ep=!0;const r=e(a);fetch(a.href,r)}})();function P(i){let t=i>>>0;return function(){t|=0,t=t+1831565813|0;let e=Math.imul(t^t>>>15,1|t);return e=e+Math.imul(e^e>>>7,61|e)^e,((e^e>>>14)>>>0)/4294967296}}const l={dayTicks:500,nightTicks:500,days:6,startGold:50,incomePerTick:.1,bounty:5,bountyPerNight:0,ringCountMul:1.5,plunder:15,enemyBase:10,enemyPerNight:4,enemyHp0:3,enemyHpPerNight:2,enemySpeed:.08,spawnWindow:300,spawnR:9.5,archerShare:.15,archerSwing:0,siegeR:7,siegeRMarsh:6,archerShotTicks:20,archerPlunder:1,archerBeamReach:3,spawnSpread:.6,fireTicks:10,rangeBase:1.5,rangePerH:.9,baseRange:2.5,raiseBase:10,raisePerH:3,raiseTicks:20,beamBase:15,beamPerH:3,beamTicks:30,beamHpBase:20,beamHpPerH:5,beamHitTicks:10,slenderRock:5,slenderSoil:4,slenderMarsh:3,gustK:1,gustMin:.6,gustMax:1.4,maxH:12},C=17,W=17,y=8,T=8,p=[[5,5],[8,5],[11,5],[11,8],[11,11],[8,11],[5,11],[5,8]],q=["one","two","ring"],X=["rock","soil","marsh"];function J(i){return i==="rock"?l.slenderRock:i==="soil"?l.slenderSoil:l.slenderMarsh}function Q(i){return l.bounty+l.bountyPerNight*(i-1)}function Y(i){return i==="marsh"&&l.siegeRMarsh>0?l.siegeRMarsh:l.siegeR}function F(i){return i<=0?0:l.rangeBase+l.rangePerH*i}function U(i){return l.raiseBase+l.raisePerH*i}function j(i){return l.beamBase+l.beamPerH*i}function V(i,t,e,s,a,r,o,n){const h=(e-i)*(r-t)-(s-t)*(a-i),u=(e-i)*(n-t)-(s-t)*(o-i),f=(o-a)*(t-r)-(n-r)*(i-a),m=(o-a)*(s-r)-(n-r)*(e-a);return(h>0&&u<0||h<0&&u>0||h===0||u===0)&&(f>0&&m<0||f<0&&m>0)}class H{constructor(t,e={}){this.over=!1,this.runMix=0,this.spawnQueue=[],this.nextId=1,this.baseCd=0,this.gustK=1,this.seed=t,this.spawnRng=P(t*2654435761),this.gustRng=P(t*40503+17),this.fallRng=P(t*97+5),this.mixRng=P(t*7919+3),this.runMix=this.mixRng()*2-1;const s=e.dir??q[t%3],a=e.ground??X[Math.floor(t/3)%3],r={score:0,gold:l.startGold,earned:0,income:0,bounty:0,spent:0,plunder:0,arrowLoss:0,kills:0,leaks:0,fled:0,spawned:0,collapses:0,lostLevels:0,beamBreaks:0,beamsBuilt:0,raises:0,heldTicks:0,maxH:0,sumH:0},o=p.map(([h,u],f)=>({id:f,x:h,y:u,h:0,beamTop:0,free:0,over:0,range:0,cooldown:0,aim:-Math.PI/2})),n=p.map((h,u)=>({edge:u,a:u,b:(u+1)%8,h:0,hp:0,maxHp:0}));this.s={tick:0,maxTicks:(l.dayTicks+l.nightTicks)*l.days,seed:t,day:1,night:!1,phaseLeft:l.dayTicks,dir:s,ground:a,archerShare:l.archerShare,slender:J(a),gold:l.startGold,player:{x:y,y:T+1,busy:0,busyKind:"",busyTarget:-1,moveCd:0,face:1},towers:o,beams:n,enemies:[],toSpawn:0,gustIn:-1,events:[],over:!1,metrics:r,w:C,h:W,baseX:y,baseY:T}}getState(){return JSON.parse(JSON.stringify(this.s))}peek(){return this.s}log(t){const e=this.s.events;e.push(`${(this.s.tick/10).toFixed(0)}s ${t}`),e.length>8&&e.shift()}adjacentPlot(){const t=this.s.player;for(let e=0;e<p.length;e++){const[s,a]=p[e];if(Math.abs(s-t.x)<=1&&Math.abs(a-t.y)<=1)return e}return-1}refreshTowers(){const t=this.s;for(const a of t.towers)a.beamTop=0;for(const a of t.beams)a.h<=0||(t.towers[a.a].beamTop=Math.max(t.towers[a.a].beamTop,a.h),t.towers[a.b].beamTop=Math.max(t.towers[a.b].beamTop,a.h));let e=0,s=0;for(const a of t.towers)a.free=a.h-a.beamTop,a.over=Math.max(0,a.free-t.slender),a.range=F(a.h),e=Math.max(e,a.h),s+=a.h;t.metrics.maxH=Math.max(t.metrics.maxH,e),t.metrics.sumH=s}collapseCheck(t,e,s){if(t.over<=0)return;const a=Math.min(1,l.gustK*t.over*e);if(this.fallRng()>=a)return;const r=t.beamTop+this.s.slender,o=t.h-r;t.h=r,this.s.metrics.collapses++,this.s.metrics.lostLevels+=o,this.log(`${s}で塔${t.id+1}が折れた（−${o}段）`),this.refreshTowers()}pay(t){this.s.gold-=t,this.s.metrics.spent+=t}startNight(){const t=this.s,e=t.day,s=l.enemyBase+l.enemyPerNight*(e-1),a=t.dir==="ring"?Math.round(s*l.ringCountMul):s,r=[],o=e%2===1?-1:1,n=Math.max(0,Math.min(1,l.archerShare+l.archerSwing*o));t.archerShare=n;for(let h=0;h<a;h++){const u=Math.floor(l.spawnWindow*h/a+this.spawnRng()*(l.spawnWindow/a));let f;const m=(this.spawnRng()*2-1)*l.spawnSpread,b=this.spawnRng(),w=this.spawnRng()<n;t.dir==="one"?f=-Math.PI/2+m:t.dir==="two"?f=(h%2===0?-Math.PI/2:Math.PI/2)+m:f=b*Math.PI*2,r.push({at:u,x:y+Math.cos(f)*l.spawnR,y:T+Math.sin(f)*l.spawnR,archer:w})}this.spawnQueue=r,t.toSpawn=a,t.gustIn=50+Math.floor(this.gustRng()*(l.nightTicks-100)),this.gustK=l.gustMin+this.gustRng()*(l.gustMax-l.gustMin),this.log(`夜${e}: 敵${a}体（${t.dir==="one"?"北":t.dir==="two"?"北と南":"全周"}）`)}endNight(){const t=this.s;t.enemies.length>0&&(t.metrics.fled+=t.enemies.length,this.log(`夜明け: ${t.enemies.length}体が逃げた`)),t.enemies=[],this.spawnQueue=[],t.toSpawn=0,t.gustIn=-1}doAction(t){const e=this.s,s=e.player;if(!(s.busy>0)){if(t.type==="move"){if(s.moveCd>0)return;const a=t.dir==="left"?-1:t.dir==="right"?1:0,r=t.dir==="up"?-1:t.dir==="down"?1:0;s.x=Math.max(0,Math.min(C-1,s.x+a)),s.y=Math.max(0,Math.min(W-1,s.y+r)),a!==0&&(s.face=a),s.moveCd=1;return}if(t.type==="raise"){const a=this.adjacentPlot();if(a<0)return;const r=e.towers[a];if(r.h>=l.maxH)return;const o=U(r.h+1);if(e.gold<o)return;this.pay(o),s.busy=l.raiseTicks,s.busyKind="raise",s.busyTarget=a;return}if(t.type==="beam"){const a=this.adjacentPlot();if(a<0)return;const r=t.side==="cw"?a:(a+7)%8,o=e.beams[r],n=Math.min(e.towers[o.a].h,e.towers[o.b].h);if(n<=0||!(n>o.h||n===o.h&&o.hp<o.maxHp))return;const h=j(n);if(e.gold<h)return;this.pay(h),s.busy=l.beamTicks,s.busyKind="beam",s.busyTarget=r}}}finishWork(){const t=this.s,e=t.player;if(e.busyKind==="raise"){const s=t.towers[e.busyTarget];s.h<l.maxH&&(s.h++,t.metrics.raises++)}else if(e.busyKind==="beam"){const s=t.beams[e.busyTarget],a=Math.min(t.towers[s.a].h,t.towers[s.b].h);a>0&&a>=s.h&&(s.h=a,s.maxHp=l.beamHpBase+l.beamHpPerH*a,s.hp=s.maxHp,t.metrics.beamsBuilt++)}e.busyKind="",e.busyTarget=-1,this.refreshTowers()}breakBeam(t){const e=this.s;this.log(`梁${t.edge+1}（高さ${t.h}）が壊された`),t.h=0,t.hp=0,t.maxHp=0,e.metrics.beamBreaks++;for(const s of e.enemies)s.holdEdge===t.edge&&(s.holdEdge=-1);this.refreshTowers(),this.collapseCheck(e.towers[t.a],1,"梁の落下"),this.collapseCheck(e.towers[t.b],1,"梁の落下")}archerShot(t){const e=this.s;let s=null,a=l.archerBeamReach;for(const r of e.beams){if(r.h<=0)continue;const o=(p[r.a][0]+p[r.b][0])/2,n=(p[r.a][1]+p[r.b][1])/2,h=Math.hypot(o-t.x,n-t.y);h<=a&&(a=h,s=r)}if(t.shotAt=e.tick,t.shotEdge=s?s.edge:-1,s){s.hp-=1,s.hp<=0&&this.breakBeam(s);return}e.gold-=l.archerPlunder,e.metrics.plunder+=l.archerPlunder,e.metrics.arrowLoss+=l.archerPlunder}kill(){const t=this.s.metrics;t.kills++;const e=Q(this.s.day);t.bounty+=e,t.earned+=e,this.s.gold+=e}shoot(t,e,s){let a=null,r=1/0;const o=s*s;for(const n of this.s.enemies){if(n.hp<=0)continue;const h=n.x-t,u=n.y-e;if(h*h+u*u>o)continue;const f=(n.x-y)**2+(n.y-T)**2;f<r&&(r=f,a=n)}return a&&(a.hp-=1,a.hp<=0&&this.kill()),a}step(t={type:"wait"}){if(this.over)return;const e=this.s,s=e.player,a=l.dayTicks+l.nightTicks,r=e.tick%a;if(r===0?(e.day=Math.floor(e.tick/a)+1,e.night=!1):r===l.dayTicks&&(e.night=!0,this.startNight()),e.phaseLeft=e.night?a-r:l.dayTicks-r,s.moveCd>0&&s.moveCd--,s.busy>0?(s.busy--,s.busy===0&&this.finishWork()):this.doAction(t),e.gold+=l.incomePerTick,e.metrics.income+=l.incomePerTick,e.metrics.earned+=l.incomePerTick,e.night){const o=r-l.dayTicks;for(;this.spawnQueue.length&&this.spawnQueue[0].at<=o;){const n=this.spawnQueue.shift(),h=l.enemyHp0+l.enemyHpPerNight*(e.day-1);e.enemies.push({id:this.nextId++,kind:n.archer?"archer":"walker",siege:!1,x:n.x,y:n.y,hp:h,maxHp:h,holdEdge:-1,hitCd:n.archer?l.archerShotTicks:l.beamHitTicks,shotAt:-1,shotEdge:-1}),e.metrics.spawned++,e.toSpawn--}if(e.gustIn>=0&&o===e.gustIn){this.log(`突風（強さ${this.gustK.toFixed(2)}）`);for(const n of e.towers)this.collapseCheck(n,this.gustK,"突風");e.gustIn=-1}for(const n of e.enemies){if(n.hp<=0)continue;if(n.holdEdge>=0){e.metrics.heldTicks++;const g=e.beams[n.holdEdge];if(g.h<=0){n.holdEdge=-1;continue}--n.hitCd<=0&&(n.hitCd=l.beamHitTicks,g.hp-=1,g.hp<=0&&this.breakBeam(g));continue}if(n.siege){--n.hitCd<=0&&(n.hitCd=l.archerShotTicks,this.archerShot(n));continue}const h=y-n.x,u=T-n.y,f=Math.hypot(h,u);if(n.kind==="archer"&&f<=Y(e.ground)){n.siege=!0;continue}if(f<.6){const g=l.plunder;e.gold-=g,e.metrics.plunder+=g,e.metrics.leaks++,n.hp=0,n.maxHp=-1,this.log("拠点が荒らされた");continue}const m=n.x+h/f*l.enemySpeed,b=n.y+u/f*l.enemySpeed;let w=-1;for(const g of e.beams){if(g.h<=0)continue;const[O,G]=p[g.a],[K,_]=p[g.b];if(V(n.x,n.y,m,b,O,G,K,_)){w=g.edge;break}}w>=0?(n.holdEdge=w,n.hitCd=l.beamHitTicks):(n.x=m,n.y=b)}for(const n of e.towers){if(n.h<=0)continue;if(n.cooldown>0){n.cooldown--;continue}const h=this.shoot(n.x,n.y,n.range);h&&(n.cooldown=l.fireTicks-1,n.aim=Math.atan2(h.y-n.y,h.x-n.x))}this.baseCd>0?this.baseCd--:this.shoot(y,T,l.baseRange)&&(this.baseCd=l.fireTicks-1),e.enemies=e.enemies.filter(n=>n.hp>0),r===a-1&&this.endNight()}e.tick++,e.metrics.gold=e.gold,e.metrics.score=Math.round(e.metrics.bounty-e.metrics.plunder),e.tick>=e.maxTicks&&(this.over=!0,e.over=!0)}}function v(i,t,e=0){let s=i*374761393+t*668265263+e*1442695041|0;return s=Math.imul(s^s>>>13,1274126177),s^=s>>>16,(s>>>0)/4294967296}function S(i,t){const e=parseInt(i.slice(1),16),s=a=>Math.max(0,Math.min(255,Math.round(t>=0?a+(255-a)*t:a*(1+t))));return`rgb(${s(e>>16&255)},${s(e>>8&255)},${s(e&255)})`}function R(i,t,e,s,a,r){i.fillStyle="#6b4a2f",i.fillRect(t,e,s,s);for(let o=0;o<7;o++){const n=t+v(a,r,o)*(s-3),h=e+v(a,r,o+20)*(s-3);i.fillStyle=o%2?"#553821":"#85603e",i.fillRect(n,h,2+(o%3===0?1:0),2)}i.fillStyle="rgba(255,220,170,0.10)",i.fillRect(t,e,s,2),i.strokeStyle="rgba(0,0,0,0.35)",i.strokeRect(t+.5,e+.5,s-1,s-1)}function L(i,t,e,s,a,r,o="#707070"){i.fillStyle=o,i.fillRect(t,e,s,s),i.strokeStyle=S(o,-.45),i.lineWidth=1;const n=s/2,h=(r+a)%2?s*.5:s*.25;if(i.beginPath(),i.moveTo(t,e+n+.5),i.lineTo(t+s,e+n+.5),i.moveTo(t+h+.5,e),i.lineTo(t+h+.5,e+n),i.moveTo(t+(h+s*.5)%s+.5,e+n),i.lineTo(t+(h+s*.5)%s+.5,e+s),i.stroke(),i.fillStyle=S(o,.25),i.fillRect(t,e,s,1.5),i.fillRect(t,e,1.5,s),i.fillStyle=S(o,-.5),i.fillRect(t,e+s-1.5,s,1.5),i.fillRect(t+s-1.5,e,1.5,s),v(a,r,77)<.4){i.strokeStyle=S(o,-.55),i.beginPath();const u=t+s*(.3+.4*v(a,r,5));i.moveTo(u,e+3),i.lineTo(u+s*.12,e+s*.3),i.lineTo(u-s*.05,e+s*.42),i.stroke()}}function E(i,t,e,s,a={}){const r=a.face??1,o=s/10;i.save(),a.glow&&(i.fillStyle=a.glow,i.beginPath(),i.arc(t,e,s*.62,0,Math.PI*2),i.fill()),i.lineJoin="round",i.strokeStyle="#8a5a2b",i.lineWidth=Math.max(1.5,o*.8),i.beginPath(),i.moveTo(t+r*o*2,e+o*1.5),i.lineTo(t+r*o*4.2,e-o*2.5),i.stroke(),(a.tool??"pick")==="pick"?(i.strokeStyle="#d8dde3",i.lineWidth=Math.max(1.5,o*.9),i.beginPath(),i.moveTo(t+r*o*2.6,e-o*3.6),i.quadraticCurveTo(t+r*o*4.4,e-o*3.4,t+r*o*5.6,e-o*1.6),i.stroke()):(i.strokeStyle="#e8eef5",i.lineWidth=Math.max(1.5,o*.9),i.beginPath(),i.moveTo(t+r*o*4.2,e-o*2.5),i.lineTo(t+r*o*5.4,e-o*5),i.stroke()),i.strokeStyle="#2b2f3a",i.lineWidth=Math.max(1.5,o*1.1),i.beginPath(),i.moveTo(t-o*1,e+o*2),i.lineTo(t-o*1.3,e+o*4.6),i.moveTo(t+o*1,e+o*2),i.lineTo(t+o*1.3,e+o*4.6),i.stroke(),i.fillStyle=a.body??"#2f7fd8",i.strokeStyle="#ffffff",i.lineWidth=Math.max(1,o*.5),i.beginPath(),i.moveTo(t-o*2.2,e+o*2.4),i.lineTo(t-o*1.8,e-o*1.2),i.lineTo(t+o*1.8,e-o*1.2),i.lineTo(t+o*2.2,e+o*2.4),i.closePath(),i.fill(),i.stroke(),i.fillStyle="#f2c9a0",i.beginPath(),i.arc(t,e-o*2.8,o*1.9,0,Math.PI*2),i.fill(),i.stroke(),i.fillStyle="#f1c40f",i.beginPath(),i.arc(t,e-o*3.1,o*2.05,Math.PI,0),i.closePath(),i.fill(),(a.lamp??!0)&&(i.fillStyle="#fffbe0",i.beginPath(),i.arc(t+r*o*1.2,e-o*4.1,o*.6,0,Math.PI*2),i.fill()),i.fillStyle="#1a1a1a",i.fillRect(t+r*o*.4-o*.35,e-o*2.7,o*.7,o*.8),i.fillRect(t+r*o*1.3-o*.35,e-o*2.7,o*.7,o*.8),i.restore()}function M(i,t,e,s,a,r,o=-1){const n=s/10;i.save(),i.lineJoin="round";const h=S(r,-.55);if(i.strokeStyle=h,i.lineWidth=Math.max(1,n*.6),i.beginPath(),i.moveTo(t-n*1.6,e+n*2.6),i.lineTo(t-n*2,e+n*4.6),i.moveTo(t+n*1.6,e+n*2.6),i.lineTo(t+n*2,e+n*4.6),i.stroke(),i.fillStyle=r,a==="brute"){i.strokeStyle="#6b4219",i.lineWidth=Math.max(2,n*1.3),i.beginPath(),i.moveTo(t+o*n*3.4,e+n*1.5),i.lineTo(t+o*n*5.2,e-n*3.5),i.stroke(),i.strokeStyle=h,i.lineWidth=Math.max(1,n*.6),i.beginPath(),i.roundRect(t-n*3.6,e-n*3.6,n*7.2,n*6.6,n*1.6),i.fill(),i.stroke(),i.fillStyle="#efe6d0";for(const f of[-1,1])i.beginPath(),i.moveTo(t+f*n*2.2,e-n*3.4),i.lineTo(t+f*n*3.4,e-n*5.6),i.lineTo(t+f*n*1.2,e-n*3.6),i.closePath(),i.fill()}else if(a==="runner"){i.beginPath(),i.moveTo(t-o*n*3.4,e+n*1.2);for(let f=0;f<=6;f++){const m=Math.PI+f/6*Math.PI,b=f%2?n*3.4:n*2.4;i.lineTo(t+Math.cos(m)*b,e-n*.2+Math.sin(m)*b)}i.lineTo(t+o*n*3.4,e+n*1.2),i.lineTo(t,e+n*2.8),i.closePath(),i.fill(),i.stroke()}else if(a==="archer")i.strokeStyle="#c8a06a",i.lineWidth=Math.max(1.2,n*.6),i.beginPath(),i.arc(t+o*n*2.8,e-n*.5,n*3.2,-Math.PI/2.2,Math.PI/2.2,o<0),i.stroke(),i.strokeStyle=h,i.lineWidth=Math.max(1,n*.6),i.beginPath(),i.moveTo(t,e-n*5),i.lineTo(t+n*2.8,e+n*2.8),i.lineTo(t-n*2.8,e+n*2.8),i.closePath(),i.fill(),i.stroke();else{i.beginPath(),i.arc(t,e,n*3.3,0,Math.PI*2),i.fill(),i.stroke(),i.fillStyle="#efe6d0";for(const f of[-1,1])i.beginPath(),i.moveTo(t+f*n*1.4,e-n*2.8),i.lineTo(t+f*n*2.4,e-n*4.8),i.lineTo(t+f*n*.4,e-n*3.2),i.closePath(),i.fill()}const u=a==="archer"?e-n*1:e-n*1.2;for(const f of[-1,1]){const m=t+f*n*1.2+o*n*.4;i.fillStyle="#fff6d6",i.beginPath(),i.arc(m,u,n*.9,0,Math.PI*2),i.fill(),i.fillStyle="#111",i.beginPath(),i.arc(m+o*n*.3,u+n*.1,n*.45,0,Math.PI*2),i.fill(),i.strokeStyle="#111",i.lineWidth=Math.max(1,n*.45),i.beginPath(),i.moveTo(m-n*.9,u-n*1-f*n*.3),i.lineTo(m+n*.9,u-n*1+f*n*.3),i.stroke()}a!=="archer"&&(i.fillStyle="#2a0c0c",i.fillRect(t-n*1.4,e+n*.6,n*2.8,n*.9),i.fillStyle="#fff",i.beginPath(),i.moveTo(t-n*1.1,e+n*.6),i.lineTo(t-n*.7,e+n*1.4),i.lineTo(t-n*.3,e+n*.6),i.moveTo(t+n*.3,e+n*.6),i.lineTo(t+n*.7,e+n*1.4),i.lineTo(t+n*1.1,e+n*.6),i.fill()),i.restore()}function B(i,t,e,s,a=0,r=!0){i.fillStyle="#3d4a5a",i.strokeStyle="#a9c6e8",i.beginPath(),i.roundRect(t+s*.12,e+s*.45,s*.76,s*.45,3),i.fill(),i.stroke();const o=t+s/2,n=e+s*.45;i.strokeStyle=r?"#4aa3e0":"#2a4a66",i.lineWidth=Math.max(2,s*.14),i.beginPath(),i.moveTo(o,n),i.lineTo(o+Math.cos(a)*s*.42,n+Math.sin(a)*s*.42),i.stroke(),i.lineWidth=1,i.fillStyle=r?"#4aa3e0":"#2a4a66",i.beginPath(),i.arc(o,n,s*.2,0,Math.PI*2),i.fill(),i.strokeStyle="#d8ecff",i.stroke()}function A(i,t,e,s,a="#3498db"){const r=s*.9,o=s*.55;i.fillStyle="#d9c7a3",i.strokeStyle="#3b3024",i.fillRect(t-r/2,e-o,r,o),i.strokeRect(t-r/2,e-o,r,o),i.fillStyle=a,i.beginPath(),i.moveTo(t-r*.62,e-o),i.lineTo(t,e-o-s*.4),i.lineTo(t+r*.62,e-o),i.closePath(),i.fill(),i.stroke(),i.fillStyle="#6b4219",i.fillRect(t-r*.12,e-o*.6,r*.24,o*.6)}function Z(i,t,e,s,a,r=1/0){i.save(),i.font=`${Math.max(10,Math.round(s*.62))}px sans-serif`,i.textBaseline="middle";let o=t,n=e;for(const h of a){const u=s+4+i.measureText(h.label).width+10;o+u-t>r&&o>t&&(o=t,n+=s+4),h.draw(i,o,n,s),i.fillStyle="#cfd6e0",i.fillText(h.label,o+s+4,n+s/2),o+=u}return i.restore(),n+s-e}const d=36,k=17*d,z=300,$=k+z,x=64,N=k+x,ee={one:"北だけ",two:"北と南",ring:"全周"},te={rock:"岩",soil:"土",marsh:"湿地"};class ie{constructor(t){t.width=$,t.height=N,this.ctx=t.getContext("2d")}ground(t,e,s){const a=this.ctx,r=e*d,o=s*d;t.ground==="rock"?L(a,r,o,d,e,s,"#6f6f73"):(R(a,r,o,d,e,s),t.ground==="marsh"&&(a.fillStyle="rgba(70,165,175,0.36)",a.fillRect(r,o,d,d),(e*7+s*3)%5===0&&(a.strokeStyle="rgba(170,230,235,0.55)",a.beginPath(),a.ellipse(r+d*.5,o+d*.55,d*.3,d*.1,0,0,Math.PI*2),a.stroke())))}tower(t,e){const s=this.ctx,a=e.x*d,r=e.y*d;if(s.fillStyle="#4b4b52",s.strokeStyle="#c9c9d2",s.lineWidth=1.5,s.beginPath(),s.roundRect(a+3,r+3,d-6,d-6,4),s.fill(),s.stroke(),e.h<=0){s.fillStyle="#9aa",s.font="10px sans-serif",s.textAlign="center",s.fillText("台座",a+d/2,r+d/2+4),s.textAlign="left";return}B(s,a,r-4,d,e.aim,t.night);const o=a+d-4,n=Math.min(6,d*1.7/Math.max(10,e.h));s.fillStyle="#000",s.fillRect(o-1,r+d-3-e.h*n,12,e.h*n+2);for(let u=0;u<e.h;u++){const f=u+1;s.fillStyle=f<=e.beamTop?"#8a8f98":f-e.beamTop<=t.slender?"#3fa2ff":"#ff4040",s.fillRect(o,r+d-2-(u+1)*n,10,n-1)}s.font="bold 12px sans-serif",s.fillStyle=e.over>0?"#ff6b6b":"#ffffff",s.strokeStyle="#000",s.lineWidth=3;const h=`h${e.h}`;s.strokeText(h,a+2,r+12),s.fillText(h,a+2,r+12),s.lineWidth=1}draw(t){const e=this.ctx;e.fillStyle="#101214",e.fillRect(0,0,$,N);for(let r=0;r<t.h;r++)for(let o=0;o<t.w;o++)this.ground(t,o,r);const s=r=>r*d+d/2;if(e.setLineDash([4,6]),e.strokeStyle="rgba(255,255,255,0.25)",e.strokeRect(s(5),s(5),6*d,6*d),e.setLineDash([]),t.night){for(const r of t.towers)r.h<=0||(e.strokeStyle="rgba(80,170,255,0.18)",e.beginPath(),e.arc(s(r.x),s(r.y),r.range*d,0,Math.PI*2),e.stroke());e.strokeStyle="rgba(200,120,255,0.25)",e.setLineDash([2,5]),e.beginPath(),e.arc(s(t.baseX),s(t.baseY),7*d,0,Math.PI*2),e.stroke(),e.setLineDash([])}A(e,s(t.baseX),t.baseY*d+d-2,d*1.1,"#c0392b");for(const r of t.beams){if(r.h<=0)continue;const[o,n]=[t.towers[r.a].x,t.towers[r.a].y],[h,u]=[t.towers[r.b].x,t.towers[r.b].y],f=r.hp/Math.max(1,r.maxHp);e.strokeStyle="#3a2410",e.lineWidth=11,e.beginPath(),e.moveTo(s(o),s(n)),e.lineTo(s(h),s(u)),e.stroke(),e.strokeStyle=f>.5?"#e69a3c":f>.25?"#e0662f":"#d02a2a",e.lineWidth=3+5*f,e.stroke(),e.lineWidth=1;const m=(s(o)+s(h))/2,b=(s(n)+s(u))/2;e.font="bold 11px sans-serif",e.fillStyle="#ffe0b0",e.strokeStyle="#000",e.lineWidth=3;const w=`梁${r.h} ${r.hp}/${r.maxHp}`;e.strokeText(w,m-22,b-7),e.fillText(w,m-22,b-7),e.lineWidth=1}for(const r of t.towers)this.tower(t,r);for(const r of t.enemies){if(r.kind!=="archer"||r.shotAt<0||t.tick-r.shotAt>6)continue;let o=s(t.baseX),n=s(t.baseY);if(r.shotEdge>=0){const h=t.beams[r.shotEdge];o=(s(t.towers[h.a].x)+s(t.towers[h.b].x))/2,n=(s(t.towers[h.a].y)+s(t.towers[h.b].y))/2}e.strokeStyle=r.shotEdge>=0?"rgba(255,170,60,0.9)":"rgba(255,60,60,0.9)",e.lineWidth=2,e.setLineDash([6,4]),e.beginPath(),e.moveTo(r.x*d+d/2,r.y*d+d/2),e.lineTo(o,n),e.stroke(),e.setLineDash([]),e.lineWidth=1}for(const r of t.enemies){const o=r.x*d+d/2,n=r.y*d+d/2;r.kind==="archer"?M(e,o,n,d*.85,"archer","#9b59b6",r.x<t.baseX?1:-1):M(e,o,n,d*.85,"grunt",r.holdEdge>=0?"#e67e22":"#c0392b",r.x<t.baseX?1:-1),e.fillStyle="#000",e.fillRect(o-12,n-22,24,4),e.fillStyle="#5f5",e.fillRect(o-12,n-22,24*r.hp/r.maxHp,4)}const a=t.player;if(E(e,s(a.x),s(a.y),d*.95,{face:a.face,tool:"pick",glow:a.busy>0?"rgba(255,230,120,0.35)":null}),a.busy>0){e.fillStyle="#222",e.fillRect(s(a.x)-16,s(a.y)+20,32,5),e.fillStyle="#ffd34d";const r=a.busyKind==="raise"?20:30;e.fillRect(s(a.x)-16,s(a.y)+20,32*(1-a.busy/r),5)}t.night&&(e.fillStyle="rgba(10,20,60,0.16)",e.fillRect(0,0,k,k)),this.hud(t),this.legend()}hud(t){const e=this.ctx,s=k+12;let a=22;const r=(o,n="#dfe6ee",h=14)=>{e.font=`${h}px sans-serif`,e.fillStyle=n,e.fillText(o,s,a),a+=h+6};r(`${t.night?"夜":"昼"} ${t.day}/6  あと${Math.ceil(t.phaseLeft/10)}秒`,t.night?"#9fb4ff":"#ffe08a",18),r(`所持金 ${Math.floor(t.gold)}   スコア ${t.metrics.score}`,"#ffffff",16),r(`向き: ${ee[t.dir]}   地盤: ${te[t.ground]}`,"#cfe8c8",15),r(`単独で立つ高さ（自由長の上限）: ${t.slender}段`,"#cfe8c8",13),r(`撃破${t.metrics.kills}  荒らされ${t.metrics.leaks}  矢−${t.metrics.arrowLoss}`,"#dfe6ee",13),r(`折れた塔${t.metrics.collapses}  壊れた梁${t.metrics.beamBreaks}`,"#dfe6ee",13),t.night&&r(`残りの敵 ${t.enemies.length+t.toSpawn}${t.gustIn>=0?"  突風が来る":""}`,"#ffb0b0",14),a+=4,r("塔  高さ 梁 自由長/上限 射程","#9aa4b0",12);for(const o of t.towers){const n=o.over>0?"#ff7070":o.h>0?"#dfe6ee":"#6c7580";r(`${o.id+1}   h${o.h}   ${o.beamTop||"-"}   ${o.free}/${t.slender}${o.over>0?"超":""}   ${o.range.toFixed(1)}`,n,12)}a+=4,e.font="11px sans-serif";for(const o of t.events.slice(-6))e.fillStyle="#b8c2cc",e.fillText(o,s,a),a+=15;t.over&&(e.font="bold 22px sans-serif",e.fillStyle="#ffd34d",e.fillText(`終了 スコア ${t.metrics.score}`,s,k-20))}legend(){const t=this.ctx,e=[{label:"自分",draw:(s,a,r,o)=>E(s,a+o/2,r+o/2,o,{tool:"pick"})},{label:"歩兵（梁で止まる）",draw:(s,a,r,o)=>M(s,a+o/2,r+o/2,o,"grunt","#c0392b")},{label:"射手（7マス・湿地は6マスで止まり撃つ）",draw:(s,a,r,o)=>M(s,a+o/2,r+o/2,o,"archer","#9b59b6")},{label:"塔",draw:(s,a,r,o)=>B(s,a,r,o)},{label:"梁",draw:(s,a,r,o)=>{s.strokeStyle="#e69a3c",s.lineWidth=6,s.beginPath(),s.moveTo(a,r+o/2),s.lineTo(a+o,r+o/2),s.stroke(),s.lineWidth=1}},{label:"矢（赤=拠点へ 橙=梁へ）",draw:(s,a,r,o)=>{s.strokeStyle="#ff3c3c",s.lineWidth=2,s.setLineDash([5,3]),s.beginPath(),s.moveTo(a,r+o),s.lineTo(a+o,r),s.stroke(),s.setLineDash([]),s.lineWidth=1}},{label:"拠点",draw:(s,a,r,o)=>A(s,a+o/2,r+o,o,"#c0392b")},{label:"岩",draw:(s,a,r,o)=>L(s,a,r,o,1,1,"#6f6f73")},{label:"土",draw:(s,a,r,o)=>R(s,a,r,o,2,1)},{label:"湿地",draw:(s,a,r,o)=>{R(s,a,r,o,3,1),s.fillStyle="rgba(70,165,175,0.42)",s.fillRect(a,r,o,o)}},{label:"塔のゲージ 灰=梁の下 青=安全 赤=上限超え",draw:(s,a,r,o)=>{s.fillStyle="#8a8f98",s.fillRect(a+o*.35,r+o*.66,o*.3,o*.3),s.fillStyle="#3fa2ff",s.fillRect(a+o*.35,r+o*.34,o*.3,o*.3),s.fillStyle="#ff4040",s.fillRect(a+o*.35,r+o*.02,o*.3,o*.3)}}];Z(t,8,k+6,22,e,$-16)}}class se{constructor(){this.pressed=new Set,this.queued=[],window.addEventListener("keydown",t=>{if(t.repeat)return;const e=t.key.toLowerCase();(e==="e"||e==="b"||e==="v")&&(this.queued.push(e),t.preventDefault()),this.pressed.add(e),["arrowleft","arrowright","arrowup","arrowdown"," "].includes(e)&&t.preventDefault()}),window.addEventListener("keyup",t=>this.pressed.delete(t.key.toLowerCase()))}poll(){const t=this.queued.shift();return t==="e"?{type:"raise"}:t==="b"?{type:"beam",side:"cw"}:t==="v"?{type:"beam",side:"ccw"}:this.pressed.has("a")||this.pressed.has("arrowleft")?{type:"move",dir:"left"}:this.pressed.has("d")||this.pressed.has("arrowright")?{type:"move",dir:"right"}:this.pressed.has("w")||this.pressed.has("arrowup")?{type:"move",dir:"up"}:this.pressed.has("s")||this.pressed.has("arrowdown")?{type:"move",dir:"down"}:{type:"wait"}}}const oe=[{type:"wait",description:"何もしない（1tick）"},{type:"move",params:{dir:"up|down|left|right"},description:"1マス移動（移動の後1tickは動けない）"},{type:"raise",description:"隣の台座の塔を1段積む（費用 10+3×新しい高さ、2秒）"},{type:"beam",params:{side:"cw|ccw"},description:"隣の台座から輪の隣の台座へ梁を架ける（高さ=2塔の低い方、費用 8+2×高さ、3秒）。梁は敵を止める壁になり、両塔の自由長を梁の高さから数え直す"}];function ne(i){return{version:1,takeControl:()=>i.setAiControlled(!0),release:()=>i.setAiControlled(!1),reset(t){return i.setGame(new H(t)),i.render(),i.getGame().getState()},getState:()=>i.getGame().getState(),step(t){return i.getGame().step(t??{type:"wait"}),i.render(),i.getGame().getState()},run(t){const e=i.getGame();for(const s of t)if(e.step(s),e.over)break;return i.render(),e.getState()},getActionSpec:()=>oe}}const re=100,ae=document.getElementById("game"),I=new ie(ae),le=new se,he=new URLSearchParams(location.search);let c=new H(Number(he.get("seed")??1)),D=!1;window.__AIP__=ne({getGame:()=>c,setGame:i=>c=i,render:()=>I.draw(c.getState()),setAiControlled:i=>D=i});window.addEventListener("keydown",i=>{i.key.toLowerCase()==="r"&&c.over&&(c=new H(c.seed))});setInterval(()=>{if(D)return;c.getState().over||c.step(le.poll()),I.draw(c.getState())},re);I.draw(c.getState());
+
+</script>
+<script>
+"use strict";
+var __BOTLIB__ = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // headless/simulate.ts
+  var simulate_exports = {};
+  __export(simulate_exports, {
+    BIG_GAP: () => BIG_GAP,
+    Bot: () => Bot,
+    PERSONAS: () => PERSONAS,
+    SPIRE_END: () => SPIRE_END,
+    distinct: () => distinct,
+    normPlan: () => normPlan,
+    runOne: () => runOne,
+    setSpireEnd: () => setSpireEnd,
+    summarize: () => summarize
+  });
+
+  // src/core/rng.ts
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function() {
+      a |= 0;
+      a = a + 1831565813 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // src/core/game.ts
+  var TUNE = {
+    dayTicks: 500,
+    nightTicks: 500,
+    days: 6,
+    startGold: 50,
+    incomePerTick: 0.1,
+    bounty: 5,
+    /** 撃破報酬の夜ごとの上乗せ（夜n の報酬 = bounty + bountyPerNight×(n−1)。0=毎夜同じ） */
+    bountyPerNight: 0,
+    /** 全周（ring）の夜の敵の数の倍率（8方向に散るので塔1本あたりは少ない。1=他の向きと同じ） */
+    ringCountMul: 1.5,
+    plunder: 15,
+    enemyBase: 10,
+    enemyPerNight: 4,
+    enemyHp0: 3,
+    enemyHpPerNight: 2,
+    enemySpeed: 0.08,
+    spawnWindow: 300,
+    spawnR: 9.5,
+    /** 射手の割合（出現ごとに抽選） */
+    archerShare: 0.15,
+    /** 夜ごとの射手の割合の振れ（奇数夜は −、偶数夜は ＋。0=毎夜同じ） */
+    archerSwing: 0,
+    /** 振れ方: 0=奇数夜は少なく偶数夜は多く、1=夜ごとにシードで抽選、2=ランごとに1回抽選（±archerSwing の一様。2は最初から見える） */
+    archerMode: 0,
+    /** 射手が止まる拠点からの距離 */
+    siegeR: 7,
+    /** 湿地での射手の止まる距離（足場が悪く近くに寄る。0=siegeR と同じ） */
+    siegeRMarsh: 6,
+    archerShotTicks: 20,
+    /** 射手の1発で拠点が失う額 */
+    archerPlunder: 1,
+    /** 射手はこの距離以内に梁があれば梁を撃つ */
+    archerBeamReach: 3,
+    /** one/two の出現角の幅（ラジアン、片側） */
+    spawnSpread: 0.6,
+    fireTicks: 10,
+    rangeBase: 1.5,
+    rangePerH: 0.9,
+    baseRange: 2.5,
+    raiseBase: 10,
+    raisePerH: 3,
+    raiseTicks: 20,
+    beamBase: 15,
+    beamPerH: 3,
+    beamTicks: 30,
+    beamHpBase: 20,
+    beamHpPerH: 5,
+    beamHitTicks: 10,
+    slenderRock: 5,
+    slenderSoil: 4,
+    slenderMarsh: 3,
+    gustK: 1,
+    /** 折れた段が隣の梁に落ちる: 失った1段あたり、両隣の梁の最大耐久のこの割合を削る（0=無し） */
+    fallBeamDmg: 0,
+    gustMin: 0.6,
+    gustMax: 1.4,
+    maxH: 12
+  };
+  var DEFAULT_TUNE = { ...TUNE };
+  function setTune(patch) {
+    Object.assign(TUNE, DEFAULT_TUNE, patch);
+  }
+  var W = 17;
+  var H = 17;
+  var BASE_X = 8;
+  var BASE_Y = 8;
+  var PLOTS = [
+    [5, 5],
+    [8, 5],
+    [11, 5],
+    [11, 8],
+    [11, 11],
+    [8, 11],
+    [5, 11],
+    [5, 8]
+  ];
+  var FACING = {
+    one: { plots: [0, 1, 2], edges: [0, 1] },
+    two: { plots: [0, 1, 2, 4, 5, 6], edges: [0, 1, 4, 5] },
+    ring: { plots: [0, 1, 2, 3, 4, 5, 6, 7], edges: [0, 1, 2, 3, 4, 5, 6, 7] }
+  };
+  var DIRS = ["one", "two", "ring"];
+  var GROUNDS = ["rock", "soil", "marsh"];
+  function slenderOf(g) {
+    return g === "rock" ? TUNE.slenderRock : g === "soil" ? TUNE.slenderSoil : TUNE.slenderMarsh;
+  }
+  function bountyOf(day) {
+    return TUNE.bounty + TUNE.bountyPerNight * (day - 1);
+  }
+  function siegeROf(g) {
+    return g === "marsh" && TUNE.siegeRMarsh > 0 ? TUNE.siegeRMarsh : TUNE.siegeR;
+  }
+  function rangeOf(h) {
+    return h <= 0 ? 0 : TUNE.rangeBase + TUNE.rangePerH * h;
+  }
+  function raiseCost(newH) {
+    return TUNE.raiseBase + TUNE.raisePerH * newH;
+  }
+  function beamCost(h) {
+    return TUNE.beamBase + TUNE.beamPerH * h;
+  }
+  function segCross(ax, ay, bx, by, cx, cy, dx, dy) {
+    const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+    const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+    const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+    return (d1 > 0 && d2 < 0 || d1 < 0 && d2 > 0 || d1 === 0 || d2 === 0) && (d3 > 0 && d4 < 0 || d3 < 0 && d4 > 0);
+  }
+  var Game = class {
+    constructor(seed, opts = {}) {
+      this.over = false;
+      this.runMix = 0;
+      this.spawnQueue = [];
+      this.nextId = 1;
+      this.baseCd = 0;
+      this.gustK = 1;
+      this.seed = seed;
+      this.spawnRng = mulberry32(seed * 2654435761);
+      this.gustRng = mulberry32(seed * 40503 + 17);
+      this.fallRng = mulberry32(seed * 97 + 5);
+      this.mixRng = mulberry32(seed * 7919 + 3);
+      this.runMix = this.mixRng() * 2 - 1;
+      const dir = opts.dir ?? DIRS[seed % 3];
+      const ground = opts.ground ?? GROUNDS[Math.floor(seed / 3) % 3];
+      const metrics = {
+        score: 0,
+        gold: TUNE.startGold,
+        earned: 0,
+        income: 0,
+        bounty: 0,
+        spent: 0,
+        plunder: 0,
+        arrowLoss: 0,
+        kills: 0,
+        leaks: 0,
+        fled: 0,
+        spawned: 0,
+        collapses: 0,
+        lostLevels: 0,
+        beamBreaks: 0,
+        beamsBuilt: 0,
+        raises: 0,
+        heldTicks: 0,
+        maxH: 0,
+        sumH: 0
+      };
+      const towers = PLOTS.map(([x, y], id) => ({ id, x, y, h: 0, beamTop: 0, free: 0, over: 0, range: 0, cooldown: 0, aim: -Math.PI / 2 }));
+      const beams2 = PLOTS.map((_, edge) => ({ edge, a: edge, b: (edge + 1) % 8, h: 0, hp: 0, maxHp: 0 }));
+      this.s = {
+        tick: 0,
+        maxTicks: (TUNE.dayTicks + TUNE.nightTicks) * TUNE.days,
+        seed,
+        day: 1,
+        night: false,
+        phaseLeft: TUNE.dayTicks,
+        dir,
+        ground,
+        archerShare: TUNE.archerMode === 2 ? Math.max(0, Math.min(1, TUNE.archerShare + TUNE.archerSwing * this.runMix)) : TUNE.archerShare,
+        slender: slenderOf(ground),
+        gold: TUNE.startGold,
+        player: { x: BASE_X, y: BASE_Y + 1, busy: 0, busyKind: "", busyTarget: -1, moveCd: 0, face: 1 },
+        towers,
+        beams: beams2,
+        enemies: [],
+        toSpawn: 0,
+        gustIn: -1,
+        events: [],
+        over: false,
+        metrics,
+        w: W,
+        h: H,
+        baseX: BASE_X,
+        baseY: BASE_Y
+      };
+    }
+    getState() {
+      return JSON.parse(JSON.stringify(this.s));
+    }
+    /** ボット用: コピーせずに読む（書き換えないこと） */
+    peek() {
+      return this.s;
+    }
+    log(msg) {
+      const ev = this.s.events;
+      ev.push(`${(this.s.tick / 10).toFixed(0)}s ${msg}`);
+      if (ev.length > 8) ev.shift();
+    }
+    /** プレイヤーの隣（チェビシェフ1以内）の台座 */
+    adjacentPlot() {
+      const p = this.s.player;
+      for (let i = 0; i < PLOTS.length; i++) {
+        const [x, y] = PLOTS[i];
+        if (Math.abs(x - p.x) <= 1 && Math.abs(y - p.y) <= 1) return i;
+      }
+      return -1;
+    }
+    refreshTowers() {
+      const s = this.s;
+      for (const t of s.towers) t.beamTop = 0;
+      for (const b of s.beams) {
+        if (b.h <= 0) continue;
+        s.towers[b.a].beamTop = Math.max(s.towers[b.a].beamTop, b.h);
+        s.towers[b.b].beamTop = Math.max(s.towers[b.b].beamTop, b.h);
+      }
+      let maxH = 0;
+      let sumH = 0;
+      for (const t of s.towers) {
+        t.free = t.h - t.beamTop;
+        t.over = Math.max(0, t.free - s.slender);
+        t.range = rangeOf(t.h);
+        maxH = Math.max(maxH, t.h);
+        sumH += t.h;
+      }
+      s.metrics.maxH = Math.max(s.metrics.maxH, maxH);
+      s.metrics.sumH = sumH;
+    }
+    /** 自由長の上限を超えた塔を、強さ k で折る判定 */
+    collapseCheck(t, k, why) {
+      if (t.over <= 0) return;
+      const p = Math.min(1, TUNE.gustK * t.over * k);
+      if (this.fallRng() >= p) return;
+      const keep = t.beamTop + this.s.slender;
+      const lost = t.h - keep;
+      t.h = keep;
+      this.s.metrics.collapses++;
+      this.s.metrics.lostLevels += lost;
+      this.log(`${why}\u3067\u5854${t.id + 1}\u304C\u6298\u308C\u305F\uFF08\u2212${lost}\u6BB5\uFF09`);
+      this.refreshTowers();
+      if (TUNE.fallBeamDmg > 0) {
+        for (const e of [t.id, (t.id + 7) % 8]) {
+          const b = this.s.beams[e];
+          if (b.h <= 0) continue;
+          b.hp -= Math.ceil(b.maxHp * TUNE.fallBeamDmg * lost);
+          if (b.hp <= 0) this.breakBeam(b);
+        }
+      }
+    }
+    pay(cost) {
+      this.s.gold -= cost;
+      this.s.metrics.spent += cost;
+    }
+    startNight() {
+      const s = this.s;
+      const n = s.day;
+      const base = TUNE.enemyBase + TUNE.enemyPerNight * (n - 1);
+      const count = s.dir === "ring" ? Math.round(base * TUNE.ringCountMul) : base;
+      const q = [];
+      const u = TUNE.archerMode === 2 ? this.runMix : TUNE.archerMode === 1 ? this.mixRng() * 2 - 1 : n % 2 === 1 ? -1 : 1;
+      const share = Math.max(0, Math.min(1, TUNE.archerShare + TUNE.archerSwing * u));
+      s.archerShare = share;
+      for (let i = 0; i < count; i++) {
+        const at = Math.floor(TUNE.spawnWindow * i / count + this.spawnRng() * (TUNE.spawnWindow / count));
+        let ang;
+        const off = (this.spawnRng() * 2 - 1) * TUNE.spawnSpread;
+        const r = this.spawnRng();
+        const archer = this.spawnRng() < share;
+        if (s.dir === "one") ang = -Math.PI / 2 + off;
+        else if (s.dir === "two") ang = (i % 2 === 0 ? -Math.PI / 2 : Math.PI / 2) + off;
+        else ang = r * Math.PI * 2;
+        q.push({ at, x: BASE_X + Math.cos(ang) * TUNE.spawnR, y: BASE_Y + Math.sin(ang) * TUNE.spawnR, archer });
+      }
+      this.spawnQueue = q;
+      s.toSpawn = count;
+      s.gustIn = 50 + Math.floor(this.gustRng() * (TUNE.nightTicks - 100));
+      this.gustK = TUNE.gustMin + this.gustRng() * (TUNE.gustMax - TUNE.gustMin);
+      this.log(`\u591C${n}: \u6575${count}\u4F53\uFF08${s.dir === "one" ? "\u5317" : s.dir === "two" ? "\u5317\u3068\u5357" : "\u5168\u5468"}\uFF09`);
+    }
+    endNight() {
+      const s = this.s;
+      if (s.enemies.length > 0) {
+        s.metrics.fled += s.enemies.length;
+        this.log(`\u591C\u660E\u3051: ${s.enemies.length}\u4F53\u304C\u9003\u3052\u305F`);
+      }
+      s.enemies = [];
+      this.spawnQueue = [];
+      s.toSpawn = 0;
+      s.gustIn = -1;
+    }
+    doAction(a) {
+      const s = this.s;
+      const p = s.player;
+      if (p.busy > 0) return;
+      if (a.type === "move") {
+        if (p.moveCd > 0) return;
+        const dx = a.dir === "left" ? -1 : a.dir === "right" ? 1 : 0;
+        const dy = a.dir === "up" ? -1 : a.dir === "down" ? 1 : 0;
+        p.x = Math.max(0, Math.min(W - 1, p.x + dx));
+        p.y = Math.max(0, Math.min(H - 1, p.y + dy));
+        if (dx !== 0) p.face = dx;
+        p.moveCd = 1;
+        return;
+      }
+      if (a.type === "raise") {
+        const i = this.adjacentPlot();
+        if (i < 0) return;
+        const t = s.towers[i];
+        if (t.h >= TUNE.maxH) return;
+        const cost = raiseCost(t.h + 1);
+        if (s.gold < cost) return;
+        this.pay(cost);
+        p.busy = TUNE.raiseTicks;
+        p.busyKind = "raise";
+        p.busyTarget = i;
+        return;
+      }
+      if (a.type === "beam") {
+        const i = this.adjacentPlot();
+        if (i < 0) return;
+        const edge = a.side === "cw" ? i : (i + 7) % 8;
+        const b = s.beams[edge];
+        const bh = Math.min(s.towers[b.a].h, s.towers[b.b].h);
+        if (bh <= 0) return;
+        if (!(bh > b.h || bh === b.h && b.hp < b.maxHp)) return;
+        const cost = beamCost(bh);
+        if (s.gold < cost) return;
+        this.pay(cost);
+        p.busy = TUNE.beamTicks;
+        p.busyKind = "beam";
+        p.busyTarget = edge;
+      }
+    }
+    finishWork() {
+      const s = this.s;
+      const p = s.player;
+      if (p.busyKind === "raise") {
+        const t = s.towers[p.busyTarget];
+        if (t.h < TUNE.maxH) {
+          t.h++;
+          s.metrics.raises++;
+        }
+      } else if (p.busyKind === "beam") {
+        const b = s.beams[p.busyTarget];
+        const bh = Math.min(s.towers[b.a].h, s.towers[b.b].h);
+        if (bh > 0 && bh >= b.h) {
+          b.h = bh;
+          b.maxHp = TUNE.beamHpBase + TUNE.beamHpPerH * bh;
+          b.hp = b.maxHp;
+          s.metrics.beamsBuilt++;
+        }
+      }
+      p.busyKind = "";
+      p.busyTarget = -1;
+      this.refreshTowers();
+    }
+    breakBeam(b) {
+      const s = this.s;
+      this.log(`\u6881${b.edge + 1}\uFF08\u9AD8\u3055${b.h}\uFF09\u304C\u58CA\u3055\u308C\u305F`);
+      b.h = 0;
+      b.hp = 0;
+      b.maxHp = 0;
+      s.metrics.beamBreaks++;
+      for (const e of s.enemies) if (e.holdEdge === b.edge) e.holdEdge = -1;
+      this.refreshTowers();
+      this.collapseCheck(s.towers[b.a], 1, "\u6881\u306E\u843D\u4E0B");
+      this.collapseCheck(s.towers[b.b], 1, "\u6881\u306E\u843D\u4E0B");
+    }
+    /** 射手の1発: 近くに梁があれば梁を、無ければ拠点を撃つ */
+    archerShot(e) {
+      const s = this.s;
+      let best = null;
+      let bestD = TUNE.archerBeamReach;
+      for (const b of s.beams) {
+        if (b.h <= 0) continue;
+        const mx = (PLOTS[b.a][0] + PLOTS[b.b][0]) / 2;
+        const my = (PLOTS[b.a][1] + PLOTS[b.b][1]) / 2;
+        const d = Math.hypot(mx - e.x, my - e.y);
+        if (d <= bestD) {
+          bestD = d;
+          best = b;
+        }
+      }
+      e.shotAt = s.tick;
+      e.shotEdge = best ? best.edge : -1;
+      if (best) {
+        best.hp -= 1;
+        if (best.hp <= 0) this.breakBeam(best);
+        return;
+      }
+      s.gold -= TUNE.archerPlunder;
+      s.metrics.plunder += TUNE.archerPlunder;
+      s.metrics.arrowLoss += TUNE.archerPlunder;
+    }
+    kill() {
+      const m = this.s.metrics;
+      m.kills++;
+      const v = bountyOf(this.s.day);
+      m.bounty += v;
+      m.earned += v;
+      this.s.gold += v;
+    }
+    shoot(x, y, range) {
+      let best = null;
+      let bestD = Infinity;
+      const r2 = range * range;
+      for (const e of this.s.enemies) {
+        if (e.hp <= 0) continue;
+        const dx = e.x - x;
+        const dy = e.y - y;
+        if (dx * dx + dy * dy > r2) continue;
+        const db = (e.x - BASE_X) ** 2 + (e.y - BASE_Y) ** 2;
+        if (db < bestD) {
+          bestD = db;
+          best = e;
+        }
+      }
+      if (best) {
+        best.hp -= 1;
+        if (best.hp <= 0) this.kill();
+      }
+      return best;
+    }
+    step(action = { type: "wait" }) {
+      if (this.over) return;
+      const s = this.s;
+      const p = s.player;
+      const cyc = TUNE.dayTicks + TUNE.nightTicks;
+      const inCyc = s.tick % cyc;
+      if (inCyc === 0) {
+        s.day = Math.floor(s.tick / cyc) + 1;
+        s.night = false;
+      } else if (inCyc === TUNE.dayTicks) {
+        s.night = true;
+        this.startNight();
+      }
+      s.phaseLeft = s.night ? cyc - inCyc : TUNE.dayTicks - inCyc;
+      if (p.moveCd > 0) p.moveCd--;
+      if (p.busy > 0) {
+        p.busy--;
+        if (p.busy === 0) this.finishWork();
+      } else {
+        this.doAction(action);
+      }
+      s.gold += TUNE.incomePerTick;
+      s.metrics.income += TUNE.incomePerTick;
+      s.metrics.earned += TUNE.incomePerTick;
+      if (s.night) {
+        const nt = inCyc - TUNE.dayTicks;
+        while (this.spawnQueue.length && this.spawnQueue[0].at <= nt) {
+          const q = this.spawnQueue.shift();
+          const hp = TUNE.enemyHp0 + TUNE.enemyHpPerNight * (s.day - 1);
+          s.enemies.push({ id: this.nextId++, kind: q.archer ? "archer" : "walker", siege: false, x: q.x, y: q.y, hp, maxHp: hp, holdEdge: -1, hitCd: q.archer ? TUNE.archerShotTicks : TUNE.beamHitTicks, shotAt: -1, shotEdge: -1 });
+          s.metrics.spawned++;
+          s.toSpawn--;
+        }
+        if (s.gustIn >= 0 && nt === s.gustIn) {
+          this.log(`\u7A81\u98A8\uFF08\u5F37\u3055${this.gustK.toFixed(2)}\uFF09`);
+          for (const t of s.towers) this.collapseCheck(t, this.gustK, "\u7A81\u98A8");
+          s.gustIn = -1;
+        }
+        for (const e of s.enemies) {
+          if (e.hp <= 0) continue;
+          if (e.holdEdge >= 0) {
+            s.metrics.heldTicks++;
+            const b = s.beams[e.holdEdge];
+            if (b.h <= 0) {
+              e.holdEdge = -1;
+              continue;
+            }
+            if (--e.hitCd <= 0) {
+              e.hitCd = TUNE.beamHitTicks;
+              b.hp -= 1;
+              if (b.hp <= 0) this.breakBeam(b);
+            }
+            continue;
+          }
+          if (e.siege) {
+            if (--e.hitCd <= 0) {
+              e.hitCd = TUNE.archerShotTicks;
+              this.archerShot(e);
+            }
+            continue;
+          }
+          const dx = BASE_X - e.x;
+          const dy = BASE_Y - e.y;
+          const d = Math.hypot(dx, dy);
+          if (e.kind === "archer" && d <= siegeROf(s.ground)) {
+            e.siege = true;
+            continue;
+          }
+          if (d < 0.6) {
+            const st = TUNE.plunder;
+            s.gold -= st;
+            s.metrics.plunder += st;
+            s.metrics.leaks++;
+            e.hp = 0;
+            e.maxHp = -1;
+            this.log("\u62E0\u70B9\u304C\u8352\u3089\u3055\u308C\u305F");
+            continue;
+          }
+          const nx = e.x + dx / d * TUNE.enemySpeed;
+          const ny = e.y + dy / d * TUNE.enemySpeed;
+          let blocked = -1;
+          for (const b of s.beams) {
+            if (b.h <= 0) continue;
+            const [ax, ay] = PLOTS[b.a];
+            const [bx, by] = PLOTS[b.b];
+            if (segCross(e.x, e.y, nx, ny, ax, ay, bx, by)) {
+              blocked = b.edge;
+              break;
+            }
+          }
+          if (blocked >= 0) {
+            e.holdEdge = blocked;
+            e.hitCd = TUNE.beamHitTicks;
+          } else {
+            e.x = nx;
+            e.y = ny;
+          }
+        }
+        for (const t of s.towers) {
+          if (t.h <= 0) continue;
+          if (t.cooldown > 0) {
+            t.cooldown--;
+            continue;
+          }
+          const tg = this.shoot(t.x, t.y, t.range);
+          if (tg) {
+            t.cooldown = TUNE.fireTicks - 1;
+            t.aim = Math.atan2(tg.y - t.y, tg.x - t.x);
+          }
+        }
+        if (this.baseCd > 0) this.baseCd--;
+        else if (this.shoot(BASE_X, BASE_Y, TUNE.baseRange)) this.baseCd = TUNE.fireTicks - 1;
+        s.enemies = s.enemies.filter((e) => e.hp > 0);
+        if (inCyc === cyc - 1) this.endNight();
+      }
+      s.tick++;
+      s.metrics.gold = s.gold;
+      s.metrics.score = Math.round(s.metrics.bounty - s.metrics.plunder);
+      if (s.tick >= s.maxTicks) {
+        this.over = true;
+        s.over = true;
+      }
+    }
+  };
+
+  // headless/simulate.ts
+  var ALL = [0, 1, 2, 3, 4, 5, 6, 7];
+  var cap = (h) => Math.min(TUNE.maxH, h);
+  function rr(plots, from, to) {
+    const out = [];
+    for (let h = from + 1; h <= cap(to); h++) for (const p of plots) out.push({ k: "raise", plot: p, to: h });
+    return out;
+  }
+  function beams(edges, h) {
+    return edges.map((e) => ({ k: "beam", edge: e, h: cap(h) }));
+  }
+  var SPIRE_END = false;
+  function setSpireEnd(v) {
+    SPIRE_END = v;
+  }
+  function endBeams(d, L) {
+    const E = FACING[d].edges;
+    return [...beams(E, L), ...beams(ALL.filter((e) => !E.includes(e)), L)];
+  }
+  var PERSONAS = [
+    /** P01（野望型）: 来る側の真ん中に1本の大塔。両隣を上限まで→梁→真ん中を上限の2倍→残りを上限→両隣も2倍→梁→真ん中を最高まで */
+    {
+      name: "p01",
+      repair: 0.5,
+      plan: (d, L) => {
+        const C = d === "one" ? [1] : d === "two" ? [1, 5] : [1, 3, 5, 7];
+        const N = C.flatMap((c) => [(c + 7) % 8, (c + 1) % 8]).filter((v, i, a) => a.indexOf(v) === i);
+        const E = C.flatMap((c) => [(c + 7) % 8, c]);
+        return [...rr([...N, ...C], 0, L), ...beams(E, L), ...rr(C, L, 2 * L), ...rr(ALL, 0, L), ...rr(N, L, 2 * L), ...beams(E, 2 * L), ...rr(C, 2 * L, 12)];
+      }
+    },
+    /** P02（あき型）: 上限の1段下（折れない）で全部→来る側に梁→来る側を少しずつ。修理は早め */
+    {
+      name: "p02",
+      repair: 0.7,
+      plan: (d, L) => {
+        const F = FACING[d].plots;
+        const E = FACING[d].edges;
+        const m = L - 1;
+        return [...rr(ALL, 0, m), ...beams(E, m), ...rr(F, m, 2 * m), ...beams(E, 2 * m), ...rr(F, 2 * m, 3 * m), ...beams(E, 3 * m), ...beams(ALL, m)];
+      }
+    },
+    /** 梁で編む（来る側だけ）: 上限まで→梁→上限の2倍→梁→最高まで */
+    {
+      name: "weave",
+      repair: 0.5,
+      plan: (d, L) => {
+        const F = FACING[d].plots;
+        const E = FACING[d].edges;
+        return [...rr(F, 0, L), ...beams(E, L), ...rr(F, L, 2 * L), ...beams(E, 2 * L), ...F.length < 8 ? rr(ALL, 0, L) : [], ...rr(F, 2 * L, 12)];
+      }
+    },
+    /** 全部を梁で編む: 全台座を上限→全周に梁→上限の2倍→梁→最高まで */
+    {
+      name: "weaveAll",
+      repair: 0.5,
+      plan: (_d, L) => [...rr(ALL, 0, L), ...beams(ALL, L), ...rr(ALL, L, 2 * L), ...beams(ALL, 2 * L), ...rr(ALL, 2 * L, 12)]
+    },
+    /** 低い壁: 全台座を2段→全周に梁（安い輪）→全部を2+上限→梁→最高まで */
+    {
+      name: "wall",
+      repair: 0.5,
+      plan: (_d, L) => [...rr(ALL, 0, 2), ...beams(ALL, 2), ...rr(ALL, 2, 2 + L), ...beams(ALL, 2 + L), ...rr(ALL, 2 + L, 12)]
+    },
+    /** 梁なしの全基: 全台座を上限まで（--spireEnd 1 なら積み終えたら余ったお金で来る側→全周に上限の高さの梁を架ける。上へは積まない） */
+    { name: "spireAll", repair: 0.5, plan: (d, L) => [...rr(ALL, 0, L), ...SPIRE_END ? endBeams(d, L) : []] },
+    /** 梁なし・来る側から: 来る側を上限まで→残りを上限まで（--spireEnd 1 なら終わりは spireAll と同じく梁） */
+    { name: "spire", repair: 0.5, plan: (d, L) => [...rr(FACING[d].plots, 0, L), ...rr(ALL, 0, L), ...SPIRE_END ? endBeams(d, L) : []] },
+    /** 梁なしで上限を超える: 全台座を上限+2（突風で折れうる、折れたら積み直す） */
+    { name: "tall", repair: 0.5, plan: (_d, L) => rr(ALL, 0, L + 2) },
+    /** 対照群: 何も建てない */
+    { name: "bare", repair: 0.5, plan: () => [] }
+  ];
+  function normPlan(tasks) {
+    const seen = /* @__PURE__ */ new Set();
+    return tasks.filter((t) => {
+      const k = JSON.stringify(t);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  function distinct(personas, dir, L) {
+    const seen = /* @__PURE__ */ new Set();
+    return personas.filter((p) => {
+      const k = JSON.stringify(normPlan(p.plan(dir, L))) + "|" + p.repair;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  var Bot = class {
+    constructor(persona) {
+      this.persona = persona;
+      this.tasks = [];
+      this.planned = false;
+    }
+    done(s, t) {
+      if (t.k === "raise") return s.towers[t.plot].h >= t.to;
+      const b = s.beams[t.edge];
+      const bh = Math.min(s.towers[b.a].h, s.towers[b.b].h);
+      if (bh < t.h) return true;
+      return b.h >= t.h && b.hp >= this.persona.repair * b.maxHp;
+    }
+    decide(s) {
+      if (!this.planned) {
+        this.tasks = normPlan(this.persona.plan(s.dir, s.slender));
+        this.planned = true;
+      }
+      const p = s.player;
+      if (p.busy > 0) return { type: "wait" };
+      const t = this.tasks.find((x) => !this.done(s, x));
+      if (!t) return { type: "wait" };
+      let plot;
+      let cost;
+      if (t.k === "raise") {
+        plot = t.plot;
+        cost = TUNE.raiseBase + TUNE.raisePerH * (s.towers[t.plot].h + 1);
+      } else {
+        plot = s.beams[t.edge].a;
+        const b = s.beams[t.edge];
+        cost = TUNE.beamBase + TUNE.beamPerH * Math.min(s.towers[b.a].h, s.towers[b.b].h);
+      }
+      const [px, py] = PLOTS[plot];
+      const dx = px - p.x;
+      const dy = py - p.y;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        if (p.moveCd > 0) return { type: "wait" };
+        if (Math.abs(dx) > 1) return { type: "move", dir: dx > 0 ? "right" : "left" };
+        return { type: "move", dir: dy > 0 ? "down" : "up" };
+      }
+      if (s.gold < cost) return { type: "wait" };
+      return t.k === "raise" ? { type: "raise" } : { type: "beam", side: "cw" };
+    }
+  };
+  function runOne(persona, seed, dir, ground) {
+    const g = new Game(seed, { dir, ground });
+    const bot = new Bot(persona);
+    while (!g.over) g.step(bot.decide(g.peek()));
+    const m = g.peek().metrics;
+    return {
+      strat: persona.name,
+      seed,
+      dir,
+      ground,
+      score: m.score,
+      kills: m.kills,
+      leaks: m.leaks,
+      fled: m.fled,
+      spent: Math.round(m.spent),
+      plunder: Math.round(m.plunder),
+      arrowLoss: Math.round(m.arrowLoss),
+      collapses: m.collapses,
+      lostLevels: m.lostLevels,
+      beamBreaks: m.beamBreaks,
+      beamsBuilt: m.beamsBuilt,
+      heldTicks: m.heldTicks,
+      maxH: m.maxH,
+      sumH: m.sumH
+    };
+  }
+  var BIG_GAP = 0.03;
+  function summarize(results, strats, dir, ground) {
+    const by = {};
+    for (const n of strats) by[n] = /* @__PURE__ */ new Map();
+    for (const r of results) if (r.dir === dir && r.ground === ground && by[r.strat]) by[r.strat].set(r.seed, r);
+    const mean = (n, f) => {
+      const v = [...by[n].values()];
+      return v.length ? v.reduce((a, r) => a + f(r), 0) / v.length : 0;
+    };
+    const beats = (a, b) => {
+      let w = 0;
+      let n = 0;
+      for (const [seed, ra] of by[a]) {
+        const rb = by[b].get(seed);
+        if (!rb) continue;
+        n++;
+        if (ra.score > rb.score) w++;
+        else if (ra.score === rb.score) w += 0.5;
+      }
+      return n > 0 && w > n / 2;
+    };
+    const rows = strats.map((n) => {
+      const others = strats.filter((o) => o !== n);
+      return {
+        strat: n,
+        mean: mean(n, (r) => r.score),
+        kills: mean(n, (r) => r.kills),
+        leaks: mean(n, (r) => r.leaks),
+        spent: mean(n, (r) => r.spent),
+        collapses: mean(n, (r) => r.collapses),
+        beamBreaks: mean(n, (r) => r.beamBreaks),
+        wins: others.filter((o) => beats(n, o)).length,
+        beatenBy: others.filter((o) => beats(o, n))
+      };
+    });
+    rows.sort((a, b) => b.mean - a.mean);
+    const sweep = rows.find((r) => r.wins === strats.length - 1)?.strat ?? null;
+    const bareBeats = strats.includes("bare") ? strats.filter((o) => o !== "bare" && beats("bare", o)) : [];
+    const m1 = rows[0]?.mean ?? 0;
+    const m2 = rows[1]?.mean ?? m1;
+    const gap = (m1 - m2) / Math.max(Math.abs(m1), Math.abs(m2), 1);
+    const bigSweep = sweep && sweep === rows[0].strat && gap >= BIG_GAP ? sweep : null;
+    return { dir, ground, L: slenderOf(ground), rows, sweep, bareBeats, gap, bigSweep };
+  }
+  function parseArgs(argv) {
+    const o = {};
+    for (let i = 0; i < argv.length; i++) {
+      const a = argv[i];
+      if (!a.startsWith("--")) continue;
+      const k = a.slice(2);
+      const v = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : "true";
+      o[k] = v;
+    }
+    return o;
+  }
+  function main() {
+    const args = parseArgs(process.argv.slice(2));
+    if (args.tune) {
+      const patch = {};
+      for (const kv of args.tune.split(",")) {
+        const [k, v] = kv.split("=");
+        patch[k] = Number(v);
+      }
+      setTune(patch);
+    }
+    if (args.spireEnd !== void 0) setSpireEnd(args.spireEnd !== "0");
+    const seeds = Number(args.seeds ?? 20);
+    const from = Number(args.seedFrom ?? 1);
+    const dirs = args.dir ? args.dir.split(",") : DIRS;
+    const grounds = args.ground ? args.ground.split(",") : GROUNDS;
+    const personas = args.strat ? PERSONAS.filter((p) => args.strat.split(",").includes(p.name)) : PERSONAS;
+    const results = [];
+    const t0 = Date.now();
+    const cellStrats = {};
+    for (const d of dirs)
+      for (const g of grounds) {
+        const ps = args.dupes ? personas : distinct(personas, d, slenderOf(g));
+        cellStrats[d + "/" + g] = ps.map((p) => p.name);
+        for (const p of ps)
+          for (let sd = from; sd < from + seeds; sd++) {
+            const r = runOne(p, sd, d, g);
+            results.push(r);
+            if (args.runs) console.log(JSON.stringify(r));
+          }
+      }
+    const cells = [];
+    for (const d of dirs) for (const g of grounds) cells.push(summarize(results, cellStrats[d + "/" + g], d, g));
+    if (args.json) {
+      console.log(JSON.stringify({ seeds: [from, from + seeds - 1], cells }, null, 1));
+      return;
+    }
+    if (args.runs) return;
+    const dirJa = { one: "\u5317\u3060\u3051", two: "\u5317\u3068\u5357", ring: "\u5168\u5468" };
+    const gJa = { rock: "\u5CA9", soil: "\u571F", marsh: "\u6E7F\u5730" };
+    console.log(`040-building-braidring simulate: \u30B7\u30FC\u30C9${from}\u301C${from + seeds - 1}\u3001${results.length}\u30E9\u30F3\u3001${((Date.now() - t0) / 1e3).toFixed(1)}\u79D2`);
+    for (const c of cells) {
+      console.log(`
+\u25A0 \u5411\u304D=${dirJa[c.dir]}\u30FB\u5730\u76E4=${gJa[c.ground]}\uFF08\u81EA\u7531\u9577\u306E\u4E0A\u9650${c.L}\uFF09  \u5168\u52DD=${c.sweep ?? "\u306A\u3057"}${c.bigSweep ? "\uFF08\u5927\u5DEE\uFF09" : ""}  1\u301C2\u4F4D\u306E\u5DEE=${(c.gap * 100).toFixed(1)}%  bare\u304C\u52DD\u3061\u8D8A\u3059\u76F8\u624B=${c.bareBeats.length ? c.bareBeats.join(",") : "0"}`);
+      console.log("  \u9806\u4F4D \u6226\u7565      score   \u6483\u7834  \u8352\u3089\u3057  \u5EFA\u7BC9\u8CBB  \u6298\u308C  \u6881\u58CA  \u52DD\u3061\u8D8A\u3057");
+      c.rows.forEach(
+        (r, i) => console.log(
+          `  ${String(i + 1).padStart(2)}  ${r.strat.padEnd(9)} ${r.mean.toFixed(0).padStart(6)} ${r.kills.toFixed(1).padStart(6)} ${r.leaks.toFixed(1).padStart(6)} ${r.spent.toFixed(0).padStart(7)} ${r.collapses.toFixed(2).padStart(5)} ${r.beamBreaks.toFixed(1).padStart(5)}   ${r.wins}/${c.rows.length - 1}`
+        )
+      );
+    }
+    const sweeps = cells.filter((c) => c.sweep);
+    const firsts = {};
+    for (const c of cells) firsts[c.rows[0].strat] = (firsts[c.rows[0].strat] ?? 0) + 1;
+    console.log(`
+\u8981\u7D04: \u5168\u52DD\u306E\u578B\u304C\u3044\u308B\u30BB\u30EB ${sweeps.length}/${cells.length}\uFF08${sweeps.map((c) => `${c.dir}/${c.ground}:${c.sweep}`).join(" ")}\uFF09`);
+    const bigs = cells.filter((c) => c.bigSweep);
+    const close = cells.filter((c) => c.gap < BIG_GAP);
+    console.log(`      \u5927\u5DEE\u306E\u5168\u52DD\uFF082\u4F4D\u3088\u308A${BIG_GAP * 100}%\u4EE5\u4E0A\u4E0A\uFF09\u304C\u3044\u308B\u30BB\u30EB ${bigs.length}/${cells.length}\uFF08${bigs.map((c) => `${c.dir}/${c.ground}:${c.bigSweep}`).join(" ")}\uFF09`);
+    console.log(`      1\u301C2\u4F4D\u306E\u5DEE${BIG_GAP * 100}%\u4EE5\u5185\u306E\u30BB\u30EB ${close.length}/${cells.length}\uFF08${close.map((c) => `${c.dir}/${c.ground}`).join(" ")}\uFF09`);
+    console.log(`      1\u4F4D\u306E\u5185\u8A33 ${Object.entries(firsts).map(([k, v]) => `${k}\xD7${v}`).join(" ")}`);
+    console.log(`      bare\u304C\u52DD\u3061\u8D8A\u3059\u76F8\u624B\u306E\u5408\u8A08 ${cells.reduce((a, c) => a + c.bareBeats.length, 0)}`);
+  }
+  if (typeof process !== "undefined" && process.argv?.[1]?.includes("simulate")) main();
+  return __toCommonJS(simulate_exports);
+})();
+
+</script>
+<script>
+(() => {
+  const CFG = {"name":"040-building-braidring","title":"Braidring (040)","version":"0.3.0","strategies":["p01","p02","weave","weaveAll","wall","spire","spireAll","tall","bare"],"maxTicks":6000,"actions":[{"label":"積む(E)","key":"e"},{"label":"梁→時計回り(B)","key":"b"},{"label":"梁→反時計回り(V)","key":"v"}],"shop":[],"help":"十字で台座の隣へ歩き、「積む」で塔を1段（費用10＋3×高さ、2秒）。隣の台座の塔と同じくらいの高さなら「梁」で輪の隣へ梁を架ける（高さ＝低い方の塔。梁は歩兵を止め、両方の塔の自由長を梁の高さから数え直す）。地盤の上限（岩5・土4・湿地3）より自由長が長い塔は、夜の突風で折れうる（ゲージが赤）。夜は塔が自動で撃つ。歩兵が拠点に着くと −15、射手の矢は −1。シードで条件が変わる（向き＝シード÷3の余り: 0北だけ・1北と南・2全周、地盤＝⌊シード÷3⌋÷3の余り: 0岩・1土・2湿地）。6日で終わり、スコア＝撃破報酬−荒らされた額。","hasBot":true};
+  const $ = (id) => document.getElementById(id);
+  const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true }));
+  let mode = 'watch', running = false, speed = 4, bot = null, last = 0, acc = 0, state = null;
+
+  function aip() { return window.__AIP__; }
+  function status(s) {
+    if (!s) return;
+    const m = s.metrics || {}, p = s.player || {};
+    const parts = ['tick <b>' + s.tick + '</b>'];
+    if (m.score !== undefined) parts.push('score <b>' + Math.round(m.score) + '</b>');
+    if (p.hp !== undefined) parts.push('HP <b>' + Math.round(p.hp) + '</b>');
+    if (m.moneyEarned !== undefined) parts.push('稼ぎ <b>' + Math.round(m.moneyEarned) + '</b>');
+    if (m.rescues !== undefined) parts.push('救助 <b>' + m.rescues + '</b>');
+    if (s.over) parts.push('<b>終了</b>');
+    else if (mode === 'watch' && s.tick >= CFG.maxTicks) parts.push('<b>' + CFG.maxTicks + 'tickで終了</b>');
+    $('status').innerHTML = parts.join('　');
+  }
+  function seed() { return Math.max(1, Number($('seed').value) || 1); }
+  function reset() {
+    state = aip().reset(seed());
+    // Bot の作り方はゲームで違う: 名前を渡す型（036など）と、PERSONAS の要素を渡す型（027〜037の戦闘など）
+    const per = CFG.hasBot && __BOTLIB__.PERSONAS ? __BOTLIB__.PERSONAS.find((p) => p.name === $('strategy').value) : null;
+    bot = CFG.hasBot ? new __BOTLIB__.Bot(per ?? $('strategy').value) : null;
+    status(state);
+  }
+  function setRunning(on) { running = on && !!bot; $('playpause').textContent = running ? '⏸ 一時停止' : '▶ 再生'; last = performance.now(); acc = 0; }
+  function frame(now) {
+    if (mode === 'watch' && running && state) {
+      acc += Math.min(250, now - last) / 100 * speed;
+      const t0 = performance.now();
+      while (acc >= 1 && !state.over && state.tick < CFG.maxTicks && performance.now() - t0 < 12) { state = aip().step(bot.decide(state)); acc -= 1; }
+      if (acc > 8 * speed) acc = 0; // 端末が遅い時は追いつこうとしない
+      if (state.over || state.tick >= CFG.maxTicks) setRunning(false);
+      status(state);
+    } else if (mode === 'play') {
+      status(aip().getState());
+    }
+    last = now;
+    requestAnimationFrame(frame);
+  }
+  function setMode(m) {
+    mode = m;
+    $('tabWatch').setAttribute('aria-pressed', String(m === 'watch'));
+    $('tabPlay').setAttribute('aria-pressed', String(m === 'play'));
+    $('watch').hidden = m !== 'watch';
+    $('play').hidden = m !== 'play';
+    if (m === 'watch') { aip().takeControl(); } else { setRunning(false); aip().release(); }
+  }
+  function holdButton(btn, k) {
+    const down = (e) => { e.preventDefault(); btn.classList.add('down'); key('keydown', k); };
+    const up = (e) => { e.preventDefault(); if (!btn.classList.contains('down')) return; btn.classList.remove('down'); key('keyup', k); };
+    btn.addEventListener('pointerdown', down);
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('pointerleave', up);
+  }
+  function tapButton(btn, k) {
+    btn.addEventListener('pointerdown', (e) => { e.preventDefault(); key('keydown', k); setTimeout(() => key('keyup', k), 120); });
+  }
+  function toggleButton(btn, k) {
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const on = btn.getAttribute('aria-pressed') !== 'true';
+      btn.setAttribute('aria-pressed', String(on));
+      key(on ? 'keydown' : 'keyup', k);
+    });
+  }
+  function build() {
+    for (const s of CFG.strategies) { const o = document.createElement('option'); o.value = o.textContent = s; $('strategy').appendChild(o); }
+    for (const v of [1, 4, 16]) {
+      const b = document.createElement('button'); b.textContent = '×' + v; b.setAttribute('aria-pressed', String(v === speed));
+      b.onclick = () => { speed = v; for (const x of $('speeds').children) x.setAttribute('aria-pressed', String(x === b)); };
+      $('speeds').appendChild(b);
+    }
+    for (const b of $('dpad').querySelectorAll('button')) holdButton(b, b.dataset.key);
+    for (const a of CFG.actions) {
+      const b = document.createElement('button'); b.textContent = a.label; $('acts').appendChild(b);
+      (a.toggle ? toggleButton : a.hold ? holdButton : tapButton)(b, a.key);
+    }
+    for (const a of CFG.shop) { const b = document.createElement('button'); b.textContent = a.label; $('shop').appendChild(b); tapButton(b, a.key); }
+    $('help').textContent = CFG.help;
+    if (!CFG.hasBot) { $('tabWatch').disabled = true; }
+    $('playpause').onclick = () => setRunning(!running);
+    $('reset').onclick = () => { reset(); if (mode === 'watch') setRunning(false); };
+    $('strategy').onchange = () => { reset(); setRunning(false); };
+    $('tabWatch').onclick = () => setMode('watch');
+    $('tabPlay').onclick = () => { setMode('play'); reset(); };
+  }
+  function start() {
+    if (!window.__AIP__) return setTimeout(start, 30);
+    build();
+    setMode(CFG.hasBot ? 'watch' : 'play');
+    reset();
+    requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
+  }
+  start();
+})();
+</script>

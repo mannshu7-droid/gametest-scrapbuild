@@ -1,7 +1,7 @@
 # 仕様書: 040-building-braidring（ブレイドリング: 塔と梁の住み分け）
 
 - 作成日: 2026-11-26
-- ステータス: v2（サイクル46・2回目 FIX、games/040-building-braidring v0.2.0。v0.1.0 からの変更は末尾「v0.2.0 の変更」）
+- ステータス: final（サイクル46完了、games/040-building-braidring v0.3.0、[finalレビュー](../../reviews/040-building-braidring-final.md) 判定FIX。変更は末尾「v0.2.0 の変更」「v0.3.0 の変更」）
 - 元になったレビュー: [039-flagship-hpvent-final](../../reviews/039-flagship-hpvent-final.md)（提案(1)「塔と梁の住み分け」、032-final から次点として持ち越し）、
   [031-building-propway-final](../../reviews/031-building-propway-final.md)（Learnings「深さ（場所）を自由に選べると住み分けは1つに収束する」）、
   [024-flagship-spirelace](../024-flagship-spirelace/spec.md)（塔・自由長・梁の移植元）
