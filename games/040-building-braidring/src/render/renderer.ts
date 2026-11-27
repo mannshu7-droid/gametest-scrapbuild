@@ -236,7 +236,7 @@ export class Renderer {
     const items: LegendItem[] = [
       { label: '自分', draw: (c, x, y, s) => drawPlayer(c, x + s / 2, y + s / 2, s, { tool: 'pick' }) },
       { label: '歩兵（梁で止まる）', draw: (c, x, y, s) => drawEnemy(c, x + s / 2, y + s / 2, s, 'grunt', '#c0392b') },
-      { label: '射手（7マスで止まり撃つ）', draw: (c, x, y, s) => drawEnemy(c, x + s / 2, y + s / 2, s, 'archer', '#9b59b6') },
+      { label: '射手（7マス・湿地は6マスで止まり撃つ）', draw: (c, x, y, s) => drawEnemy(c, x + s / 2, y + s / 2, s, 'archer', '#9b59b6') },
       { label: '塔', draw: (c, x, y, s) => drawTurret(c, x, y, s) },
       {
         label: '梁',

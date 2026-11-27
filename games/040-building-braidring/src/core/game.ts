@@ -17,6 +17,10 @@ export const TUNE = {
   startGold: 50,
   incomePerTick: 0.1,
   bounty: 5,
+  /** 撃破報酬の夜ごとの上乗せ（夜n の報酬 = bounty + bountyPerNight×(n−1)。0=毎夜同じ） */
+  bountyPerNight: 0,
+  /** 全周（ring）の夜の敵の数の倍率（8方向に散るので塔1本あたりは少ない。1=他の向きと同じ） */
+  ringCountMul: 1.5,
   plunder: 15,
   enemyBase: 10,
   enemyPerNight: 4,
@@ -33,6 +37,8 @@ export const TUNE = {
   archerMode: 0,
   /** 射手が止まる拠点からの距離 */
   siegeR: 7,
+  /** 湿地での射手の止まる距離（足場が悪く近くに寄る。0=siegeR と同じ） */
+  siegeRMarsh: 6,
   archerShotTicks: 20,
   /** 射手の1発で拠点が失う額 */
   archerPlunder: 1,
@@ -101,6 +107,14 @@ export interface GameOptions {
 
 export function slenderOf(g: Ground): number {
   return g === 'rock' ? TUNE.slenderRock : g === 'soil' ? TUNE.slenderSoil : TUNE.slenderMarsh;
+}
+/** 夜n の撃破報酬 */
+export function bountyOf(day: number): number {
+  return TUNE.bounty + TUNE.bountyPerNight * (day - 1);
+}
+/** 射手が止まる拠点からの距離（地盤で変わる） */
+export function siegeROf(g: Ground): number {
+  return g === 'marsh' && TUNE.siegeRMarsh > 0 ? TUNE.siegeRMarsh : TUNE.siegeR;
 }
 export function rangeOf(h: number): number {
   return h <= 0 ? 0 : TUNE.rangeBase + TUNE.rangePerH * h;
@@ -271,7 +285,8 @@ export class Game {
   private startNight(): void {
     const s = this.s;
     const n = s.day;
-    const count = TUNE.enemyBase + TUNE.enemyPerNight * (n - 1);
+    const base = TUNE.enemyBase + TUNE.enemyPerNight * (n - 1);
+    const count = s.dir === 'ring' ? Math.round(base * TUNE.ringCountMul) : base;
     const q: Array<{ at: number; x: number; y: number; archer: boolean }> = [];
     const u = TUNE.archerMode === 2 ? this.runMix : TUNE.archerMode === 1 ? this.mixRng() * 2 - 1 : n % 2 === 1 ? -1 : 1;
     const share = Math.max(0, Math.min(1, TUNE.archerShare + TUNE.archerSwing * u));
@@ -419,9 +434,10 @@ export class Game {
   private kill(): void {
     const m = this.s.metrics;
     m.kills++;
-    m.bounty += TUNE.bounty;
-    m.earned += TUNE.bounty;
-    this.s.gold += TUNE.bounty;
+    const v = bountyOf(this.s.day);
+    m.bounty += v;
+    m.earned += v;
+    this.s.gold += v;
   }
 
   private shoot(x: number, y: number, range: number): EnemyState | null {
@@ -519,7 +535,7 @@ export class Game {
         const dx = BASE_X - e.x;
         const dy = BASE_Y - e.y;
         const d = Math.hypot(dx, dy);
-        if (e.kind === 'archer' && d <= TUNE.siegeR) {
+        if (e.kind === 'archer' && d <= siegeROf(s.ground)) {
           e.siege = true;
           continue;
         }

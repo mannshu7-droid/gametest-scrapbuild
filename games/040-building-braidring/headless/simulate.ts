@@ -10,9 +10,11 @@
  *   npm run simulate -- --runs                        … 各ランを JSON 行で出す
  *   npm run simulate -- --dupes                       … 計画が同じになる戦略も残す（既定は条件ごとに重複を除く）
  *   npm run simulate -- --json                        … 要約を JSON で出す
+ *   npm run simulate -- --spireEnd 1                  … spire・spireAll の終わりに梁を架ける（v0.3.0 で試して不採用）
  *
  * 判定（仕様書「AI評価の観点」）: セルごとに総当たり（同じシードで scoreが上なら勝ち、過半数のシードで勝てば「勝ち越し」）。
  * 全勝 = 他の8戦略すべてに勝ち越し。bareが勝ち越す相手も数える。
+ * v0.3.0: 1〜2位の差（平均の差÷絶対値の大きい方）と「大差の全勝」（全勝かつ差3%以上）、差3%以内のセル数も出す。
  */
 import { FACING, Game, PLOTS, TUNE, setTune, DIRS, GROUNDS, slenderOf, type Tune } from '../src/core/game';
 import type { Action, AttackDir, GameState, Ground } from '../src/core/types';
@@ -36,6 +38,17 @@ function rr(plots: number[], from: number, to: number): Task[] {
 }
 function beams(edges: number[], h: number): Task[] {
   return edges.map((e) => ({ k: 'beam', edge: e, h: cap(h) }) as Task);
+}
+
+/** spire・spireAll の計画の終わりに梁を架けるか（v0.3.0 で追加、既定 false＝上限で止まる。--spireEnd 1 で終わりに梁。梁の型へ寄り「梁なし」が消えるので不採用） */
+export let SPIRE_END = false;
+export function setSpireEnd(v: boolean): void {
+  SPIRE_END = v;
+}
+/** 計画の終わりの梁: 来る側の辺→残りの辺（上限の高さ。塔は上限で止めたまま＝自由長は0から数え直すだけ） */
+function endBeams(d: AttackDir, L: number): Task[] {
+  const E = FACING[d].edges;
+  return [...beams(E, L), ...beams(ALL.filter((e) => !E.includes(e)), L)];
 }
 
 /** 戦略の一覧（v0.1.0）。F=敵が来る側の台座、E=敵が来る側の辺、L=地盤の自由長の上限 */
@@ -84,21 +97,35 @@ export const PERSONAS: Persona[] = [
     repair: 0.5,
     plan: (_d, L) => [...rr(ALL, 0, 2), ...beams(ALL, 2), ...rr(ALL, 2, 2 + L), ...beams(ALL, 2 + L), ...rr(ALL, 2 + L, 12)],
   },
-  /** 梁なしの全基: 全台座を上限まで（そこで止まる） */
-  { name: 'spireAll', repair: 0.5, plan: (_d, L) => rr(ALL, 0, L) },
-  /** 梁なし・来る側から: 来る側を上限まで→残りを上限まで */
-  { name: 'spire', repair: 0.5, plan: (d, L) => [...rr(FACING[d].plots, 0, L), ...rr(ALL, 0, L)] },
+  /** 梁なしの全基: 全台座を上限まで（--spireEnd 1 なら積み終えたら余ったお金で来る側→全周に上限の高さの梁を架ける。上へは積まない） */
+  { name: 'spireAll', repair: 0.5, plan: (d, L) => [...rr(ALL, 0, L), ...(SPIRE_END ? endBeams(d, L) : [])] },
+  /** 梁なし・来る側から: 来る側を上限まで→残りを上限まで（--spireEnd 1 なら終わりは spireAll と同じく梁） */
+  { name: 'spire', repair: 0.5, plan: (d, L) => [...rr(FACING[d].plots, 0, L), ...rr(ALL, 0, L), ...(SPIRE_END ? endBeams(d, L) : [])] },
   /** 梁なしで上限を超える: 全台座を上限+2（突風で折れうる、折れたら積み直す） */
   { name: 'tall', repair: 0.5, plan: (_d, L) => rr(ALL, 0, L + 2) },
   /** 対照群: 何も建てない */
   { name: 'bare', repair: 0.5, plan: () => [] },
 ];
 
+/**
+ * 計画の正規形: 前に同じタスクがある重複を除く（ボットは最初の未完了タスクを選ぶので、後ろの重複は決して先に選ばれない＝動きは同じ）。
+ * v0.3.0: これで全周の spire（来る側＝全部→全部）と spireAll も同じ計画と分かる（v0.2.0 は別扱いで同点の2行が残っていた）
+ */
+export function normPlan(tasks: Task[]): Task[] {
+  const seen = new Set<string>();
+  return tasks.filter((t) => {
+    const k = JSON.stringify(t);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 /** 条件で計画が同じになる戦略は先の1つだけ残す（全周では spire＝spireAll、weave＝weaveAll） */
 export function distinct(personas: Persona[], dir: AttackDir, L: number): Persona[] {
   const seen = new Set<string>();
   return personas.filter((p) => {
-    const k = JSON.stringify(p.plan(dir, L)) + '|' + p.repair;
+    const k = JSON.stringify(normPlan(p.plan(dir, L))) + '|' + p.repair;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -120,7 +147,7 @@ export class Bot {
 
   decide(s: GameState): Action {
     if (!this.planned) {
-      this.tasks = this.persona.plan(s.dir, s.slender);
+      this.tasks = normPlan(this.persona.plan(s.dir, s.slender));
       this.planned = true;
     }
     const p = s.player;
@@ -207,7 +234,14 @@ export interface CellSummary {
   sweep: string | null;
   /** bare が勝ち越した相手 */
   bareBeats: string[];
+  /** 1〜2位の差（平均 score の差 ÷ 2つの絶対値の大きい方） */
+  gap: number;
+  /** 全勝で、かつ1〜2位の差が BIG_GAP 以上（「大差の全勝」） */
+  bigSweep: string | null;
 }
+
+/** 「大差」と「接戦」の境（v2 改善点2: 3%） */
+export const BIG_GAP = 0.03;
 
 export function summarize(results: RunResult[], strats: string[], dir: AttackDir, ground: Ground): CellSummary {
   const by: Record<string, Map<number, RunResult>> = {};
@@ -246,7 +280,11 @@ export function summarize(results: RunResult[], strats: string[], dir: AttackDir
   rows.sort((a, b) => b.mean - a.mean);
   const sweep = rows.find((r) => r.wins === strats.length - 1)?.strat ?? null;
   const bareBeats = strats.includes('bare') ? strats.filter((o) => o !== 'bare' && beats('bare', o)) : [];
-  return { dir, ground, L: slenderOf(ground), rows, sweep, bareBeats };
+  const m1 = rows[0]?.mean ?? 0;
+  const m2 = rows[1]?.mean ?? m1;
+  const gap = (m1 - m2) / Math.max(Math.abs(m1), Math.abs(m2), 1);
+  const bigSweep = sweep && sweep === rows[0].strat && gap >= BIG_GAP ? sweep : null;
+  return { dir, ground, L: slenderOf(ground), rows, sweep, bareBeats, gap, bigSweep };
 }
 
 function parseArgs(argv: string[]): Record<string, string> {
@@ -271,6 +309,7 @@ function main(): void {
     }
     setTune(patch);
   }
+  if (args.spireEnd !== undefined) setSpireEnd(args.spireEnd !== '0');
   const seeds = Number(args.seeds ?? 20);
   const from = Number(args.seedFrom ?? 1);
   const dirs = (args.dir ? args.dir.split(',') : DIRS) as AttackDir[];
@@ -301,7 +340,7 @@ function main(): void {
   const gJa: Record<string, string> = { rock: '岩', soil: '土', marsh: '湿地' };
   console.log(`040-building-braidring simulate: シード${from}〜${from + seeds - 1}、${results.length}ラン、${((Date.now() - t0) / 1000).toFixed(1)}秒`);
   for (const c of cells) {
-    console.log(`\n■ 向き=${dirJa[c.dir]}・地盤=${gJa[c.ground]}（自由長の上限${c.L}）  全勝=${c.sweep ?? 'なし'}  bareが勝ち越す相手=${c.bareBeats.length ? c.bareBeats.join(',') : '0'}`);
+    console.log(`\n■ 向き=${dirJa[c.dir]}・地盤=${gJa[c.ground]}（自由長の上限${c.L}）  全勝=${c.sweep ?? 'なし'}${c.bigSweep ? '（大差）' : ''}  1〜2位の差=${(c.gap * 100).toFixed(1)}%  bareが勝ち越す相手=${c.bareBeats.length ? c.bareBeats.join(',') : '0'}`);
     console.log('  順位 戦略      score   撃破  荒らし  建築費  折れ  梁壊  勝ち越し');
     c.rows.forEach((r, i) =>
       console.log(
@@ -313,6 +352,10 @@ function main(): void {
   const firsts: Record<string, number> = {};
   for (const c of cells) firsts[c.rows[0].strat] = (firsts[c.rows[0].strat] ?? 0) + 1;
   console.log(`\n要約: 全勝の型がいるセル ${sweeps.length}/${cells.length}（${sweeps.map((c) => `${c.dir}/${c.ground}:${c.sweep}`).join(' ')}）`);
+  const bigs = cells.filter((c) => c.bigSweep);
+  const close = cells.filter((c) => c.gap < BIG_GAP);
+  console.log(`      大差の全勝（2位より${BIG_GAP * 100}%以上上）がいるセル ${bigs.length}/${cells.length}（${bigs.map((c) => `${c.dir}/${c.ground}:${c.bigSweep}`).join(' ')}）`);
+  console.log(`      1〜2位の差${BIG_GAP * 100}%以内のセル ${close.length}/${cells.length}（${close.map((c) => `${c.dir}/${c.ground}`).join(' ')}）`);
   console.log(`      1位の内訳 ${Object.entries(firsts).map(([k, v]) => `${k}×${v}`).join(' ')}`);
   console.log(`      bareが勝ち越す相手の合計 ${cells.reduce((a, c) => a + c.bareBeats.length, 0)}`);
 }
