@@ -1,7 +1,7 @@
 # 仕様書: 041-flagship-braidvent（ブレイドベント — 地盤で上限が変わる塔と、梁の柵の本命）
 
 - 作成日: 2026-11-27
-- ステータス: v0.1.0（サイクル47・1回目 BUILD+REVIEW、[v1レビュー](../../reviews/041-flagship-braidvent-v1.md)）
+- ステータス: final（v0.3.0、サイクル47完了・判定FIX、[finalレビュー](../../reviews/041-flagship-braidvent-final.md)）。v0.1.0（サイクル47・1回目 BUILD+REVIEW、[v1レビュー](../../reviews/041-flagship-braidvent-v1.md)）
 - 元になったレビュー: [reviews/040-building-braidring-final.md](../../reviews/040-building-braidring-final.md)（提案(1)「041-flagship-braidvent」）、
   [reviews/039-flagship-hpvent-final.md](../../reviews/039-flagship-hpvent-final.md)（次点(2)「c だけを残し a・b を外した本命の整理」）
 - 土台: [039-flagship-hpvent](../039-flagship-hpvent/spec.md) v0.3.0 をそのままフォーク（揺れの遠征・救助・塔と梁・割れ目・支柱・休み・余熱・坑道の固め・走る・重兵の予兆・拠点の回復に時間）
