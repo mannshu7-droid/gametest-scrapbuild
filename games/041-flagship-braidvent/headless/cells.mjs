@@ -22,13 +22,17 @@ for (const c of cells) {
   const p02 = c.rows.findIndex((r) => r.name === 'p02') + 1;
   const w = c.rows.find((r) => r.name === 'weave');
   console.log(
-    `| ${c.label} | ${c.top} ${c.rows[0].score} | ${c.second} ${c.rows[1].score} | ${pct(c.gap)} | ${c.sweep ?? 'なし'}${c.bigSweep ? '（大差）' : ''} | ${c.bareBeats.length ? c.bareBeats.join(',') : '0'} | ${p02 || '-'} | ${w ? `${w.holds}/${w.heldSec}/${w.plunder}` : '-'} |`,
+    `| ${c.label} | ${c.top} ${c.rows[0].score} | ${c.second} ${c.rows[1].score} | ${pct(c.gap)} | ${c.sweep ?? 'なし'}${c.bigSweep ? '（大差）' : c.sweep && c.gap < 0.01 ? '（僅差）' : ''} | ${c.bareBeats.length ? c.bareBeats.join(',') : '0'} | ${p02 || '-'} | ${w ? `${w.holds}/${w.heldSec}/${w.plunder}` : '-'} |`,
   );
 }
 const sweeps = cells.filter((c) => c.sweep);
 const bigs = cells.filter((c) => c.bigSweep);
 const close = cells.filter((c) => c.close);
+// 041 3回目: 僅差の全勝（全勝かつ1〜2位の差1%未満）を別に数える
+const NARROW = 0.01;
+const narrows = sweeps.filter((c) => c.gap < NARROW);
 console.log(`\n全勝のいるセル ${sweeps.length}/${cells.length}（${sweeps.map((c) => `${c.label}:${c.sweep}`).join(' ')}）`);
+console.log(`僅差の全勝（差1%未満） ${narrows.length}/${cells.length}、全勝から僅差を除く ${sweeps.length - narrows.length}/${cells.length}`);
 console.log(`大差の全勝 ${bigs.length}/${cells.length}、差3%以内 ${close.length}/${cells.length}、bare が勝ち越す相手のいるセル ${cells.filter((c) => c.bareBeats.length).length}`);
 
 // 条件ごとの合計（組の平均）

@@ -84,6 +84,12 @@ const HEAL_TO = 0.8;
 let DEPART_HP = 0.7;
 /** 039 3回目（v2重大#2の候補）: >0なら出発の線を max(DEPART_HP, 帰るHP＋DEPART_REL) ではなく 帰るHP＋DEPART_REL（上限1）にする（--departRel） */
 let DEPART_REL = 0;
+/**
+ * 041 3回目（v2重大#1の候補(i)）: >0なら p02 は昼に拠点で「小さな柵」を張る＝その拠点の最初の2基を高さ P02_FENCE まで積み、2基を梁で編む
+ * （梁なしの上限を超えない低い塔＋梁1本＝慎重な型が柵の得だけを取る）。0で v0.2.0 の p02（塔を積まない）。`--p02Fence N`。
+ * 3と4と5を80シードで比べて既定4（`--preset` を付けた時は0＝旧版と一致）
+ */
+let P02_FENCE = 4;
 /** 032: `--props auto|none|all`（auto＝bare以外は建てる。規則に支柱が無ければ建てない） */
 let PROPS_DEFAULT: 'auto' | 'none' | 'all' = 'auto';
 /** 032: 戦略名（`weave+P`・`bare-P`）を、元の戦略と支柱を建てるかに分ける */
@@ -653,6 +659,42 @@ function nextTowerJob(s: GameState, plan: TowerPlan, base: { x: number; radius: 
   return money >= cost * TOWER_BUDGET_MULT ? { kind: 'beam', t: best.t } : null;
 }
 
+/**
+ * 041 3回目: p02 の「小さな柵」。その拠点の最初の2基（id順）を高さ h（地盤の上限まで）に積み、2基を梁で編む。
+ * 梁は2基の低い方の高さで架ける（既にその高さ以上の梁があれば何もしない）。作業中のものは続ける
+ */
+function nextFenceJob(s: GameState, base: { x: number; radius: number }, h: number): { kind: 'raise' | 'beam'; t: Turret } | null {
+  const towers = turretsAtBaseOf(s, base);
+  if (towers.length < 2) return null;
+  const work = s.player.towerWork;
+  if (work && work.progress < work.total) {
+    const t = towers.find((o) => o.id === work.turretId);
+    if (t) return { kind: work.kind, t };
+  }
+  const inProgress = towers.find((t) => t.raiseProgress > 0);
+  if (inProgress) return { kind: 'raise', t: inProgress };
+  // 梁を架けられる最初の2基（id順で、梁の届く組）
+  let pair: [Turret, Turret] | null = null;
+  for (let i = 0; i < towers.length && !pair; i++) {
+    for (let j = i + 1; j < towers.length; j++) {
+      if (chebyshev(towers[i].x, towers[i].y, towers[j].x, towers[j].y) <= s.towerRules.beamSpan) {
+        pair = [towers[i], towers[j]];
+        break;
+      }
+    }
+  }
+  if (!pair) return null;
+  const money = s.player.money;
+  const lim = (t: Turret) => t.slenderLimit ?? s.towerRules.slenderLimit;
+  for (const t of [...pair].sort((a, b) => a.height - b.height || a.id - b.id)) {
+    const target = Math.min(h, lim(t));
+    if (t.height < target) return money >= (t.raiseCost ?? Infinity) * TOWER_BUDGET_MULT ? { kind: 'raise', t } : null;
+  }
+  const level = Math.min(pair[0].height, pair[1].height);
+  if (level < 1 || level <= pairBeamLevel(s, pair[0], pair[1])) return null;
+  return money >= (10 + 2 * level) * TOWER_BUDGET_MULT ? { kind: 'beam', t: pair[0] } : null;
+}
+
 /** 026新規: 遠征の制約と固定の帰還閾値（CLIの--resource/--returnAtで設定。ブラウザのバンドルでは既定のまま） */
 let RESOURCE: Resource = 'tremor';
 let RETURN_AT: number | null = null;
@@ -951,10 +993,10 @@ export class Bot {
       }
       // 024新規: 塔戦略は昼の拠点滞在中に塔作業（積み増し・梁）を行う。ショップより優先する
       // （時間で払うコストのため、作業中は採掘に出られない＝その分の稼ぎを失う）
-      if (isTowerPlan(this.strategy) && s.phase === 'day') {
+      if ((isTowerPlan(this.strategy) || (this.strategy === 'p02' && P02_FENCE > 0)) && s.phase === 'day') {
         const base = currentBaseInfo(s);
         if (base) {
-          const job = nextTowerJob(s, this.strategy, base);
+          const job = isTowerPlan(this.strategy) ? nextTowerJob(s, this.strategy, base) : nextFenceJob(s, base, P02_FENCE);
           if (job) {
             const act = actionToBuildAt(s, job.t, (dir) => ({ type: job.kind, dir }) as Action);
             if (act) return act;
@@ -1678,6 +1720,7 @@ BOT_READ = !args.includes('--noRead');
 READ_LAG = Number(argVal('readLag') ?? 3);
 DEPART_HP = Number(argVal('departHp') ?? (PRESET === '038' ? 0 : 0.7));
 DEPART_REL = Number(argVal('departRel') ?? 0);
+P02_FENCE = Number(argVal('p02Fence') ?? (PRESET === null ? 4 : 0));
 // `--preset 026/028`では帰還線をその版のまま（028と全フィールド一致させる）
 if ((PRESET !== null && PRESET !== '030' && PRESET !== '032' && PRESET !== '034' && PRESET !== 'v1' && PRESET !== '038' && PRESET !== '039') || argVal('lines') === 'none') for (const k of Object.keys(BOT_LINES)) delete BOT_LINES[k];
 const propsArg = argVal('props');
