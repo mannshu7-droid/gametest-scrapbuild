@@ -439,8 +439,11 @@ export const TUNE = {
   // 2回目（v0.2.0）で D3＝(a)0.5＋(b)1.5＋(c)回復2・膝0.8・救助後HP5割 を既定に（v2レビュー）。`--preset 038`/`?preset=038` で038 v0.3.0と同じ規則 ----
   /** (a) 救助では抱えた積荷に加え、失った積荷×rescueBankMultを救助費として所持金から取る（払えなければ借金）。0で無効 */
   rescueBankMult: 0,
-  /** (b) HPが低いほど被ダメが増える: ×(1+hpDmgLow×(1−HP割合)^hpDmgExp)。0で無効。041 では (a)(b) を外し (c) だけ残す（039-final の整理） */
-  hpDmgLow: 0,
+  /**
+   * (b) HPが低いほど被ダメが増える: ×(1+hpDmgLow×(1−HP割合)^hpDmgExp)。0で無効。041 v1 では (a)(b) を外し (c) だけ残した（039-final の整理）。
+   * 2回目（v1重大#1）: 外すと攻める型（pusher）が全勝したので、b だけ弱めて戻す（039 の 1.5 の半分の 0.75。039-final の「入れるなら弱めに」）。`--tune hpDmgLow=0` で v1
+   */
+  hpDmgLow: 0.75,
   hpDmgExp: 2,
   /** (c) 拠点での回復（1tickあたりHP）。038は4（100HPを2.5秒で全快＝ほぼ無料） */
   baseRegen: 2,
@@ -475,6 +478,16 @@ export const TUNE = {
   beamWallReach: 1,
   /** 拠点に着いたレイダーの1打で所持金から失う額＝打撃×raidPlunder（040 の「荒らされた額」。梁の柵の値打ち）。0で039 */
   raidPlunder: 1,
+  /**
+   * 041 2回目: 荒らしの重さを、プレイヤーがその拠点圏にいない時だけ×raidAbsentMult にする（1で v1 と同じ）。
+   * 拠点を空けて遠征に出る型ほど荒らされる＝塔を積まない攻める型への重し
+   */
+  raidAbsentMult: 1,
+  /**
+   * 041 2回目: 1なら、柵で止められたレイダーは梁ではなく柵の杭（梁ごとの耐久、梁の耐久と同じ値）を叩き、杭が尽きるとその梁の柵だけ開く。
+   * 梁は折れず塔は崩れない。杭は夜明けに戻る。0で v1（柵で止めた敵は梁を叩き、梁が折れると塔が崩れうる）。2回目（v1重大#2）で既定1
+   */
+  wallStakes: 1,
   /** 梁の耐久＝BEAM_HP＋beamHpPerLevel×梁の高さ（壁として叩かれるので高い梁ほど固い。0で039の12固定） */
   beamHpPerLevel: 3,
 };
@@ -486,6 +499,8 @@ export const PRESET_039: Partial<typeof TUNE> = {
   beamWall: 0,
   beamHpPerLevel: 0,
   raidPlunder: 0,
+  raidAbsentMult: 1,
+  wallStakes: 0,
 };
 export type Ground = 'rock' | 'soil' | 'marsh';
 const GROUND_ORDER: Ground[] = ['rock', 'soil', 'marsh'];
@@ -1359,6 +1374,8 @@ export class Game {
     beamHeldTicks: 0,
     beamHolds: 0,
     raidPlunder: 0,
+    raidPlunderAway: 0,
+    stakesBroken: 0,
     luredRaiders: 0,
     nightFieldDamage: 0,
     towersLost: 0,
@@ -2554,7 +2571,8 @@ export class Game {
         const top = this.beamWallAt(base.x + r + 1, base.x + r, lo0);
         if (!top || seen.has(key)) continue;
         seen.add(key);
-        out.push({ baseX: base.x, radius: r, lo, hi, beamId: top.id, level: top.level, hp: top.hp, maxHp: top.maxHp });
+        const hp = TUNE.wallStakes > 0 ? (top.stakeHp ?? top.maxHp) : top.hp;
+        out.push({ baseX: base.x, radius: r, lo, hi, beamId: top.id, level: top.level, hp, maxHp: top.maxHp });
       }
     }
     return out;
@@ -2586,6 +2604,7 @@ export class Game {
         if (!a || Math.abs(a.x - base.x) > r) continue;
         const [lo, hi] = this.corridorLanes(a);
         if (ny < lo - TUNE.beamWallReach || ny > hi + TUNE.beamWallReach) continue;
+        if (TUNE.wallStakes > 0 && (b.stakeHp ?? b.maxHp) <= 0) continue;
         if (!best || b.level > best.level) best = b;
       }
     }
@@ -3460,7 +3479,14 @@ export class Game {
           if (e.atkCd <= 0) {
             e.atkCd = ENEMY_DEFS[e.type].atkCdMax;
             this.metrics.beamWallHits++;
-            this.damageBeam(hb, e.atk);
+            if (TUNE.wallStakes > 0) {
+              // 2回目: 杭を叩く。尽きたらこの梁の柵だけ開く（梁は折れない）
+              hb.stakeHp = (hb.stakeHp ?? hb.maxHp) - e.atk;
+              if (hb.stakeHp <= 0) {
+                this.metrics.stakesBroken++;
+                for (const o of this.enemies) if (o.heldBy === hb.id) o.heldBy = undefined;
+              }
+            } else this.damageBeam(hb, e.atk);
           }
           continue;
         }
@@ -3485,7 +3511,11 @@ export class Game {
           this.metrics.baseDamageTaken += e.atk;
           // 041: 拠点に着いたレイダーは荒らす（040 の plunder）。所持金から 打撃×raidPlunder を失う（0未満にはしない）
           if (TUNE.raidPlunder > 0) {
-            const loss = Math.min(Math.max(0, this.player.money), Math.round(e.atk * TUNE.raidPlunder));
+            // 2回目: その拠点圏にプレイヤーがいなければ ×raidAbsentMult（拠点を空けた型ほど荒らされる）
+            const away = Math.abs(this.player.x - base.x) > this.radiusFor(base);
+            if (away) this.metrics.raidPlunderAway++;
+            const mult = TUNE.raidPlunder * (away ? TUNE.raidAbsentMult : 1);
+            const loss = Math.min(Math.max(0, this.player.money), Math.round(e.atk * mult));
             this.player.money -= loss;
             this.metrics.raidPlunder += loss;
           }
@@ -4001,6 +4031,8 @@ export class Game {
         this.phase = 'day';
         this.phaseTicksLeft = DAY_LENGTH;
         this.metrics.nightsSurvived++;
+        // 041 2回目: 柵の杭は夜明けに戻る
+        if (TUNE.wallStakes > 0) for (const b of this.beams) b.stakeHp = b.maxHp;
         this.todayEarned = 0;
         this.rescuesToday = 0;
         // 028: 踏ん張りは夜明けに戻る（1日にgritPerDay回）

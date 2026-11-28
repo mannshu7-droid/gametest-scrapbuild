@@ -1291,6 +1291,8 @@ interface RunResult {
   /** 041: 梁に止められた延べ数・叩いた回数・止められていた秒、建てた梁、崩落、塔の平均の高さ（終わり） */
   beamHolds: number;
   raidPlunder: number;
+  raidPlunderAway: number;
+  stakesBroken: number;
   beamWallHits: number;
   beamHeldTicks: number;
   towerHeightEnd: number;
@@ -1533,6 +1535,8 @@ function runOne(seed: number, strategy: string, maxTicks: number): RunResult {
     beamsLost: s.metrics.beamsLost,
     beamHolds: s.metrics.beamHolds ?? 0,
     raidPlunder: s.metrics.raidPlunder ?? 0,
+    raidPlunderAway: s.metrics.raidPlunderAway ?? 0,
+    stakesBroken: s.metrics.stakesBroken ?? 0,
     beamWallHits: s.metrics.beamWallHits ?? 0,
     beamHeldTicks: s.metrics.beamHeldTicks ?? 0,
     towerHeightEnd: s.turrets.length ? s.turrets.reduce((a, t) => a + t.height, 0) / s.turrets.length : 0,
@@ -1832,6 +1836,8 @@ function cellSummary(label: string, names: string[], all: Record<string, RunResu
         heldSec: f((r) => r.beamHeldTicks / 10, 0),
         baseDmg: f((r) => r.baseDamageTaken, 0),
         plunder: f((r) => r.raidPlunder, 0),
+        stakesBroken: f((r) => r.stakesBroken ?? 0),
+        plunderAway: f((r) => r.raidPlunderAway ?? 0),
         hEnd: f((r) => r.towerHeightEnd, 2),
         limit: f((r) => r.towerSlenderEnd, 2),
         rescues: f((r) => r.rescues, 2),
