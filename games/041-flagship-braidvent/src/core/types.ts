@@ -163,6 +163,8 @@ export interface Beam {
   /** 梁の耐久（v2新規）。夜、塔に引き付けられたレイダーに狙われ、0で落ちる */
   hp: number;
   maxHp: number;
+  /** 041 2回目: 柵の杭の耐久（`wallStakes 1` の時だけ使う）。柵で止めたレイダーはこれを削り、0で柵が開く（梁は無傷）。夜明けに戻る */
+  stakeHp?: number;
 }
 
 export interface Base {
@@ -306,6 +308,10 @@ export interface Metrics {
   beamHolds: number;
   /** 041: 拠点に着いたレイダーに荒らされた額の合計 */
   raidPlunder: number;
+  /** 041 2回目: 荒らしの打撃のうち、プレイヤーがその拠点圏にいなかった回数 */
+  raidPlunderAway: number;
+  /** 041 2回目: 柵の杭が尽きて柵が開いた回数（`wallStakes 1`） */
+  stakesBroken: number;
   /** 高い塔に呼び寄せられた追加の襲撃者の累計（v2新規） */
   luredRaiders: number;
   /** 夜・拠点圏外でプレイヤーが敵から受けたダメージの累計（v2新規。死亡数が少なく揺らぎに埋もれる領域で、
