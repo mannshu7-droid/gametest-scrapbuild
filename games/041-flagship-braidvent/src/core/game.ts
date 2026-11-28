@@ -484,6 +484,11 @@ export const TUNE = {
    */
   raidAbsentMult: 1,
   /**
+   * 041 3回目（v2重大#1の候補(ii)）: プレイヤーがその拠点圏にいる時の荒らしの重さ×raidHomeMult（1で v0.2.0 と同じ）。
+   * 「拠点にいる（待つ）」ことに守りの値打ちを付ける。0なら拠点圏にいる間は荒らされない
+   */
+  raidHomeMult: 1,
+  /**
    * 041 2回目: 1なら、柵で止められたレイダーは梁ではなく柵の杭（梁ごとの耐久、梁の耐久と同じ値）を叩き、杭が尽きるとその梁の柵だけ開く。
    * 梁は折れず塔は崩れない。杭は夜明けに戻る。0で v1（柵で止めた敵は梁を叩き、梁が折れると塔が崩れうる）。2回目（v1重大#2）で既定1
    */
@@ -500,6 +505,7 @@ export const PRESET_039: Partial<typeof TUNE> = {
   beamHpPerLevel: 0,
   raidPlunder: 0,
   raidAbsentMult: 1,
+  raidHomeMult: 1,
   wallStakes: 0,
 };
 export type Ground = 'rock' | 'soil' | 'marsh';
@@ -3514,7 +3520,7 @@ export class Game {
             // 2回目: その拠点圏にプレイヤーがいなければ ×raidAbsentMult（拠点を空けた型ほど荒らされる）
             const away = Math.abs(this.player.x - base.x) > this.radiusFor(base);
             if (away) this.metrics.raidPlunderAway++;
-            const mult = TUNE.raidPlunder * (away ? TUNE.raidAbsentMult : 1);
+            const mult = TUNE.raidPlunder * (away ? TUNE.raidAbsentMult : TUNE.raidHomeMult);
             const loss = Math.min(Math.max(0, this.player.money), Math.round(e.atk * mult));
             this.player.money -= loss;
             this.metrics.raidPlunder += loss;
