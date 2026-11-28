@@ -121,7 +121,7 @@ function drawGroundSwatch(c: CanvasRenderingContext2D, g: 'rock' | 'soil' | 'mar
   }
 }
 const GROUND_TINT: Record<string, string> = { rock: 'rgba(170,176,186,0.22)', soil: 'rgba(150,100,55,0.22)', marsh: 'rgba(60,170,150,0.26)' };
-/** 041: 梁の柵（太い木の杭の列）。ratio＝梁の耐久の割合（減るほど赤い） */
+/** 041: 梁の柵（太い木の杭の列）。ratio＝杭の耐久の割合（2回目から梁とは別の杭。減るほど赤く、尽きると柵が消えて開く） */
 function drawPalisade(c: CanvasRenderingContext2D, x: number, top: number, h: number, ratio: number): void {
   c.fillStyle = ratio > 0.6 ? '#b9773a' : ratio > 0.3 ? '#d35400' : '#ff2d2d';
   for (let yy = top; yy < top + h - 2; yy += 7) {
@@ -628,7 +628,7 @@ export class Renderer {
     ctx.fillStyle = s.phase === 'day' ? (s.nightWarning ? '#ff9f43' : '#f1c40f') : '#7f9cf5';
     const forecast = s.baseForecasts.map((f) => `${f.isHome ? '本' : '前'}${f.level === 'danger' ? '危' : f.level === 'caution' ? '注' : '安'}`).join(' ');
     this.fitText(
-      `${s.phase === 'day' ? '昼' : '夜'} 残り${Math.ceil(s.phaseTicksLeft / 10)}秒  夜${s.metrics.nightsSurvived}回生存${s.nightWarning ? '  夜が近い!' : ''}  今夜: ${forecast || '-'}  誘引+${s.lureRaidCount}${p.coveringTowers > 0 ? `  援護${p.coveringTowers}` : ''}${TUNE.raidPlunder > 0 ? `  荒らされ¥${s.metrics.raidPlunder}` : ''}${TUNE.beamWall > 0 ? `  柵で止めた${s.metrics.beamHolds}` : ''}`,
+      `${s.phase === 'day' ? '昼' : '夜'} 残り${Math.ceil(s.phaseTicksLeft / 10)}秒  夜${s.metrics.nightsSurvived}回生存${s.nightWarning ? '  夜が近い!' : ''}  今夜: ${forecast || '-'}  誘引+${s.lureRaidCount}${p.coveringTowers > 0 ? `  援護${p.coveringTowers}` : ''}${TUNE.raidPlunder > 0 ? `  荒らされ¥${s.metrics.raidPlunder}` : ''}${TUNE.beamWall > 0 ? `  柵で止めた${s.metrics.beamHolds}${TUNE.wallStakes > 0 ? ` 杭が尽きた${s.metrics.stakesBroken}` : ''}` : ''}`,
       6,
       hudY + 94,
       W - 12,
